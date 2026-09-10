@@ -1,0 +1,1 @@
+"""RandFatture backend."""
