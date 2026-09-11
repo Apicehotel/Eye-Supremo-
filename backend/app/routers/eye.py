@@ -1,10 +1,9 @@
-import hashlib
 import secrets
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 from ..ai_service import eye_ai_answer
 from ..config import settings
@@ -13,12 +12,12 @@ from ..eye_services import (
     add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
     review_rankings, seed_eye_supremo,
 )
-from ..importers import parse_review_email
 from ..models import (
     Alert, EmergingTheme, Hotel, Invoice, Review, ReviewCategory, ReviewTag,
-    RoleExclusion, Room, UserProfile,
+    RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
+from ..review_importers import parse_review_document
 from ..sync_service import push_to_supabase, sync_configuration
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
@@ -31,6 +30,19 @@ def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role
     return role
 
 
+def current_username(x_eye_user: str = Header(default="", alias="X-Eye-User")) -> str:
+    return x_eye_user.strip().lower()
+
+
+def allowed_hotel_ids(db: Session, role: str, username: str) -> set[int] | None:
+    if role in {"developer", "supremo"}:
+        return None
+    profile = db.scalar(select(UserProfile).where(UserProfile.username == username)) if username else None
+    if profile and profile.home_hotel_id:
+        return {profile.home_hotel_id}
+    return set()
+
+
 def hotel_from_code(db: Session, code: str) -> Hotel:
     hotel = db.scalar(select(Hotel).where(Hotel.code == code))
     if not hotel:
@@ -38,9 +50,21 @@ def hotel_from_code(db: Session, code: str) -> Hotel:
     return hotel
 
 
+def require_hotel_access(db: Session, hotel: Hotel, role: str, username: str):
+    allowed = allowed_hotel_ids(db, role, username)
+    if allowed is not None and hotel.id not in allowed:
+        raise HTTPException(403, "Hotel non assegnato a questo utente")
+
+
 @router.get("/hotels")
-def hotels(db: Session = Depends(get_db)):
-    return db.scalars(select(Hotel).where(Hotel.active.is_(True)).order_by(Hotel.name)).all()
+def hotels(role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    stmt = select(Hotel).where(Hotel.active.is_(True))
+    allowed = allowed_hotel_ids(db, role, username)
+    if allowed is not None:
+        if not allowed:
+            return []
+        stmt = stmt.where(Hotel.id.in_(allowed))
+    return db.scalars(stmt.order_by(Hotel.name)).all()
 
 
 @router.get("/users")
@@ -85,13 +109,16 @@ def live_search(q: str = Query(min_length=1, max_length=160), limit: int = Query
 
 
 @router.post("/ai/ask")
-async def ask_eye(payload: dict, role: str = Depends(current_role), db: Session = Depends(get_db)):
+async def ask_eye(payload: dict, role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     question = str(payload.get("question", "")).strip()
     if not question:
         raise HTTPException(422, "Domanda vuota")
     hotel_id = None
     if payload.get("hotel_code"):
-        hotel_id = hotel_from_code(db, str(payload["hotel_code"])).id
+        hotel = hotel_from_code(db, str(payload["hotel_code"])); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
+    elif role not in {"developer", "supremo"}:
+        allowed = allowed_hotel_ids(db, role, username)
+        hotel_id = next(iter(allowed)) if allowed else None
     return await eye_ai_answer(db, question, role_name=role, hotel_id=hotel_id)
 
 
@@ -104,42 +131,47 @@ def assign_invoice_hotel(invoice_id: int, hotel_code: str, role: str = Depends(c
         raise HTTPException(404, "Fattura non trovata")
     hotel = hotel_from_code(db, hotel_code)
     meta = ensure_invoice_metadata(db, inv, hotel.id); db.commit(); db.refresh(meta)
-    return {"ok": True, "invoice_id": invoice_id, "hotel": hotel.name, "sync_uuid": meta.sync_uuid}
+    return {"ok": True, "invoice_id": invoice_id, "destination": hotel.name, "sync_uuid": meta.sync_uuid}
 
 
 @router.post("/reviews/import/{hotel_code}")
-async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), role: str = Depends(current_role), db: Session = Depends(get_db)):
-    hotel = hotel_from_code(db, hotel_code)
+async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username)
     imported, errors = [], []
     for file in files[:200]:
         suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in {".eml", ".txt"}:
-            errors.append({"file": file.filename, "error": "Formato recensione supportato: EML o TXT"}); continue
+        if suffix not in {".msg", ".eml", ".txt"}:
+            errors.append({"file": file.filename, "error": "Formato recensione supportato: MSG, EML o TXT"}); continue
         content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
         if len(content) > settings.max_upload_mb * 1024 * 1024:
             errors.append({"file": file.filename, "error": "File troppo grande"}); continue
         safe = settings.data_dir / "reviews" / f"{secrets.token_hex(12)}{suffix}"
         safe.write_bytes(content)
         try:
-            if suffix == ".eml":
-                parsed = parse_review_email(safe)
-            else:
-                text = content.decode("utf-8", errors="replace")
-                parsed = {"date": date.today().isoformat(), "author": None, "source": "txt", "text": text, "rating": None, "room_code": None, "raw_file": safe.name}
-            review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=date.fromisoformat(parsed["date"]),
-                                rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
-                                room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
-            imported.append(review.id)
+            parsed_reviews = parse_review_document(safe)
+            if not parsed_reviews:
+                errors.append({"file": file.filename, "error": "Nessuna recensione riconosciuta nel messaggio"}); continue
+            file_count = 0
+            for parsed in parsed_reviews:
+                review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=date.fromisoformat(parsed["date"]),
+                                    rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
+                                    room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
+                imported.append(review.id); file_count += 1
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
     return {"hotel": hotel.name, "imported": len(imported), "review_ids": imported, "errors": errors}
 
 
 @router.get("/reviews")
-def reviews(hotel_code: str | None = None, q: str = "", limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+def reviews(hotel_code: str | None = None, q: str = "", limit: int = Query(100, le=500), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     stmt = select(Review).options(selectinload(Review.hotel), selectinload(Review.room), selectinload(Review.tags).selectinload(ReviewTag.category))
     if hotel_code:
-        stmt = stmt.where(Review.hotel_id == hotel_from_code(db, hotel_code).id)
+        hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); stmt = stmt.where(Review.hotel_id == hotel.id)
+    else:
+        allowed = allowed_hotel_ids(db, role, username)
+        if allowed is not None:
+            if not allowed: return []
+            stmt = stmt.where(Review.hotel_id.in_(allowed))
     if q:
         stmt = stmt.where(Review.text.ilike(f"%{q}%"))
     items = db.scalars(stmt.order_by(Review.date.desc()).limit(limit)).unique().all()
@@ -152,15 +184,25 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int = Query(100, 
 
 
 @router.get("/rankings")
-def rankings(hotel_code: str | None = None, limit: int = Query(5, ge=1, le=25), db: Session = Depends(get_db)):
-    hotel_id = hotel_from_code(db, hotel_code).id if hotel_code else None
+def rankings(hotel_code: str | None = None, limit: int = Query(5, ge=1, le=25), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    hotel_id = None
+    if hotel_code:
+        hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
+    elif role not in {"developer", "supremo"}:
+        allowed = allowed_hotel_ids(db, role, username)
+        hotel_id = next(iter(allowed)) if allowed else None
     return review_rankings(db, hotel_id=hotel_id, limit=limit)
 
 
 @router.get("/rankings/by-hotel")
-def rankings_by_hotel(limit: int = Query(5, ge=1, le=25), db: Session = Depends(get_db)):
+def rankings_by_hotel(limit: int = Query(5, ge=1, le=25), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    allowed = allowed_hotel_ids(db, role, username)
+    stmt = select(Hotel).where(Hotel.active.is_(True))
+    if allowed is not None:
+        if not allowed: return {}
+        stmt = stmt.where(Hotel.id.in_(allowed))
     result = {}
-    for hotel in db.scalars(select(Hotel).where(Hotel.active.is_(True))).all():
+    for hotel in db.scalars(stmt).all():
         result[hotel.code] = {"hotel": hotel.name, **review_rankings(db, hotel_id=hotel.id, limit=limit)}
     return result
 
