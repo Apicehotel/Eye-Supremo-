@@ -37,6 +37,9 @@ def wait_and_open_browser(timeout: float = 30.0) -> None:
     while time.time() < deadline:
         try:
             with socket.create_connection((HOST, PORT), timeout=0.5):
+                if os.environ.get("EYE_SUPREMO_NO_BROWSER") == "1":
+                    write_log(f"Server pronto su {URL}; apertura browser soppressa dal test.")
+                    return
                 write_log(f"Server pronto su {URL}; apro il browser.")
                 webbrowser.open(URL)
                 return
