@@ -3,7 +3,7 @@ name: Eye Supremo Windows Installer
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [main, feat/eye-supremo-foundations]
     paths:
       - 'backend/**'
       - 'frontend/**'
