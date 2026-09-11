@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -63,6 +63,7 @@ class Invoice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
     supplier: Mapped[Supplier] = relationship(back_populates="invoices")
     rows: Mapped[list["InvoiceRow"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
+    meta: Mapped["InvoiceMeta | None"] = relationship(back_populates="invoice", uselist=False, cascade="all, delete-orphan")
     __table_args__ = (Index("ix_invoice_supplier_date", "supplier_id", "data"),)
 
 
@@ -83,6 +84,7 @@ class InvoiceRow(Base):
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=1)
     invoice: Mapped[Invoice] = relationship(back_populates="rows")
     product: Mapped[Product | None] = relationship()
+    policy: Mapped["InvoiceRowPolicy | None"] = relationship(back_populates="row", uselist=False, cascade="all, delete-orphan")
 
 
 class ImportJob(Base):
@@ -112,3 +114,152 @@ class AppSetting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+# --- Eye Supremo modular domain -------------------------------------------------
+
+class Hotel(Base):
+    __tablename__ = "hotels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(160))
+    role_name: Mapped[str] = mapped_column(String(30), index=True)  # developer, supremo, level1, level2, level3
+    home_hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_manage_config: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    home_hotel: Mapped[Hotel | None] = relationship()
+
+
+class RoleExclusion(Base):
+    __tablename__ = "role_exclusions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    role_name: Mapped[str] = mapped_column(String(30), index=True)
+    exclusion_type: Mapped[str] = mapped_column(String(30), index=True)  # category, product, supplier, keyword
+    value: Mapped[str] = mapped_column(String(240), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("role_name", "exclusion_type", "value"),)
+
+
+class InvoiceMeta(Base):
+    __tablename__ = "invoice_meta"
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id", ondelete="CASCADE"), primary_key=True)
+    hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
+    sync_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    sync_status: Mapped[str] = mapped_column(String(20), default="local", index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+    invoice: Mapped[Invoice] = relationship(back_populates="meta")
+    hotel: Mapped[Hotel | None] = relationship()
+
+
+class InvoiceRowPolicy(Base):
+    __tablename__ = "invoice_row_policy"
+    row_id: Mapped[int] = mapped_column(ForeignKey("invoice_rows.id", ondelete="CASCADE"), primary_key=True)
+    analysis_status: Mapped[str] = mapped_column(String(30), default="product", index=True)  # product, accounting_excluded, review
+    exclusion_reason: Mapped[str | None] = mapped_column(String(160), index=True)
+    manually_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    row: Mapped[InvoiceRow] = relationship(back_populates="policy")
+
+
+class Room(Base):
+    __tablename__ = "rooms"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(40), index=True)
+    label: Mapped[str | None] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    hotel: Mapped[Hotel] = relationship()
+    __table_args__ = (UniqueConstraint("hotel_id", "code"),)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id", ondelete="CASCADE"), index=True)
+    room_id: Mapped[int | None] = mapped_column(ForeignKey("rooms.id"), index=True)
+    source: Mapped[str | None] = mapped_column(String(80), index=True)
+    author: Mapped[str | None] = mapped_column(String(160))
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    text: Mapped[str] = mapped_column(Text)
+    sentiment_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), index=True)
+    raw_file: Mapped[str | None] = mapped_column(String(500))
+    sync_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    hotel: Mapped[Hotel] = relationship()
+    room: Mapped[Room | None] = relationship()
+    tags: Mapped[list["ReviewTag"]] = relationship(back_populates="review", cascade="all, delete-orphan")
+
+
+class ReviewCategory(Base):
+    __tablename__ = "review_categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    parent_name: Mapped[str | None] = mapped_column(String(120))
+    auto_learned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ReviewTag(Base):
+    __tablename__ = "review_tags"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"), index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("review_categories.id", ondelete="CASCADE"), index=True)
+    polarity: Mapped[str] = mapped_column(String(12), index=True)  # positive, negative
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=1)
+    excerpt: Mapped[str | None] = mapped_column(Text)
+    review: Mapped[Review] = relationship(back_populates="tags")
+    category: Mapped[ReviewCategory] = relationship()
+    __table_args__ = (UniqueConstraint("review_id", "category_id", "polarity"),)
+
+
+class EmergingTheme(Base):
+    __tablename__ = "emerging_themes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    normalized: Mapped[str] = mapped_column(String(120), index=True)
+    occurrences: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="candidate", index=True)  # candidate, approved, merged, ignored
+    merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("review_categories.id"))
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (UniqueConstraint("hotel_id", "normalized"),)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(50), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="info", index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str] = mapped_column(Text)
+    entity_type: Mapped[str | None] = mapped_column(String(40), index=True)
+    entity_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+
+class SyncState(Base):
+    __tablename__ = "sync_state"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(40), index=True)
+    entity_uuid: Mapped[str] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    remote_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (UniqueConstraint("entity_type", "entity_uuid"),)
