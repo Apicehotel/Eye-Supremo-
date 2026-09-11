@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3-embedding:0.6b"
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
+    supabase_access_token: str | None = None
     sync_enabled: bool = False
     live_search_debounce_ms: int = 180
     model_config = SettingsConfigDict(env_prefix="EYESUPREMO_", env_file=".env", extra="ignore")
