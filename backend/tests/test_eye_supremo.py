@@ -1,7 +1,8 @@
 from datetime import date
 from decimal import Decimal
 from sqlalchemy import select
-from app.eye_services import add_review, invoice_search, invoice_search_summary
+from app.eye_services import add_review, invoice_search_summary
+from app.search_index import invoice_search
 from app.models import Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Supplier, UserProfile
 
 
@@ -24,6 +25,20 @@ def test_search_sums_only_matching_rows(db):
     summary = invoice_search_summary(rows)
     assert summary["rows"] == 1
     assert summary["row_total"] == 10
+
+
+def test_live_search_endpoint_uses_row_total(client, db):
+    supplier = Supplier(ragione_sociale="Elettrica Test"); db.add(supplier); db.flush()
+    inv = Invoice(supplier_id=supplier.id, numero="LED-1", data=date(2026, 5, 1), imponibile=40, iva=8.8, totale=48.8)
+    db.add(inv); db.flush()
+    row = InvoiceRow(invoice_id=inv.id, descrizione_originale="LAMP LED E27 12W", descrizione_normalizzata="lamp led e27 12w", quantita=4, prezzo_unitario=10, totale_riga=40, confidence=1)
+    db.add(row); db.flush(); db.add(InvoiceRowPolicy(row_id=row.id, analysis_status="product")); db.commit()
+    response = client.get("/api/eye/search/live", params={"q":"lamp"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["engine"] == "fts5+rapidfuzz"
+    assert payload["summary"]["row_total"] == 40
+    assert payload["results"][0]["description"] == "LAMP LED E27 12W"
 
 
 def test_accounting_rows_are_hidden_from_analysis(db):
