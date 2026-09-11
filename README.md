@@ -1,61 +1,205 @@
-# RandFatture
+# Eye Supremo
 
-RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
+Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per analizzare fatture, recensioni, camere, servizi, ranking, storico prezzi e anomalie. Il PC resta pienamente operativo anche senza Internet; Supabase è un ponte opzionale per sincronizzare dati autorizzati tra Hotel Giò, Chocohotel e Hotel Il Brigantino.
 
-## Architettura
+## Principi
 
-- React + TypeScript + Vite per l'interfaccia responsive.
-- FastAPI + SQLAlchemy 2 per le API REST.
-- SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
-- File e backup nella cartella locale `data` (ignorata da Git).
-- Ollama opzionale su `http://127.0.0.1:11434`.
+- **PC = motore principale**: SQLite, import, ricerca, ranking, backup e IA locale.
+- **GitHub = codice e versioni**: mai fatture o recensioni reali.
+- **Supabase = ponte opzionale**: sync autenticata push/pull, separata dal funzionamento locale.
+- **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
+- **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Hotel preconfigurati
 
-## Requisiti e avvio
+- `gio` — Hotel Giò
+- `choco` — Chocohotel
+- `brigantino` — Hotel Il Brigantino
 
-Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
+## Accesso e ruoli
 
-## Importazione
+Eye Supremo usa autenticazione locale con PIN e sessione. Al primo avvio lo Sviluppatore imposta il PIN; successivamente gli utenti accedono con il proprio profilo.
 
-La pagina Importa accetta PDF e XML. L'XML FatturaPA è letto in modo strutturato; i PDF con testo incorporato sono estratti senza cloud. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
+- **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
+- **Supremo**: visibilità globale operativa sui tre hotel.
+- **Livello 1 / 2 / 3**: accesso operativo limitabile all'hotel assegnato e alle esclusioni configurate.
 
-## Unità e prezzi
+Per le recensioni, Sviluppatore e Supremo vedono **Tutti gli hotel** oltre alle tre sezioni Giò/Choco/Brigantino. Gli utenti assegnati a una sola struttura vedono solo quella.
 
-Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/ml, pezzi, rotoli, confezioni, scatole, metri, m²/m³ e paia. Prezzo dichiarato e normalizzato sono salvati separatamente.
+Per le fatture la visibilità resta aziendale Apice con esclusioni per categoria/prodotto/fornitore/parola chiave; le fatture **non vengono separate in tre archivi hotel**.
 
-## Ollama
+## Fatture: archivio unico Apice
 
-Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. RandAI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
+Import principale: **XML FatturaPA, TXT e PDF**.
 
-## Backup e test
+Pipeline:
 
-Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups`.
+1. hash SHA-256 e controllo duplicati;
+2. parsing e anteprima;
+3. conferma esplicita;
+4. classificazione righe;
+5. voci contabili non utili all'analisi restano nella fattura ma vengono escluse dalla ricerca prodotto;
+6. indicizzazione FTS5;
+7. confronto prezzi e creazione alert quando applicabile.
+
+La sezione **Destinazione fattura** è separata dall'import: una fattura resta dell'archivio centrale Apice e può essere marcata facoltativamente come `Generale / Apice`, `Hotel Giò`, `Chocohotel` o `Hotel Il Brigantino` per filtri e analisi.
+
+Le domande di spesa sommano **le righe pertinenti**, non il totale completo delle fatture che le contengono.
+
+## Report storico prodotto
+
+Il modulo **Report storico** riprende la logica dell'Excel operativo e la rende automatica.
+
+Ricerca:
+
+`Prodotto → Produttore/Marca → Fornitore → date → prezzi`
+
+In alto mostra subito:
+
+- prezzo iniziale + data;
+- prezzo medio;
+- miglior prezzo + data;
+- ultimo prezzo + data;
+- fornitore mediamente più conveniente.
+
+Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. Ogni nuovo prezzo è confrontato con il precedente con indicazione `↑`, `↓` o `=` e variazione in euro/%.
+
+I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
+
+### Stampa
+
+Il report ha un layout dedicato **A4 orizzontale**. Quando le date diventano troppe vengono suddivise in più pagine; su **ogni pagina** vengono ripetuti prodotto, produttore/marca e fornitore, così ogni prezzo mantiene sempre il proprio riferimento. La UI espone `Stampa / PDF` e genera pagine compatte pensate per la stampa, non una semplice schermata web ridotta.
+
+## Ricerca veloce
+
+La ricerca parte mentre si digita:
+
+1. **SQLite FTS5** con prefix index;
+2. SQL filtrato;
+3. **RapidFuzz** come fallback;
+4. Qwen solo per interpretazione finale.
+
+L'evoluzione prevista per l'archivio massivo usa prodotto canonico, alias/anti-alias, classificazione `Food & Beverage` / `Non Food`, vector search locale e Qwen solo sui casi ambigui. Similarità testuale non equivale a equivalenza semantica: per esempio `bombolone` e `bombola` devono restare separati.
+
+## Recensioni
+
+Le recensioni sono divise per hotel. Prima si seleziona **Giò / Choco / Brigantino**, poi si caricano i file: tutte le recensioni estratte ereditano l'hotel scelto.
+
+Formati supportati:
+
+- **Outlook `.msg`**;
+- EML;
+- TXT.
+
+Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
+
+## Eye AI e agenti interni
+
+Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
+
+Agenti interni:
+
+- `router` — comprende l'intento;
+- `products` — ricerca prodotto, alias e storico;
+- `classifier` — classifica Food & Beverage / Non Food e sottocategorie;
+- `invoices` — dati fattura e fornitore;
+- `prices` — storico, medie, minimi e variazioni;
+- `reviews` — recensioni, camere, servizi e ranking;
+- `verifier` — controlla unità incompatibili e falsi positivi;
+- `answer` — genera la risposta finale breve e verificabile.
+
+Gli specialisti che leggono il database possono lavorare in parallelo, ma **ognuno apre una propria sessione SQLAlchemy/SQLite**: non condividono la stessa sessione tra thread. Somme, medie, ranking e confronti restano deterministici; Qwen viene usato soprattutto per interpretazione e sintesi.
+
+La chiamata Ollama usa **structured output JSON Schema** (`answer`, `facts`, `confidence`). Se Ollama non è disponibile, l'orchestratore ricade sul motore deterministico locale. L'endpoint `/api/eye/agents/registry` espone il registro degli agenti e dei tool consentiti.
+
+Modelli consigliati:
+
+```text
+qwen3:8b
+llama3.2:3b
+qwen3-embedding:0.6b
+```
+
+Eseguire `scarica-modelli-ia.bat` dopo aver installato Ollama.
+
+## Alert
+
+Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture può generare alert quando il prezzo corrente supera in modo rilevante lo storico. Le righe contabili escluse non generano alert prodotto.
+
+## Ponte Supabase
+
+Sul progetto **Apice MultiHotel** sono presenti:
+
+- `eye_sync_memberships`
+- `eye_sync_objects`
+- Edge Function `eye-supremo-sync`
+
+L'Edge Function richiede JWT valido. `developer` e `supremo` possono essere configurati per lettura globale; gli altri utenti ricevono solo gli hotel autorizzati dalla membership server-side.
+
+Variabili locali in `.env.example`:
+
+```text
+EYESUPREMO_SYNC_ENABLED=false
+EYESUPREMO_SUPABASE_URL=
+EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
+EYESUPREMO_SUPABASE_ACCESS_TOKEN=
+```
+
+La sync è **disattivata per default** e l'app continua a funzionare offline.
+
+## Avvio sviluppo
+
+Requisiti: Python 3.11+ e Node 20+.
+
+```powershell
+setup.bat
+start.bat
+```
+
+API: `http://127.0.0.1:8000/api/docs`
+UI dev: `http://127.0.0.1:5173`
+
+## Installer Windows
+
+Il PC finale **non deve avere Python o Node**.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
+
+Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller e incorpora la UI nel backend. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
+
+I dati vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
+
+## Test e CI
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pytest
+pytest -q
 cd ..\frontend
+npm ci
 npm run build
 ```
 
-I test coprono normalizzazione, prezzi, database, duplicati, API, ricerca, fallback Ollama e XML FatturaPA.
+La PR esegue automaticamente backend test + frontend build e la pipeline Windows genera l'installer.
 
 ## Sicurezza
 
-Nessuna telemetria o invio cloud. Upload limitati, estensioni consentite, nomi file generati, protezione path traversal nei download, hash e audit log. Per il futuro multiutente serviranno autenticazione, cifratura e ruoli.
+- dati reali locali per default;
+- autenticazione locale con PIN e sessione;
+- ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
+- hotel delle recensioni limitato ai permessi utente;
+- agenti con strumenti dichiarati e limitati;
+- sessioni database isolate per worker concorrente;
+- Qwen non modifica direttamente fatture o prodotti;
+- upload con limiti e nomi generati;
+- hash duplicati;
+- audit log;
+- sync remota con JWT obbligatorio;
+- nessun token reale committato.
 
-## Troubleshooting
+## Limitazioni note
 
-- **IA locale non disponibile**: avviare Ollama e verificare URL/modello; il resto funziona comunque.
-- **Porta occupata**: liberare la porta 8000 o 5173.
-- **PDF senza testo**: è una scansione; viene segnalata per revisione.
-- **Browser non aperto**: visitare `http://127.0.0.1:5173`.
-
-## Roadmap dichiarata
-
-- OCR Tesseract per scansioni e immagini; import CSV/XLSX con mappatura.
-- Conferma completa dell'anteprima UI e riconciliazione alias assistita.
-- Embedding incrementali con indice vettoriale locale.
-- Report PDF/XLSX e ripristino backup guidato.
-- Multiutente con ruoli e cifratura; packaging Tauri; PostgreSQL opzionale.
+- il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
+- il login Supabase desktop e refresh automatico della sessione restano necessari per rendere la sync remota completamente trasparente agli utenti;
+- `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.

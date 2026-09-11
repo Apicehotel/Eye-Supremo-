@@ -1,0 +1,66 @@
+name: Eye Supremo CI
+
+on:
+  pull_request:
+    branches: [main, feat/eye-supremo-foundations]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run backend tests
+        working-directory: backend
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Upload built frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: EyeSupremo-Frontend-Dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  source-snapshot:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload tested source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: EyeSupremo-Tested-Source
+          path: |
+            backend
+            frontend
+            installer
+            scripts
+            README.md
+            setup.bat
+            start.bat
+            scarica-modelli-ia.bat
+          if-no-files-found: error
+          retention-days: 7
