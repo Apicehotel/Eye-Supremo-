@@ -4,6 +4,8 @@ from sqlalchemy import select
 from app.eye_services import add_review, invoice_search_summary
 from app.search_index import invoice_search
 from app.models import Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Supplier, UserProfile
+from app.report_service import historical_product_report
+from app.review_importers import split_review_blocks
 
 
 def test_core_seed(db):
@@ -50,6 +52,37 @@ def test_accounting_rows_are_hidden_from_analysis(db):
     assert invoice_search(db, "carburante", limit=20) == []
 
 
+def test_historical_report_tracks_price_direction_and_best_supplier(db):
+    s1 = Supplier(ragione_sociale="Fornitore 1"); s2 = Supplier(ragione_sociale="MARR"); db.add_all([s1, s2]); db.flush()
+    samples = [
+        (s1, "A1", date(2024,1,1), Decimal("1.25")),
+        (s1, "A2", date(2025,1,1), Decimal("1.30")),
+        (s2, "B1", date(2024,2,1), Decimal("0.90")),
+        (s2, "B2", date(2025,2,1), Decimal("0.85")),
+    ]
+    for supplier, number, when, price in samples:
+        inv = Invoice(supplier_id=supplier.id, numero=number, data=when, imponibile=price, iva=0, totale=price); db.add(inv); db.flush()
+        row = InvoiceRow(invoice_id=inv.id, descrizione_originale="Bombolone crema", descrizione_normalizzata="bombolone crema", quantita=1, unita_normalizzata="pz", prezzo_unitario=price, totale_riga=price, confidence=1); db.add(row); db.flush()
+        db.add(InvoiceRowPolicy(row_id=row.id, analysis_status="product"))
+    db.commit()
+    report = historical_product_report(db, "bombolone")
+    assert report["summary"]["initial_price"] == 1.25
+    assert report["summary"]["best_price"] == 0.85
+    assert report["summary"]["best_supplier"] == "MARR"
+    marr = next(x for x in report["suppliers"] if x["supplier"] == "MARR")
+    assert marr["points"][-1]["trend"] == "down"
+    assert marr["points"][-1]["delta"] == -0.05
+
+
+def test_review_digest_splits_multiple_rooms():
+    text = """Booking.com recensioni\nCAM: 217\nData recensione: 17/02/2026\nVoto: 9\nPositivo: staff gentile\nNegativo: camera piccola\nCAM: 305\nData recensione: 18/02/2026\nVoto: 7\nPositivo: colazione buona\nNegativo: letto scomodo"""
+    items = split_review_blocks(text, "2026-02-19", "Outlook MSG", None, "sample.msg")
+    assert len(items) == 2
+    assert items[0]["room_code"] == "217"
+    assert items[1]["room_code"] == "305"
+    assert items[0]["source"] == "Booking"
+
+
 def test_review_ranking_best_and_worst(db):
     hotel = db.scalar(select(Hotel).where(Hotel.code == "choco"))
     add_review(db, hotel_id=hotel.id, text="Camera 101 pulita, letto comodo e staff gentile", review_date=date(2026, 8, 1), rating=Decimal("9.5"), room_code="101")
@@ -61,7 +94,7 @@ def test_review_ranking_best_and_worst(db):
 
 
 def test_review_txt_import_endpoint(client):
-    response = client.post("/api/eye/reviews/import/choco", files=[("files", ("review.txt", b"Camera pulita e staff gentile", "text/plain"))])
+    response = client.post("/api/eye/reviews/import/choco", files=[("files", ("review.txt", b"Recensione - Camera 101 pulita e staff gentile", "text/plain"))])
     assert response.status_code == 200
     assert response.json()["imported"] == 1
     items = client.get("/api/eye/reviews", params={"hotel_code": "choco"}).json()
@@ -81,6 +114,7 @@ def test_bootstrap_locks_eye_api_and_session_unlocks_it(client):
     assert blocked.status_code == 401
     allowed = client.get("/api/eye/hotels", headers={"X-Eye-Session":token,"X-Eye-Role":"level1"})
     assert allowed.status_code == 200
+    assert len(allowed.json()) == 3
 
 
 def test_level_user_cannot_spoof_developer_after_login(client):
