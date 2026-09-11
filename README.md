@@ -1,61 +1,193 @@
-# RandFatture
+# Eye Supremo
 
-RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
+Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per analizzare fatture, recensioni, camere, servizi, ranking e anomalie. Il PC resta pienamente operativo anche senza Internet; Supabase è un ponte opzionale per sincronizzare dati autorizzati tra Hotel Giò, Chocohotel e Hotel Il Brigantino.
 
-## Architettura
+## Principi
 
-- React + TypeScript + Vite per l'interfaccia responsive.
-- FastAPI + SQLAlchemy 2 per le API REST.
-- SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
-- File e backup nella cartella locale `data` (ignorata da Git).
-- Ollama opzionale su `http://127.0.0.1:11434`.
+- **PC = motore principale**: SQLite, import, ricerca, ranking, backup e IA locale.
+- **GitHub = codice e versioni**: mai fatture o recensioni reali.
+- **Supabase = ponte opzionale**: sync autenticata push/pull, separata dal funzionamento locale.
+- **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
+- **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Hotel preconfigurati
 
-## Requisiti e avvio
+- `gio` — Hotel Giò
+- `choco` — Chocohotel
+- `brigantino` — Hotel Il Brigantino
 
-Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
+Ogni documento sincronizzato mantiene hotel di origine e UUID.
 
-## Importazione
+## Ruoli
 
-La pagina Importa accetta PDF e XML. L'XML FatturaPA è letto in modo strutturato; i PDF con testo incorporato sono estratti senza cloud. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
+Eye Supremo crea cinque profili logici iniziali:
 
-## Unità e prezzi
+- **Sviluppatore**: accesso completo, configurazione e manutenzione.
+- **Supremo**: lettura completa dei tre livelli/hotel e uso operativo globale.
+- **Livello 1 / 2 / 3**: accesso operativo con esclusioni configurabili.
 
-Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/ml, pezzi, rotoli, confezioni, scatole, metri, m²/m³ e paia. Prezzo dichiarato e normalizzato sono salvati separatamente.
+Per le fatture la regola è **visibilità generale con esclusioni**: categoria, prodotto, fornitore o parola chiave possono essere nascosti a un ruolo. Le stesse esclusioni vengono applicate alla ricerca e all'IA.
 
-## Ollama
+> Il selettore ruolo locale è un contesto operativo. La sincronizzazione remota richiede invece autenticazione Supabase JWT e membership server-side.
 
-Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. RandAI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
+## Fatture
 
-## Backup e test
+Import principale: **XML FatturaPA, TXT e PDF**.
 
-Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups`.
+Pipeline:
+
+1. hash SHA-256 e controllo duplicati;
+2. parsing e anteprima;
+3. conferma esplicita;
+4. classificazione righe;
+5. voci contabili non utili all'analisi (`carburante`, sconti, abbuoni, bolli, trasporto, ecc.) restano nella fattura ma vengono escluse da ricerca prodotto/ranking;
+6. indicizzazione FTS5;
+7. confronto prezzi e creazione alert quando applicabile.
+
+Le domande di spesa sommano **le righe pertinenti**, non il totale completo delle fatture che le contengono.
+
+## Ricerca veloce
+
+La ricerca è pensata per partire mentre si digita:
+
+1. **SQLite FTS5** con prefix index (2/3/4 caratteri);
+2. SQL filtrato;
+3. **RapidFuzz** come fallback per errori e descrizioni simili;
+4. Qwen solo per interpretazione finale.
+
+La UI usa un debounce breve; l'effetto utente è una ricerca progressiva carattere per carattere.
+
+## Recensioni
+
+Ogni hotel carica il proprio archivio recensioni. Formati iniziali: **EML e TXT**.
+
+Categorie storiche iniziali:
+
+- Camere / Arredi
+- Ristorante
+- Colazione
+- Staff
+- Letti
+- Pulizia
+- Altro
+- Parcheggio
+- Posizione
+- Cuscini
+
+Le recensioni possono essere collegate alla camera. I temi non riconosciuti alimentano **Temi emergenti**: non diventano categorie al primo caso; vengono conteggiati e possono essere approvati dallo Sviluppatore.
+
+## Ranking recensioni
+
+Disponibili globalmente e per singolo hotel:
+
+- Top 5 camere migliori;
+- Top 5 camere peggiori;
+- Top 5 servizi migliori;
+- Top 5 servizi peggiori;
+- Top/Bottom per Hotel Giò, Chocohotel e Brigantino.
+
+Il ranking camere considera voto e quantità di recensioni, evitando che una singola recensione domini la classifica.
+
+## Eye AI
+
+Eye AI usa **Qwen 3 8B** tramite Ollama. Il modello riceve un contesto piccolo e citabile formato da:
+
+- righe fattura pertinenti e relativo totale;
+- recensioni pertinenti;
+- camere;
+- ranking migliori/peggiori.
+
+Modelli consigliati:
+
+```text
+qwen3:8b
+llama3.2:3b
+qwen3-embedding:0.6b
+```
+
+Eseguire `scarica-modelli-ia.bat` dopo aver installato Ollama.
+
+## Alert
+
+Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture può generare alert quando il prezzo corrente supera in modo rilevante lo storico. Le righe contabili escluse non generano alert prodotto.
+
+## Ponte Supabase
+
+Sul progetto **Apice MultiHotel** è previsto uno schema isolato:
+
+- `eye_sync_memberships`
+- `eye_sync_objects`
+- Edge Function `eye-supremo-sync`
+
+L'Edge Function richiede JWT valido. `developer` e `supremo` possono essere configurati per lettura globale; gli altri utenti ricevono solo gli hotel autorizzati dalla membership server-side.
+
+Variabili locali in `.env.example`:
+
+```text
+EYESUPREMO_SYNC_ENABLED=false
+EYESUPREMO_SUPABASE_URL=
+EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
+EYESUPREMO_SUPABASE_ACCESS_TOKEN=
+```
+
+La sync è **disattivata per default** e l'app continua a funzionare offline.
+
+## Avvio sviluppo
+
+Requisiti sulla macchina di sviluppo: Python 3.11+ e Node 20+.
+
+```powershell
+setup.bat
+start.bat
+```
+
+API: `http://127.0.0.1:8000/api/docs`
+UI dev: `http://127.0.0.1:5173`
+
+## Installer Windows
+
+Il PC finale **non deve avere Python o Node**.
+
+Build su PC di sviluppo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
+
+Lo script:
+
+1. compila React;
+2. crea `dist/EyeSupremo.exe` con PyInstaller;
+3. incorpora la UI nel backend.
+
+Compilando poi `installer/EyeSupremo.iss` con Inno Setup 6 si ottiene `release/EyeSupremo-Setup.exe`.
+
+I dati dell'installazione vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile e quindi preservati dagli aggiornamenti.
+
+## Test e CI
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pytest
+pytest -q
 cd ..\frontend
+npm ci
 npm run build
 ```
 
-I test coprono normalizzazione, prezzi, database, duplicati, API, ricerca, fallback Ollama e XML FatturaPA.
+La PR esegue automaticamente backend test + frontend build tramite GitHub Actions.
 
 ## Sicurezza
 
-Nessuna telemetria o invio cloud. Upload limitati, estensioni consentite, nomi file generati, protezione path traversal nei download, hash e audit log. Per il futuro multiutente serviranno autenticazione, cifratura e ruoli.
+- dati reali locali per default;
+- upload con limiti e nomi file generati;
+- hash duplicati;
+- audit log;
+- sync remota con JWT obbligatorio;
+- tabelle sync non accessibili direttamente ad `anon`/`authenticated`: passano dalla Edge Function;
+- nessun token reale deve essere committato.
 
-## Troubleshooting
+## Limitazioni note della milestone
 
-- **IA locale non disponibile**: avviare Ollama e verificare URL/modello; il resto funziona comunque.
-- **Porta occupata**: liberare la porta 8000 o 5173.
-- **PDF senza testo**: è una scansione; viene segnalata per revisione.
-- **Browser non aperto**: visitare `http://127.0.0.1:5173`.
-
-## Roadmap dichiarata
-
-- OCR Tesseract per scansioni e immagini; import CSV/XLSX con mappatura.
-- Conferma completa dell'anteprima UI e riconciliazione alias assistita.
-- Embedding incrementali con indice vettoriale locale.
-- Report PDF/XLSX e ripristino backup guidato.
-- Multiutente con ruoli e cifratura; packaging Tauri; PostgreSQL opzionale.
+- import recensioni diretto: EML/TXT; Outlook MSG richiede un parser/conversione dedicata prima di abilitarlo in produzione;
+- il login Supabase desktop e il refresh automatico della sessione sono il passo successivo per rendere la sync utilizzabile dagli utenti finali senza configurazione manuale;
+- l'indicizzazione semantica Qwen3 Embedding è predisposta come modello, mentre FTS5 + RapidFuzz sono il motore di ricerca attivo in questa milestone.
