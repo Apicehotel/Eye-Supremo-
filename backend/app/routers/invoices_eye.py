@@ -9,7 +9,7 @@ from ..config import settings
 from ..database import get_db
 from ..eye_services import apply_row_policies, create_price_alerts, ensure_invoice_metadata
 from ..importers import parse_document
-from ..models import Hotel, ImportJob, Invoice, InvoiceRow, Supplier
+from ..models import ImportJob, Invoice, InvoiceRow, Supplier
 from ..schemas import InvoiceIn
 from ..services import audit, create_invoice, duplicate_candidates
 
@@ -17,24 +17,14 @@ router = APIRouter(prefix="/api/eye/invoices", tags=["Eye Supremo invoices"])
 ALLOWED = {".xml", ".txt", ".pdf"}
 
 
-def resolve_hotel(db: Session, hotel_code: str | None):
-    if not hotel_code:
-        return None
-    hotel = db.scalar(select(Hotel).where(Hotel.code == hotel_code))
-    if not hotel:
-        raise HTTPException(404, "Hotel non trovato")
-    return hotel
-
-
 @router.post("/import/preview")
-async def import_preview(file: UploadFile = File(...), hotel_code: str | None = None, db: Session = Depends(get_db)):
+async def import_preview(file: UploadFile = File(...), db: Session = Depends(get_db)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED:
         raise HTTPException(415, "Formato fattura supportato: XML, TXT o PDF")
     content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File troppo grande")
-    hotel = resolve_hotel(db, hotel_code)
     digest = hashlib.sha256(content).hexdigest()
     safe_name = f"{secrets.token_hex(12)}{suffix}"
     path = settings.data_dir / "uploads" / safe_name
@@ -47,7 +37,7 @@ async def import_preview(file: UploadFile = File(...), hotel_code: str | None = 
         job.status = "error"; job.error = str(exc); audit(db, "import.error", str(exc), "error"); db.commit()
         raise HTTPException(422, str(exc))
     matches = duplicate_candidates(db, file_hash=digest)
-    preview.update({"job_id": job.id, "file_hash": digest, "duplicate_matches": [i.id for i in matches], "hotel": hotel.name if hotel else None, "hotel_code": hotel.code if hotel else None})
+    preview.update({"job_id": job.id, "file_hash": digest, "duplicate_matches": [i.id for i in matches]})
     job.payload_json = json.dumps(preview, ensure_ascii=False)
     audit(db, "import.preview", f"Anteprima Eye Supremo per {job.filename}")
     db.commit()
@@ -55,13 +45,12 @@ async def import_preview(file: UploadFile = File(...), hotel_code: str | None = 
 
 
 @router.post("/import/{job_id}/confirm")
-def import_confirm(job_id: int, payload: dict | None = None, hotel_code: str | None = None, force: bool = False, db: Session = Depends(get_db)):
+def import_confirm(job_id: int, payload: dict | None = None, force: bool = False, db: Session = Depends(get_db)):
     job = db.get(ImportJob, job_id)
     if not job or not job.payload_json:
         raise HTTPException(404, "Anteprima non trovata")
     if job.status == "completed":
         raise HTTPException(409, "Importazione già confermata")
-    hotel = resolve_hotel(db, hotel_code)
     preview = json.loads(job.payload_json)
     if payload:
         preview["supplier"].update(payload.get("supplier", {})); preview["invoice"].update(payload.get("invoice", {}))
@@ -81,12 +70,14 @@ def import_confirm(job_id: int, payload: dict | None = None, hotel_code: str | N
         raise HTTPException(409, {"message": "Possibile duplicato", "matches": [x.id for x in matches]})
     invoice = create_invoice(db, invoice_payload)
     invoice = db.scalar(select(Invoice).options(selectinload(Invoice.rows)).where(Invoice.id == invoice.id))
-    ensure_invoice_metadata(db, invoice, hotel.id if hotel else None)
+    # Le fatture appartengono all'archivio centrale Apice. L'eventuale destinazione
+    # operativa viene assegnata soltanto dalla sezione "Destinazione fattura".
+    ensure_invoice_metadata(db, invoice, None)
     apply_row_policies(db, invoice)
     job.status = "completed"
     db.commit()
     invoice = db.scalar(select(Invoice).options(selectinload(Invoice.rows).selectinload(InvoiceRow.policy)).where(Invoice.id == invoice.id))
     alerts = create_price_alerts(db, invoice)
-    audit(db, "import.completed", f"Importata fattura {invoice.numero} in Eye Supremo", entity_type="invoice", entity_id=invoice.id)
+    audit(db, "import.completed", f"Importata fattura {invoice.numero} nell'archivio centrale Apice", entity_type="invoice", entity_id=invoice.id)
     db.commit()
-    return {"ok": True, "invoice_id": invoice.id, "hotel": hotel.name if hotel else None, "alerts_created": len(alerts)}
+    return {"ok": True, "invoice_id": invoice.id, "alerts_created": len(alerts)}
