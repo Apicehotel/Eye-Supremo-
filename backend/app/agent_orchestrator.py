@@ -36,9 +36,11 @@ AGENTS: dict[str, AgentSpec] = {
     "answer": AgentSpec("answer", "Produce una risposta breve e verificabile", ("structured_qwen",)),
 }
 
-PRODUCT_HINTS = ("prodotto", "prezzo", "costa", "fornitore", "vende", "meglio", "storico", "media", "minimo", "massimo")
-REVIEW_HINTS = ("recensione", "camera", "staff", "pulizia", "colazione", "ristorante", "servizio", "ranking")
-CLASSIFY_HINTS = ("categoria", "classifica", "food", "beverage", "non food", "che prodotto", "tipologia")
+# Usiamo radici lessicali, non parole intere, così singolare/plurale e piccole
+# variazioni italiane non mandano la domanda allo specialista sbagliato.
+PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "meglio", "storic", "medi", "minim", "massim")
+REVIEW_HINTS = ("recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking")
+CLASSIFY_HINTS = ("categor", "classific", "food", "beverage", "non food", "tipologi")
 
 
 def classify_intent(question: str) -> list[str]:
@@ -151,8 +153,8 @@ async def _qwen_structured(question: str, context: dict[str, Any]) -> dict[str, 
 
 
 async def run_orchestrated_query(db: Session, question: str, role_name: str = "developer", hotel_id: int | None = None) -> dict[str, Any]:
-    # `db` is retained in the signature because authorization is resolved by the caller.
-    # Each parallel worker opens an isolated SQLAlchemy session to keep SQLite thread-safe.
+    # `db` resta nella firma perché l'autorizzazione viene risolta dal caller.
+    # Ogni worker parallelo apre una sessione SQLAlchemy separata per SQLite.
     del db
     plan = classify_intent(question)
     context: dict[str, Any] = {}
