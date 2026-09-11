@@ -14,6 +14,7 @@ from .routers.search_eye import router as search_router
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
 from .routers.invoices_eye import router as eye_invoice_router
+from .routers.reports_eye import router as reports_router
 from .routers.sync_eye import router as sync_router
 
 
@@ -58,8 +59,9 @@ async def local_auth_guard(request: Request, call_next):
                 if legacy_admin and user.role_name != "developer":
                     return JSONResponse({"detail": "Solo lo Sviluppatore può usare questa funzione"}, status_code=403)
                 headers = list(request.scope.get("headers", []))
-                headers = [(k, v) for k, v in headers if k.lower() != b"x-eye-role"]
+                headers = [(k, v) for k, v in headers if k.lower() not in {b"x-eye-role", b"x-eye-user"}]
                 headers.append((b"x-eye-role", user.role_name.encode("utf-8")))
+                headers.append((b"x-eye-user", user.username.encode("utf-8")))
                 request.scope["headers"] = headers
         finally:
             db.close()
@@ -68,6 +70,7 @@ async def local_auth_guard(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(search_router)
+app.include_router(reports_router)
 app.include_router(legacy_router)
 app.include_router(eye_router)
 app.include_router(eye_invoice_router)
