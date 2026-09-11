@@ -1,10 +1,19 @@
+import os
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def default_data_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "EyeSupremo"
+    return Path(__file__).resolve().parents[2] / "data"
+
+
 class Settings(BaseSettings):
     app_name: str = "Eye Supremo"
-    data_dir: Path = Path(__file__).resolve().parents[2] / "data"
+    data_dir: Path = default_data_dir()
     max_upload_mb: int = 30
     ollama_url: str = "http://127.0.0.1:11434"
     chat_model: str = "qwen3:8b"
