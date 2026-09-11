@@ -49,6 +49,8 @@ def wait_and_open_browser(timeout: float = 30.0) -> None:
 
 
 def show_fatal_error(message: str) -> None:
+    if os.environ.get("EYE_SUPREMO_NO_BROWSER") == "1":
+        return
     try:
         ctypes.windll.user32.MessageBoxW(
             0,
