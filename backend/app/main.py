@@ -1,12 +1,15 @@
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from .auth_service import auth_configured, session_user
 from .database import Base, SessionLocal, engine
 from .eye_services import seed_eye_supremo
 from .search_index import ensure_fts5
+from .routers.auth_eye import router as auth_router
 from .routers.search_eye import router as search_router
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
@@ -34,6 +37,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def local_auth_guard(request: Request, call_next):
+    path = request.url.path
+    public_auth = path.startswith("/api/eye/auth/")
+    if path.startswith("/api/eye/") and not public_auth:
+        db = SessionLocal()
+        try:
+            if auth_configured(db):
+                token = request.headers.get("X-Eye-Session")
+                user = session_user(db, token)
+                if not user or not user.active:
+                    return JSONResponse({"detail": "Sessione Eye Supremo richiesta"}, status_code=401)
+                headers = list(request.scope.get("headers", []))
+                headers = [(k, v) for k, v in headers if k.lower() != b"x-eye-role"]
+                headers.append((b"x-eye-role", user.role_name.encode("utf-8")))
+                request.scope["headers"] = headers
+        finally:
+            db.close()
+    return await call_next(request)
+
+
+app.include_router(auth_router)
 app.include_router(search_router)
 app.include_router(legacy_router)
 app.include_router(eye_router)
