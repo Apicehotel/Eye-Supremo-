@@ -7,9 +7,11 @@ async def push_to_supabase(payload: dict) -> dict:
         return {"enabled": False, "synced": False, "message": "Sincronizzazione disattivata"}
     if not settings.supabase_url or not settings.supabase_publishable_key:
         return {"enabled": True, "synced": False, "message": "Supabase non configurato"}
+    if not settings.supabase_access_token:
+        return {"enabled": True, "synced": False, "message": "Sessione Supabase autenticata mancante"}
     url = settings.supabase_url.rstrip("/") + "/functions/v1/eye-supremo-sync"
     headers = {
-        "Authorization": f"Bearer {settings.supabase_publishable_key}",
+        "Authorization": f"Bearer {settings.supabase_access_token}",
         "apikey": settings.supabase_publishable_key,
         "Content-Type": "application/json",
     }
@@ -27,6 +29,7 @@ def sync_configuration() -> dict:
     return {
         "enabled": settings.sync_enabled,
         "configured": bool(settings.supabase_url and settings.supabase_publishable_key),
+        "authenticated": bool(settings.supabase_access_token),
         "mode": "local-first",
         "remote": "Supabase bridge",
     }
