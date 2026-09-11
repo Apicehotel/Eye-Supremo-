@@ -1,6 +1,6 @@
 # Eye Supremo
 
-Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per analizzare fatture, recensioni, camere, servizi, ranking e anomalie. Il PC resta pienamente operativo anche senza Internet; Supabase è un ponte opzionale per sincronizzare dati autorizzati tra Hotel Giò, Chocohotel e Hotel Il Brigantino.
+Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per analizzare fatture, recensioni, camere, servizi, ranking, storico prezzi e anomalie. Il PC resta pienamente operativo anche senza Internet; Supabase è un ponte opzionale per sincronizzare dati autorizzati tra Hotel Giò, Chocohotel e Hotel Il Brigantino.
 
 ## Principi
 
@@ -16,21 +16,19 @@ Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per anal
 - `choco` — Chocohotel
 - `brigantino` — Hotel Il Brigantino
 
-Ogni documento sincronizzato mantiene hotel di origine e UUID.
+## Accesso e ruoli
 
-## Ruoli
+Eye Supremo usa autenticazione locale con PIN e sessione. Al primo avvio lo Sviluppatore imposta il PIN; successivamente gli utenti accedono con il proprio profilo.
 
-Eye Supremo crea cinque profili logici iniziali:
+- **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
+- **Supremo**: visibilità globale operativa sui tre hotel.
+- **Livello 1 / 2 / 3**: accesso operativo limitabile all'hotel assegnato e alle esclusioni configurate.
 
-- **Sviluppatore**: accesso completo, configurazione e manutenzione.
-- **Supremo**: lettura completa dei tre livelli/hotel e uso operativo globale.
-- **Livello 1 / 2 / 3**: accesso operativo con esclusioni configurabili.
+Per le recensioni, Sviluppatore e Supremo vedono **Tutti gli hotel** oltre alle tre sezioni Giò/Choco/Brigantino. Gli utenti assegnati a una sola struttura vedono solo quella.
 
-Per le fatture la regola è **visibilità generale con esclusioni**: categoria, prodotto, fornitore o parola chiave possono essere nascosti a un ruolo. Le stesse esclusioni vengono applicate alla ricerca e all'IA.
+Per le fatture la visibilità resta aziendale Apice con esclusioni per categoria/prodotto/fornitore/parola chiave; le fatture **non vengono separate in tre archivi hotel**.
 
-> Il selettore ruolo locale è un contesto operativo. La sincronizzazione remota richiede invece autenticazione Supabase JWT e membership server-side.
-
-## Fatture
+## Fatture: archivio unico Apice
 
 Import principale: **XML FatturaPA, TXT e PDF**.
 
@@ -40,28 +38,60 @@ Pipeline:
 2. parsing e anteprima;
 3. conferma esplicita;
 4. classificazione righe;
-5. voci contabili non utili all'analisi (`carburante`, sconti, abbuoni, bolli, trasporto, ecc.) restano nella fattura ma vengono escluse da ricerca prodotto/ranking;
+5. voci contabili non utili all'analisi restano nella fattura ma vengono escluse dalla ricerca prodotto;
 6. indicizzazione FTS5;
 7. confronto prezzi e creazione alert quando applicabile.
 
+La sezione **Destinazione fattura** è separata dall'import: una fattura resta dell'archivio centrale Apice e può essere marcata facoltativamente come `Generale / Apice`, `Hotel Giò`, `Chocohotel` o `Hotel Il Brigantino` per filtri e analisi.
+
 Le domande di spesa sommano **le righe pertinenti**, non il totale completo delle fatture che le contengono.
+
+## Report storico prodotto
+
+Il modulo **Report storico** riprende la logica dell'Excel operativo e la rende automatica.
+
+Ricerca:
+
+`Prodotto → Produttore/Marca → Fornitore → date → prezzi`
+
+In alto mostra subito:
+
+- prezzo iniziale + data;
+- prezzo medio;
+- miglior prezzo + data;
+- ultimo prezzo + data;
+- fornitore mediamente più conveniente.
+
+Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. Ogni nuovo prezzo è confrontato con il precedente con indicazione `↑`, `↓` o `=` e variazione in euro/%.
+
+I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
+
+### Stampa
+
+Il report ha un layout dedicato **A4 orizzontale**. Quando le date diventano troppe vengono suddivise in più pagine; su **ogni pagina** vengono ripetuti prodotto, produttore/marca e fornitore, così ogni prezzo mantiene sempre il proprio riferimento. La UI espone `Stampa / PDF` e genera pagine compatte pensate per la stampa, non una semplice schermata web ridotta.
 
 ## Ricerca veloce
 
-La ricerca è pensata per partire mentre si digita:
+La ricerca parte mentre si digita:
 
-1. **SQLite FTS5** con prefix index (2/3/4 caratteri);
+1. **SQLite FTS5** con prefix index;
 2. SQL filtrato;
-3. **RapidFuzz** come fallback per errori e descrizioni simili;
+3. **RapidFuzz** come fallback;
 4. Qwen solo per interpretazione finale.
-
-La UI usa un debounce breve; l'effetto utente è una ricerca progressiva carattere per carattere.
 
 ## Recensioni
 
-Ogni hotel carica il proprio archivio recensioni. Formati iniziali: **EML e TXT**.
+Le recensioni sono divise per hotel. Prima si seleziona **Giò / Choco / Brigantino**, poi si caricano i file: tutte le recensioni estratte ereditano l'hotel scelto.
 
-Categorie storiche iniziali:
+Formati supportati:
+
+- **Outlook `.msg`**;
+- EML;
+- TXT.
+
+Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
+
+Categorie iniziali:
 
 - Camere / Arredi
 - Ristorante
@@ -74,28 +104,22 @@ Categorie storiche iniziali:
 - Posizione
 - Cuscini
 
-Le recensioni possono essere collegate alla camera. I temi non riconosciuti alimentano **Temi emergenti**: non diventano categorie al primo caso; vengono conteggiati e possono essere approvati dallo Sviluppatore.
+Le recensioni possono essere collegate alla camera. I temi non riconosciuti alimentano **Temi emergenti** e possono essere approvati dallo Sviluppatore.
 
 ## Ranking recensioni
 
-Disponibili globalmente e per singolo hotel:
+Disponibili globalmente per Supremo/Sviluppatore e per singolo hotel:
 
 - Top 5 camere migliori;
 - Top 5 camere peggiori;
 - Top 5 servizi migliori;
-- Top 5 servizi peggiori;
-- Top/Bottom per Hotel Giò, Chocohotel e Brigantino.
-
-Il ranking camere considera voto e quantità di recensioni, evitando che una singola recensione domini la classifica.
+- Top 5 servizi peggiori.
 
 ## Eye AI
 
-Eye AI usa **Qwen 3 8B** tramite Ollama. Il modello riceve un contesto piccolo e citabile formato da:
+Eye AI usa **Qwen 3 8B** tramite Ollama. Il modello riceve un contesto piccolo formato da righe fattura pertinenti, recensioni, camere e ranking.
 
-- righe fattura pertinenti e relativo totale;
-- recensioni pertinenti;
-- camere;
-- ranking migliori/peggiori.
+La chiamata Ollama usa **structured output JSON Schema**: Qwen deve restituire `answer`, `facts` e `confidence`, riducendo risposte libere/non verificabili. Se Ollama non è disponibile, il sistema ricade sul motore deterministico locale.
 
 Modelli consigliati:
 
@@ -113,7 +137,7 @@ Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture p
 
 ## Ponte Supabase
 
-Sul progetto **Apice MultiHotel** è previsto uno schema isolato:
+Sul progetto **Apice MultiHotel** sono presenti:
 
 - `eye_sync_memberships`
 - `eye_sync_objects`
@@ -134,7 +158,7 @@ La sync è **disattivata per default** e l'app continua a funzionare offline.
 
 ## Avvio sviluppo
 
-Requisiti sulla macchina di sviluppo: Python 3.11+ e Node 20+.
+Requisiti: Python 3.11+ e Node 20+.
 
 ```powershell
 setup.bat
@@ -148,21 +172,13 @@ UI dev: `http://127.0.0.1:5173`
 
 Il PC finale **non deve avere Python o Node**.
 
-Build su PC di sviluppo:
-
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-Lo script:
+Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller e incorpora la UI nel backend. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
 
-1. compila React;
-2. crea `dist/EyeSupremo.exe` con PyInstaller;
-3. incorpora la UI nel backend.
-
-Compilando poi `installer/EyeSupremo.iss` con Inno Setup 6 si ottiene `release/EyeSupremo-Setup.exe`.
-
-I dati dell'installazione vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile e quindi preservati dagli aggiornamenti.
+I dati vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
 
 ## Test e CI
 
@@ -174,20 +190,22 @@ npm ci
 npm run build
 ```
 
-La PR esegue automaticamente backend test + frontend build tramite GitHub Actions.
+La PR esegue automaticamente backend test + frontend build e la pipeline Windows genera l'installer.
 
 ## Sicurezza
 
 - dati reali locali per default;
-- upload con limiti e nomi file generati;
+- autenticazione locale con PIN e sessione;
+- ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
+- hotel delle recensioni limitato ai permessi utente;
+- upload con limiti e nomi generati;
 - hash duplicati;
 - audit log;
 - sync remota con JWT obbligatorio;
-- tabelle sync non accessibili direttamente ad `anon`/`authenticated`: passano dalla Edge Function;
-- nessun token reale deve essere committato.
+- nessun token reale committato.
 
-## Limitazioni note della milestone
+## Limitazioni note
 
-- import recensioni diretto: EML/TXT; Outlook MSG richiede un parser/conversione dedicata prima di abilitarlo in produzione;
-- il login Supabase desktop e il refresh automatico della sessione sono il passo successivo per rendere la sync utilizzabile dagli utenti finali senza configurazione manuale;
-- l'indicizzazione semantica Qwen3 Embedding è predisposta come modello, mentre FTS5 + RapidFuzz sono il motore di ricerca attivo in questa milestone.
+- il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
+- il login Supabase desktop e refresh automatico della sessione restano necessari per rendere la sync remota completamente trasparente agli utenti;
+- `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo.
