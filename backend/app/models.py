@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as date_type, datetime
 from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -51,7 +51,7 @@ class Invoice(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
     numero: Mapped[str] = mapped_column(String(80), index=True)
-    data: Mapped[date] = mapped_column(Date, index=True)
+    data: Mapped[date_type] = mapped_column(Date, index=True)
     imponibile: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     iva: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     totale: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, index=True)
@@ -106,7 +106,7 @@ class AuditLog(Base):
     message: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String(20), default="info", index=True)
     entity_type: Mapped[str | None] = mapped_column(String(50))
-    entity_id: Mapped[int | None]
+    entity_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
 
@@ -115,8 +115,6 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
 
-
-# --- Eye Supremo modular domain -------------------------------------------------
 
 class Hotel(Base):
     __tablename__ = "hotels"
@@ -132,7 +130,7 @@ class UserProfile(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(160))
-    role_name: Mapped[str] = mapped_column(String(30), index=True)  # developer, supremo, level1, level2, level3
+    role_name: Mapped[str] = mapped_column(String(30), index=True)
     home_hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     can_manage_config: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -144,7 +142,7 @@ class RoleExclusion(Base):
     __tablename__ = "role_exclusions"
     id: Mapped[int] = mapped_column(primary_key=True)
     role_name: Mapped[str] = mapped_column(String(30), index=True)
-    exclusion_type: Mapped[str] = mapped_column(String(30), index=True)  # category, product, supplier, keyword
+    exclusion_type: Mapped[str] = mapped_column(String(30), index=True)
     value: Mapped[str] = mapped_column(String(240), index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str | None] = mapped_column(Text)
@@ -165,7 +163,7 @@ class InvoiceMeta(Base):
 class InvoiceRowPolicy(Base):
     __tablename__ = "invoice_row_policy"
     row_id: Mapped[int] = mapped_column(ForeignKey("invoice_rows.id", ondelete="CASCADE"), primary_key=True)
-    analysis_status: Mapped[str] = mapped_column(String(30), default="product", index=True)  # product, accounting_excluded, review
+    analysis_status: Mapped[str] = mapped_column(String(30), default="product", index=True)
     exclusion_reason: Mapped[str | None] = mapped_column(String(160), index=True)
     manually_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     row: Mapped[InvoiceRow] = relationship(back_populates="policy")
@@ -190,7 +188,7 @@ class Review(Base):
     source: Mapped[str | None] = mapped_column(String(80), index=True)
     author: Mapped[str | None] = mapped_column(String(160))
     rating: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), index=True)
-    date: Mapped[date] = mapped_column(Date, index=True)
+    date: Mapped[date_type] = mapped_column(Date, index=True)
     text: Mapped[str] = mapped_column(Text)
     sentiment_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), index=True)
     raw_file: Mapped[str | None] = mapped_column(String(500))
@@ -216,7 +214,7 @@ class ReviewTag(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     review_id: Mapped[int] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"), index=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("review_categories.id", ondelete="CASCADE"), index=True)
-    polarity: Mapped[str] = mapped_column(String(12), index=True)  # positive, negative
+    polarity: Mapped[str] = mapped_column(String(12), index=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=1)
     excerpt: Mapped[str | None] = mapped_column(Text)
     review: Mapped[Review] = relationship(back_populates="tags")
@@ -231,7 +229,7 @@ class EmergingTheme(Base):
     name: Mapped[str] = mapped_column(String(120))
     normalized: Mapped[str] = mapped_column(String(120), index=True)
     occurrences: Mapped[int] = mapped_column(Integer, default=1, index=True)
-    status: Mapped[str] = mapped_column(String(20), default="candidate", index=True)  # candidate, approved, merged, ignored
+    status: Mapped[str] = mapped_column(String(20), default="candidate", index=True)
     merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("review_categories.id"))
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
