@@ -8,6 +8,7 @@ import webbrowser
 from pathlib import Path
 
 import uvicorn
+from app.main import app as fastapi_app
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -66,7 +67,7 @@ if __name__ == "__main__":
     write_log("Avvio Eye Supremo desktop.")
     threading.Thread(target=wait_and_open_browser, daemon=True).start()
     try:
-        uvicorn.run("app.main:app", host=HOST, port=PORT, log_level="warning")
+        uvicorn.run(fastapi_app, host=HOST, port=PORT, log_level="warning")
     except Exception as exc:
         detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         write_log("Errore fatale durante l'avvio:\n" + detail)
