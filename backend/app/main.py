@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .database import Base, SessionLocal, engine
 from .eye_services import seed_eye_supremo
+from .search_index import ensure_fts5
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
 from .routers.invoices_eye import router as eye_invoice_router
@@ -19,6 +20,7 @@ async def lifespan(_app: FastAPI):
         seed_eye_supremo(db)
     finally:
         db.close()
+    ensure_fts5(engine)
     yield
 
 
