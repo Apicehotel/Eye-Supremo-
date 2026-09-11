@@ -1,9 +1,9 @@
 import {ReactNode} from 'react';
-import {LayoutDashboard,FileText,Package,Users,Upload,Sparkles,ChartNoAxesCombined,History,TriangleAlert,Tags,Settings,MonitorCog,Menu,X,ReceiptText,MessageSquareText,ShieldCheck,LogOut} from 'lucide-react';
+import {LayoutDashboard,FileText,Package,Users,Upload,Sparkles,ChartNoAxesCombined,History,TriangleAlert,Tags,Settings,MonitorCog,Menu,X,ReceiptText,MessageSquareText,ShieldCheck,LogOut,MapPin,TrendingUp} from 'lucide-react';
 import {clearAuth,currentUser,eyeApi} from '../lib/api';
 
-export type Page = 'dashboard'|'invoices'|'products'|'suppliers'|'import'|'ai'|'reports'|'history'|'anomalies'|'categories'|'settings'|'system';
-const nav:[Page,string,any][]=[['dashboard','Dashboard',LayoutDashboard],['invoices','Fatture',FileText],['products','Prodotti',Package],['suppliers','Fornitori',Users],['import','Importa',Upload],['ai','Ricerca IA',Sparkles],['reports','Report',ChartNoAxesCombined],['history','Storico',History],['anomalies','Alert',TriangleAlert],['categories','Categorie',Tags],['settings','Impostazioni',Settings],['system','Sistema',MonitorCog]];
+export type Page = 'dashboard'|'invoices'|'products'|'suppliers'|'import'|'ai'|'reports'|'history-report'|'destinations'|'history'|'anomalies'|'categories'|'settings'|'system';
+const nav:[Page,string,any][]=[['dashboard','Dashboard',LayoutDashboard],['invoices','Fatture',FileText],['products','Prodotti',Package],['suppliers','Fornitori',Users],['import','Importa',Upload],['destinations','Destinazione fattura',MapPin],['history-report','Report storico',TrendingUp],['ai','Ricerca IA',Sparkles],['reports','Report',ChartNoAxesCombined],['history','Storico',History],['anomalies','Alert',TriangleAlert],['categories','Categorie',Tags],['settings','Impostazioni',Settings],['system','Sistema',MonitorCog]];
 
 export function Shell({page,setPage,area,setArea,children,open,setOpen}:{page:Page,setPage:(p:Page)=>void,area:'invoices'|'reviews',setArea:(a:'invoices'|'reviews')=>void,children:ReactNode,open:boolean,setOpen:(v:boolean)=>void}){
  const user=currentUser(); const isDeveloper=user?.role_name==='developer';
