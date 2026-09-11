@@ -10,6 +10,7 @@ from .search_index import ensure_fts5
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
 from .routers.invoices_eye import router as eye_invoice_router
+from .routers.sync_eye import router as sync_router
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.add_middleware(
 app.include_router(legacy_router)
 app.include_router(eye_router)
 app.include_router(eye_invoice_router)
+app.include_router(sync_router)
 
 
 def frontend_dist() -> Path:
