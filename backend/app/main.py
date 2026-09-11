@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from .database import Base, SessionLocal, engine
 from .eye_services import seed_eye_supremo
 from .search_index import ensure_fts5
+from .routers.search_eye import router as search_router
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
 from .routers.invoices_eye import router as eye_invoice_router
@@ -33,6 +34,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(search_router)
 app.include_router(legacy_router)
 app.include_router(eye_router)
 app.include_router(eye_invoice_router)
