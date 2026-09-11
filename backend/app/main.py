@@ -38,12 +38,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DEVELOPER_ONLY_PREFIXES = ("/api/settings", "/api/backups", "/api/logs")
+
 
 @app.middleware("http")
 async def local_auth_guard(request: Request, call_next):
     path = request.url.path
     public_auth = path.startswith("/api/eye/auth/")
-    if path.startswith("/api/eye/") and not public_auth:
+    eye_protected = path.startswith("/api/eye/") and not public_auth
+    legacy_admin = path.startswith(DEVELOPER_ONLY_PREFIXES)
+    if eye_protected or legacy_admin:
         db = SessionLocal()
         try:
             if auth_configured(db):
@@ -51,6 +55,8 @@ async def local_auth_guard(request: Request, call_next):
                 user = session_user(db, token)
                 if not user or not user.active:
                     return JSONResponse({"detail": "Sessione Eye Supremo richiesta"}, status_code=401)
+                if legacy_admin and user.role_name != "developer":
+                    return JSONResponse({"detail": "Solo lo Sviluppatore può usare questa funzione"}, status_code=403)
                 headers = list(request.scope.get("headers", []))
                 headers = [(k, v) for k, v in headers if k.lower() != b"x-eye-role"]
                 headers.append((b"x-eye-role", user.role_name.encode("utf-8")))
