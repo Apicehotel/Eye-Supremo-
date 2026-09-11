@@ -4,7 +4,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import settings
-from .eye_services import invoice_search, invoice_search_summary, review_rankings
+from .eye_services import invoice_search_summary, review_rankings
+from .search_index import invoice_search
 from .models import Hotel, Review, Room
 
 
