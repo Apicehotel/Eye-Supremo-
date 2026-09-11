@@ -1,0 +1,45 @@
+name: Eye Supremo Windows Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'installer/**'
+      - 'scripts/build_windows.ps1'
+      - 'scarica-modelli-ia.bat'
+      - '.github/workflows/windows-installer.yml'
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build portable executable
+        shell: powershell
+        run: ./scripts/build_windows.ps1
+      - name: Install Inno Setup if missing
+        shell: powershell
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+      - name: Compile setup
+        shell: powershell
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EyeSupremo-Windows-Setup
+          path: release/EyeSupremo-Setup.exe
+          if-no-files-found: error
