@@ -26,3 +26,4 @@ Gli specialisti dati possono lavorare in parallelo ma ogni worker apre una sessi
 - `bombolone` e `bombola` non sono equivalenti anche se simili lessicalmente.
 - I prezzi vengono confrontati solo su unità normalizzate compatibili.
 - Se Ollama non risponde, il fallback deterministico continua a funzionare offline.
+- Le PR degli agenti vengono validate da CI e build Windows anche quando puntano alla branch `feat/eye-supremo-foundations`.
