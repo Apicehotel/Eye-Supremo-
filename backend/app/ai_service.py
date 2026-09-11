@@ -8,6 +8,16 @@ from .eye_services import invoice_search_summary, review_rankings
 from .search_index import invoice_search
 from .models import Hotel, Review, Room
 
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "facts": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    },
+    "required": ["answer", "facts", "confidence"],
+}
+
 
 async def eye_ai_answer(db: Session, question: str, role_name: str = "developer", hotel_id: int | None = None) -> dict:
     invoice_records = invoice_search(db, question, role_name=role_name, limit=40)
@@ -36,18 +46,32 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
             status.raise_for_status()
         prompt = (
             "Sei Eye Supremo, assistente gestionale hotel. Rispondi in italiano usando ESCLUSIVAMENTE il JSON fornito. "
-            "Non inventare importi, camere, ranking o recensioni. Per domande di spesa usa invoice_summary.row_total, "
-            "che somma solo le righe pertinenti, non il totale delle fatture. Indica sempre le fonti utili.\n"
+            "Non inventare importi, camere, ranking, produttori, fornitori o recensioni. Per domande di spesa usa invoice_summary.row_total, "
+            "che somma solo le righe pertinenti e non il totale delle fatture. Se il contesto non basta, dillo chiaramente. "
+            "Nel campo facts inserisci solo fatti verificabili presenti nel contesto.\n"
             f"DOMANDA: {question}\nCONTESTO:\n{json.dumps(context, ensure_ascii=False, default=str)}"
         )
         async with httpx.AsyncClient(timeout=60) as client:
             res = await client.post(f"{settings.ollama_url}/api/generate", json={
-                "model": settings.chat_model, "prompt": prompt, "stream": False,
-                "options": {"temperature": 0.1, "num_predict": 550},
+                "model": settings.chat_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": ANSWER_SCHEMA,
+                "options": {"temperature": 0.0, "num_predict": 650},
             })
             res.raise_for_status()
-            answer = res.json().get("response", "")
-        return {"mode": "ollama", "answer": answer, "context": context}
+            raw = res.json().get("response", "{}")
+            structured = json.loads(raw)
+            answer = str(structured.get("answer", "")).strip()
+            if not answer:
+                raise ValueError("Risposta strutturata vuota")
+        return {
+            "mode": "ollama",
+            "answer": answer,
+            "facts": structured.get("facts", []),
+            "confidence": structured.get("confidence", "medium"),
+            "context": context,
+        }
     except Exception:
         summary = context["invoice_summary"]
         if invoice_records:
@@ -56,4 +80,4 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
             answer = f"Ho trovato {len(review_records)} recensioni pertinenti. Ollama non è disponibile: mostro i dati locali senza generazione IA."
         else:
             answer = "Non ho trovato dati pertinenti nell'archivio locale."
-        return {"mode": "deterministic", "answer": answer, "context": context}
+        return {"mode": "deterministic", "answer": answer, "facts": [], "confidence": "high", "context": context}
