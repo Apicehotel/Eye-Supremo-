@@ -15,6 +15,7 @@ from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
 from .routers.invoices_eye import router as eye_invoice_router
 from .routers.reports_eye import router as reports_router
+from .routers.agents_eye import router as agents_router
 from .routers.sync_eye import router as sync_router
 
 
@@ -30,7 +31,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Eye Supremo API", version="2.0.0", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="Eye Supremo API", version="2.1.0", docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:8765"],
@@ -71,6 +72,7 @@ async def local_auth_guard(request: Request, call_next):
 app.include_router(auth_router)
 app.include_router(search_router)
 app.include_router(reports_router)
+app.include_router(agents_router)
 app.include_router(legacy_router)
 app.include_router(eye_router)
 app.include_router(eye_invoice_router)
