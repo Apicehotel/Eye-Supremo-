@@ -36,3 +36,24 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  source-snapshot:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload tested source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: EyeSupremo-Tested-Source
+          path: |
+            backend
+            frontend
+            installer
+            scripts
+            README.md
+            setup.bat
+            start.bat
+            scarica-modelli-ia.bat
+          if-no-files-found: error
+          retention-days: 7
