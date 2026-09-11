@@ -79,6 +79,8 @@ La ricerca parte mentre si digita:
 3. **RapidFuzz** come fallback;
 4. Qwen solo per interpretazione finale.
 
+L'evoluzione prevista per l'archivio massivo usa prodotto canonico, alias/anti-alias, classificazione `Food & Beverage` / `Non Food`, vector search locale e Qwen solo sui casi ambigui. Similarità testuale non equivale a equivalenza semantica: per esempio `bombolone` e `bombola` devono restare separati.
+
 ## Recensioni
 
 Le recensioni sono divise per hotel. Prima si seleziona **Giò / Choco / Brigantino**, poi si caricano i file: tutte le recensioni estratte ereditano l'hotel scelto.
@@ -91,35 +93,24 @@ Formati supportati:
 
 Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
 
-Categorie iniziali:
+## Eye AI e agenti interni
 
-- Camere / Arredi
-- Ristorante
-- Colazione
-- Staff
-- Letti
-- Pulizia
-- Altro
-- Parcheggio
-- Posizione
-- Cuscini
+Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
 
-Le recensioni possono essere collegate alla camera. I temi non riconosciuti alimentano **Temi emergenti** e possono essere approvati dallo Sviluppatore.
+Agenti interni:
 
-## Ranking recensioni
+- `router` — comprende l'intento;
+- `products` — ricerca prodotto, alias e storico;
+- `classifier` — classifica Food & Beverage / Non Food e sottocategorie;
+- `invoices` — dati fattura e fornitore;
+- `prices` — storico, medie, minimi e variazioni;
+- `reviews` — recensioni, camere, servizi e ranking;
+- `verifier` — controlla unità incompatibili e falsi positivi;
+- `answer` — genera la risposta finale breve e verificabile.
 
-Disponibili globalmente per Supremo/Sviluppatore e per singolo hotel:
+Gli specialisti che leggono il database possono lavorare in parallelo, ma **ognuno apre una propria sessione SQLAlchemy/SQLite**: non condividono la stessa sessione tra thread. Somme, medie, ranking e confronti restano deterministici; Qwen viene usato soprattutto per interpretazione e sintesi.
 
-- Top 5 camere migliori;
-- Top 5 camere peggiori;
-- Top 5 servizi migliori;
-- Top 5 servizi peggiori.
-
-## Eye AI
-
-Eye AI usa **Qwen 3 8B** tramite Ollama. Il modello riceve un contesto piccolo formato da righe fattura pertinenti, recensioni, camere e ranking.
-
-La chiamata Ollama usa **structured output JSON Schema**: Qwen deve restituire `answer`, `facts` e `confidence`, riducendo risposte libere/non verificabili. Se Ollama non è disponibile, il sistema ricade sul motore deterministico locale.
+La chiamata Ollama usa **structured output JSON Schema** (`answer`, `facts`, `confidence`). Se Ollama non è disponibile, l'orchestratore ricade sul motore deterministico locale. L'endpoint `/api/eye/agents/registry` espone il registro degli agenti e dei tool consentiti.
 
 Modelli consigliati:
 
@@ -198,6 +189,9 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 - autenticazione locale con PIN e sessione;
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
+- agenti con strumenti dichiarati e limitati;
+- sessioni database isolate per worker concorrente;
+- Qwen non modifica direttamente fatture o prodotti;
 - upload con limiti e nomi generati;
 - hash duplicati;
 - audit log;
@@ -208,4 +202,4 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
 - il login Supabase desktop e refresh automatico della sessione restano necessari per rendere la sync remota completamente trasparente agli utenti;
-- `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo.
+- `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.
