@@ -5,6 +5,7 @@ from .database import Base, SessionLocal, engine
 from .eye_services import seed_eye_supremo
 from .routers.api import router as legacy_router
 from .routers.eye import router as eye_router
+from .routers.invoices_eye import router as eye_invoice_router
 
 
 @asynccontextmanager
@@ -28,3 +29,4 @@ app.add_middleware(
 )
 app.include_router(legacy_router)
 app.include_router(eye_router)
+app.include_router(eye_invoice_router)
