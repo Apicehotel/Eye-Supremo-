@@ -71,3 +71,27 @@ def test_review_txt_import_endpoint(client):
 def test_non_developer_cannot_manage_users(client):
     response = client.get("/api/eye/users", headers={"X-Eye-Role": "level1"})
     assert response.status_code == 403
+
+
+def test_bootstrap_locks_eye_api_and_session_unlocks_it(client):
+    bootstrap = client.post("/api/eye/auth/bootstrap", json={"pin":"123456"})
+    assert bootstrap.status_code == 200
+    token = bootstrap.json()["session"]
+    blocked = client.get("/api/eye/hotels", headers={"X-Eye-Role":"developer"})
+    assert blocked.status_code == 401
+    allowed = client.get("/api/eye/hotels", headers={"X-Eye-Session":token,"X-Eye-Role":"level1"})
+    assert allowed.status_code == 200
+
+
+def test_level_user_cannot_spoof_developer_after_login(client):
+    bootstrap = client.post("/api/eye/auth/bootstrap", json={"pin":"123456"}).json()
+    developer_token = bootstrap["session"]
+    users = client.get("/api/eye/auth/users", headers={"X-Eye-Session":developer_token}).json()
+    level1 = next(u for u in users if u["role_name"] == "level1")
+    changed = client.put(f"/api/eye/auth/users/{level1['id']}/pin", json={"pin":"654321"}, headers={"X-Eye-Session":developer_token})
+    assert changed.status_code == 200
+    login = client.post("/api/eye/auth/login", json={"username":"livello1","pin":"654321"})
+    assert login.status_code == 200
+    level_token = login.json()["session"]
+    protected = client.get("/api/eye/users", headers={"X-Eye-Session":level_token,"X-Eye-Role":"developer"})
+    assert protected.status_code == 403
