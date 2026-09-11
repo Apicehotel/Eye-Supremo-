@@ -22,6 +22,7 @@ create table if not exists public.eye_sync_objects (
 
 create index if not exists eye_sync_objects_hotel_idx on public.eye_sync_objects(hotel_code, entity_type, updated_at desc);
 create index if not exists eye_sync_objects_updated_idx on public.eye_sync_objects(updated_at desc);
+create index if not exists eye_sync_objects_updated_by_idx on public.eye_sync_objects(updated_by);
 alter table public.eye_sync_memberships enable row level security;
 alter table public.eye_sync_objects enable row level security;
 revoke all on public.eye_sync_memberships from anon, authenticated;
