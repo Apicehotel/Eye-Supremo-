@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..models import Hotel, Invoice
+from ..models import Hotel, Invoice, InvoiceMeta
 from ..report_service import historical_product_report
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo reports"])
@@ -18,7 +18,7 @@ def history_product(q: str = Query(min_length=1, max_length=180), db: Session = 
 def invoice_destinations(limit: int = Query(250, ge=1, le=1000), db: Session = Depends(get_db)):
     items = db.scalars(
         select(Invoice)
-        .options(selectinload(Invoice.supplier), selectinload(Invoice.meta).selectinload("hotel"))
+        .options(selectinload(Invoice.supplier), selectinload(Invoice.meta).selectinload(InvoiceMeta.hotel))
         .order_by(Invoice.data.desc(), Invoice.id.desc())
         .limit(limit)
     ).all()
