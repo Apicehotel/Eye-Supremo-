@@ -15,7 +15,7 @@ export default function Warehouse(){
  const [form,setForm]=useState({product_id:'',movement_type:'in',quantity:'1',unit:'pz',unit_cost:'',note:''});
  const [invoiceId,setInvoiceId]=useState('');
  const [thresholds,setThresholds]=useState<Record<number,string>>({});
- const load=async()=>{setError('');try{const [s,m]=await Promise.all([api<StockRow[]>('/warehouse/summary'),api<Movement[]>('/warehouse/movements?limit=100')]);setStocks(s);setMovements(m);setThresholds(Object.fromEntries(s.map(x=>[x.product_id,String(x.min_quantity)])));if(!form.product_id&&s[0])setForm(f=>({...f,product_id:String(s[0].product_id),unit:s[0].unit||'pz'}))}catch(e:any){setError(e.message||'Impossibile caricare il magazzino')}};
+ const load=async()=>{setError('');try{const [s,m]=await Promise.all([api<StockRow[]>('/warehouse/summary'),api<Movement[]>('/warehouse/movements?limit=100')]);setStocks(s);setMovements(m);const next:Record<number,string>={};s.forEach(x=>{next[x.product_id]=String(x.min_quantity)});setThresholds(next);if(!form.product_id&&s[0])setForm(f=>({...f,product_id:String(s[0].product_id),unit:s[0].unit||'pz'}))}catch(e:any){setError(e.message||'Impossibile caricare il magazzino')}};
  useEffect(()=>{load()},[]);
  const lowCount=useMemo(()=>stocks?.filter(x=>x.low_stock).length||0,[stocks]);
  const trackedCount=useMemo(()=>stocks?.filter(x=>x.tracking_enabled).length||0,[stocks]);
