@@ -5,6 +5,7 @@ import {HistoryPage,Invoices,Products,Reports,SimplePage,Suppliers} from './page
 import {AIPage,ImportPage,SettingsPage,SystemPage} from './pages/ImportAISettings';
 import Reviews from './pages/Reviews';
 import InvoiceEditor from './pages/InvoiceEditor';
+import Warehouse from './pages/Warehouse';
 import './pages/InvoiceEditor.css';
 
 export default function App(){
@@ -22,6 +23,7 @@ export default function App(){
   case'invoices':content=<Invoices onOpen={openInvoice}/>;break;
   case'editor':content=<InvoiceEditor invoiceId={editingInvoiceId}/>;break;
   case'products':content=<Products/>;break;
+  case'warehouse':content=<Warehouse/>;break;
   case'suppliers':content=<Suppliers/>;break;
   case'import':content=<ImportPage/>;break;
   case'ai':content=<AIPage/>;break;
