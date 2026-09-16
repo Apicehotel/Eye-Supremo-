@@ -7,6 +7,23 @@ from pypdf import PdfReader
 from .normalization import normalize_text
 
 
+def extract_with_markitdown(path: Path) -> str:
+    """Extract local documents to Markdown without allowing remote I/O.
+
+    MarkItDown is deliberately used only after the upload has been copied to
+    our controlled data directory. The caller still validates the extension
+    and upload size before reaching this function.
+    """
+    try:
+        from markitdown import MarkItDown
+    except ImportError as exc:
+        raise RuntimeError("Dipendenza MarkItDown non installata") from exc
+
+    converter = MarkItDown(enable_plugins=False)
+    result = converter.convert_local(str(path))
+    return (result.markdown or "").strip()
+
+
 def decimal(value, default="0") -> Decimal:
     try:
         return Decimal(str(value or default).replace(".", "").replace(",", ".")) if isinstance(value, str) and "," in value else Decimal(str(value or default))
@@ -40,7 +57,12 @@ def parse_xml(path: Path) -> dict:
 
 
 def parse_pdf(path: Path) -> dict:
-    text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
+    # MarkItDown preserves headings/tables better for the IA pipeline. Keep
+    # pypdf as a fallback so existing local PDF imports remain operational.
+    try:
+        text = extract_with_markitdown(path)
+    except Exception:
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
     if not text.strip():
         return {"supplier": {"ragione_sociale": "Da riconoscere"}, "invoice": {"numero": "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": "0", "valuta": "EUR"}, "rows": [], "confidence": .15, "warnings": ["PDF senza testo: installare Tesseract per l'OCR"], "extracted_text": ""}
     number = re.search(r"(?:fattura|n\.?)[\s:#-]*([A-Z0-9/-]+)", text, re.I)
@@ -48,7 +70,23 @@ def parse_pdf(path: Path) -> dict:
     return {"supplier": {"ragione_sociale": text.splitlines()[0][:180] or "Da verificare"}, "invoice": {"numero": number.group(1) if number else "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": str(decimal(total[-1])) if total else "0", "valuta": "EUR"}, "rows": [], "confidence": .45, "warnings": ["Controllare i campi estratti dal PDF"], "extracted_text": text}
 
 
+def parse_office_document(path: Path) -> dict:
+    """Create a reviewable preview for DOCX/XLSX/PPTX documents.
+
+    Invoice-specific field extraction remains intentionally separate: the
+    preview exposes the Markdown to the deterministic parser/IA layer instead
+    of silently inventing accounting values.
+    """
+    text = extract_with_markitdown(path)
+    if not text:
+        return {"supplier": {"ragione_sociale": "Da riconoscere"}, "invoice": {"numero": "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": "0", "valuta": "EUR"}, "rows": [], "confidence": .1, "warnings": ["Documento senza testo estraibile"], "extracted_text": ""}
+    number = re.search(r"(?:fattura|n\.?)[\s:#-]*([A-Z0-9/-]+)", text, re.I)
+    total = re.findall(r"(?:totale\s+(?:documento|fattura)?)[\s€:]*([\d.,]+)", text, re.I)
+    return {"supplier": {"ragione_sociale": text.splitlines()[0][:180] or "Da verificare"}, "invoice": {"numero": number.group(1) if number else "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": str(decimal(total[-1])) if total else "0", "valuta": "EUR"}, "rows": [], "confidence": .35, "warnings": ["Controllare i campi estratti dal documento", "Le righe contabili richiedono conferma"], "extracted_text": text}
+
+
 def parse_document(path: Path) -> dict:
     if path.suffix.lower() == ".xml": return parse_xml(path)
     if path.suffix.lower() == ".pdf": return parse_pdf(path)
-    raise ValueError("Formato supportato in questa milestone: PDF o XML")
+    if path.suffix.lower() in {".docx", ".xlsx", ".pptx"}: return parse_office_document(path)
+    raise ValueError("Formato non supportato: usare PDF, XML, DOCX, XLSX o PPTX")
