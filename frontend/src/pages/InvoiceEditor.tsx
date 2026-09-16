@@ -6,8 +6,10 @@ type Line={id:string;description:string;qty:number;unit:string;unitPrice:number;
 type Fields={unit:boolean;tax:boolean;notes:boolean};
 type Draft={invoiceId:number|null;number:string;date:string;supplier:string;currency:string;status:string;notes:string;fields:Fields;lines:Line[]};
 type InvoiceDetail={id:number;numero:string;data:string;valuta:string;stato_importazione:string;testo_estratto?:string|null;supplier:{id:number;ragione_sociale:string};rows:Array<{id:number;descrizione_originale:string;descrizione_normalizzata?:string|null;product?:string|null;quantita:number;unita_originale?:string|null;unita_normalizzata?:string|null;prezzo_unitario:number;aliquota_iva?:number|null}>};
+type PdfLayout={brand:string;document_title:string;show_unit:boolean;show_tax:boolean;show_notes:boolean;paper_size:'A4'|'Letter'|'80mm';font_scale:number};
 
 const STORAGE_KEY='eyesupremo.invoice-editor.draft';
+const DEFAULT_LAYOUT:PdfLayout={brand:'EYE SUPREMO',document_title:'FATTURA',show_unit:true,show_tax:true,show_notes:true,paper_size:'A4',font_scale:1};
 const storageKey=(invoiceId:number|null)=>invoiceId?`${STORAGE_KEY}.${invoiceId}`:STORAGE_KEY;
 const freshLine=():Line=>({id:crypto.randomUUID(),description:'',qty:1,unit:'pz',unitPrice:0,tax:22});
 const freshDraft=():Draft=>({invoiceId:null,number:'',date:new Date().toISOString().slice(0,10),supplier:'',currency:'EUR',status:'Bozza',notes:'',fields:{unit:true,tax:true,notes:true},lines:[freshLine()]});
@@ -16,6 +18,7 @@ const fromInvoice=(inv:InvoiceDetail):Draft=>({invoiceId:inv.id,number:inv.numer
 
 export default function InvoiceEditor({invoiceId=null}:{invoiceId?:number|null}){
  const [draft,setDraft]=useState<Draft>(()=>{if(invoiceId)return freshDraft();try{const saved=localStorage.getItem(STORAGE_KEY);return saved?JSON.parse(saved):freshDraft()}catch{return freshDraft()}});
+ const [layout,setLayout]=useState<PdfLayout>(DEFAULT_LAYOUT);
  const [savedAt,setSavedAt]=useState<string>('');
  const [loading,setLoading]=useState(Boolean(invoiceId));
  const [error,setError]=useState('');
@@ -25,6 +28,7 @@ export default function InvoiceEditor({invoiceId=null}:{invoiceId?:number|null})
   setLoading(true);setError('');
   api<InvoiceDetail>(`/invoices/${invoiceId}`).then(inv=>{const serverDraft=fromInvoice(inv);try{const cached=localStorage.getItem(storageKey(invoiceId));setDraft(cached?{...serverDraft,...JSON.parse(cached),invoiceId}:serverDraft)}catch{setDraft(serverDraft)}}).catch(()=>setError('Impossibile caricare la fattura. Verifica che il backend sia attivo e che il documento esista.')).finally(()=>setLoading(false));
  };
+ useEffect(()=>{api<PdfLayout>('/pdf-layout').then(setLayout).catch(()=>setLayout(DEFAULT_LAYOUT))},[]);
  useEffect(()=>{if(invoiceId)loadInvoice();else{try{const saved=localStorage.getItem(STORAGE_KEY);setDraft(saved?JSON.parse(saved):freshDraft())}catch{setDraft(freshDraft())}setLoading(false);setError('')}},[invoiceId]);
  useEffect(()=>{if(!loading)localStorage.setItem(storageKey(invoiceId),JSON.stringify({...draft,invoiceId}))},[draft,invoiceId,loading]);
 
@@ -36,6 +40,7 @@ export default function InvoiceEditor({invoiceId=null}:{invoiceId?:number|null})
  const move=(index:number,delta:number)=>setDraft(d=>{const next=[...d.lines],to=index+delta;if(to<0||to>=next.length)return d;[next[index],next[to]]=[next[to],next[index]];return {...d,lines:next}});
  const save=()=>{localStorage.setItem(storageKey(invoiceId),JSON.stringify({...draft,invoiceId}));setSavedAt(new Date().toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}))};
  const resetFromArchive=()=>{if(invoiceId){localStorage.removeItem(storageKey(invoiceId));loadInvoice()}else{localStorage.removeItem(STORAGE_KEY);setDraft(freshDraft());setSavedAt('')}};
+ const printUnit=draft.fields.unit&&layout.show_unit,printTax=draft.fields.tax&&layout.show_tax,printNotes=draft.fields.notes&&layout.show_notes;
 
  if(loading)return <div className="page invoice-editor-page"><header className="page-head"><div><p className="eyebrow">Editor fattura</p><h1>Caricamento documento…</h1><p>Sto recuperando i dati importati e le righe normalizzate.</p></div></header></div>;
  return <div className="page invoice-editor-page">
@@ -52,7 +57,7 @@ export default function InvoiceEditor({invoiceId=null}:{invoiceId?:number|null})
      <label>Valuta<select value={draft.currency} onChange={e=>patch({currency:e.target.value})}><option>EUR</option><option>USD</option><option>GBP</option></select></label>
      <label>Stato<select value={draft.status} onChange={e=>patch({status:e.target.value})}><option>Bozza</option><option>Da verificare</option><option>Verificata</option><option>Pagata</option><option>confermata</option></select></label>
     </div>
-    <div className="editor-field-toggle"><b>Campi visibili</b><button onClick={()=>patch({fields:{...draft.fields,unit:!draft.fields.unit}})}>{draft.fields.unit?<Eye size={16}/>:<EyeOff size={16}/>}Unità</button><button onClick={()=>patch({fields:{...draft.fields,tax:!draft.fields.tax}})}>{draft.fields.tax?<Eye size={16}/>:<EyeOff size={16}/>}IVA</button><button onClick={()=>patch({fields:{...draft.fields,notes:!draft.fields.notes}})}>{draft.fields.notes?<Eye size={16}/>:<EyeOff size={16}/>}Note</button></div>
+    <div className="editor-field-toggle"><b>Campi visibili in editor</b><button onClick={()=>patch({fields:{...draft.fields,unit:!draft.fields.unit}})}>{draft.fields.unit?<Eye size={16}/>:<EyeOff size={16}/>}Unità</button><button onClick={()=>patch({fields:{...draft.fields,tax:!draft.fields.tax}})}>{draft.fields.tax?<Eye size={16}/>:<EyeOff size={16}/>}IVA</button><button onClick={()=>patch({fields:{...draft.fields,notes:!draft.fields.notes}})}>{draft.fields.notes?<Eye size={16}/>:<EyeOff size={16}/>}Note</button></div>
     <div className="editor-lines-head"><h2>Righe fattura</h2><button className="secondary" onClick={()=>patch({lines:[...draft.lines,freshLine()]})}><Plus size={17}/>Aggiungi riga</button></div>
     <div className="editor-lines">
      {draft.lines.map((line,index)=><div className="editor-line" key={line.id}>
@@ -68,12 +73,12 @@ export default function InvoiceEditor({invoiceId=null}:{invoiceId?:number|null})
     </div>
     {draft.fields.notes&&<label className="editor-notes">Note<textarea rows={4} value={draft.notes} onChange={e=>patch({notes:e.target.value})} placeholder="Note locali o di verifica"/></label>}
    </div>
-   <aside className="invoice-preview">
+   <aside className={`invoice-preview paper-${layout.paper_size.toLowerCase()}`} style={{fontSize:`${layout.font_scale}em`}}>
     <div className="preview-paper">
-     <div className="preview-brand"><b>EYE SUPREMO</b><span>{draft.status}</span></div><h2>FATTURA {draft.number||'—'}</h2><p><b>Fornitore:</b> {draft.supplier||'—'}</p><p><b>Data:</b> {draft.date||'—'}</p>
-     <table><thead><tr><th>Descrizione</th><th>Qtà</th>{draft.fields.unit&&<th>U.M.</th>}<th>Prezzo</th>{draft.fields.tax&&<th>IVA</th>}<th>Totale</th></tr></thead><tbody>{draft.lines.map(l=><tr key={l.id}><td>{l.description||'—'}</td><td>{l.qty}</td>{draft.fields.unit&&<td>{l.unit}</td>}<td>{money(l.unitPrice,draft.currency)}</td>{draft.fields.tax&&<td>{l.tax}%</td>}<td>{money(l.qty*l.unitPrice,draft.currency)}</td></tr>)}</tbody></table>
-     <div className="preview-totals"><span>Imponibile <b>{money(subtotal,draft.currency)}</b></span>{draft.fields.tax&&<span>IVA <b>{money(taxTotal,draft.currency)}</b></span>}<span className="grand-total">Totale <b>{money(total,draft.currency)}</b></span></div>
-     {draft.fields.notes&&draft.notes&&<div className="preview-notes"><b>Note</b><p>{draft.notes}</p></div>}
+     <div className="preview-brand"><b>{layout.brand}</b><span>{draft.status}</span></div><h2>{layout.document_title} {draft.number||'—'}</h2><p><b>Fornitore:</b> {draft.supplier||'—'}</p><p><b>Data:</b> {draft.date||'—'}</p>
+     <table><thead><tr><th>Descrizione</th><th>Qtà</th>{printUnit&&<th>U.M.</th>}<th>Prezzo</th>{printTax&&<th>IVA</th>}<th>Totale</th></tr></thead><tbody>{draft.lines.map(l=><tr key={l.id}><td>{l.description||'—'}</td><td>{l.qty}</td>{printUnit&&<td>{l.unit}</td>}<td>{money(l.unitPrice,draft.currency)}</td>{printTax&&<td>{l.tax}%</td>}<td>{money(l.qty*l.unitPrice,draft.currency)}</td></tr>)}</tbody></table>
+     <div className="preview-totals"><span>Imponibile <b>{money(subtotal,draft.currency)}</b></span>{printTax&&<span>IVA <b>{money(taxTotal,draft.currency)}</b></span>}<span className="grand-total">Totale <b>{money(total,draft.currency)}</b></span></div>
+     {printNotes&&draft.notes&&<div className="preview-notes"><b>Note</b><p>{draft.notes}</p></div>}
     </div>
    </aside>
   </section>
