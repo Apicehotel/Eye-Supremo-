@@ -18,7 +18,7 @@ Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare d
 
 ## Importazione
 
-La pagina Importa accetta PDF e XML. L'XML FatturaPA è letto in modo strutturato; i PDF con testo incorporato sono estratti senza cloud. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
+La pagina Importa accetta PDF, XML, DOCX, XLSX e PPTX. MarkItDown converte i documenti locali in Markdown per l'analisi; l'XML FatturaPA resta letto con il parser strutturato e il PDF mantiene il fallback pypdf. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
 
 ## Unità e prezzi
 
