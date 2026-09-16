@@ -16,6 +16,11 @@ def _signed_quantity(movement: WarehouseMovement) -> Decimal:
     return movement.quantity
 
 
+def _current_stock(db: Session, product_id: int) -> Decimal:
+    movements = db.scalars(select(WarehouseMovement).where(WarehouseMovement.product_id == product_id)).all()
+    return sum((_signed_quantity(x) for x in movements), Decimal("0"))
+
+
 def _serialize_movement(movement: WarehouseMovement, product: Product | None = None):
     return {
         "id": movement.id,
@@ -51,7 +56,7 @@ def warehouse_summary(db: Session = Depends(get_db)):
             "stock": float(stock),
             "min_quantity": float(minimum),
             "low_stock": bool(setting and setting.enabled and stock <= minimum),
-            "tracking_enabled": bool(setting.enabled) if setting else False,
+            "tracking_enabled": bool(movements) or bool(setting and setting.enabled),
             "movement_count": len(movements),
             "latest_unit_cost": float(latest_cost) if latest_cost is not None else None,
         })
@@ -85,6 +90,10 @@ def create_warehouse_movement(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(422, "La quantità deve essere maggiore di zero")
     if movement_type == "adjustment" and quantity == 0:
         raise HTTPException(422, "La rettifica non può essere zero")
+    if movement_type == "out":
+        stock = _current_stock(db, product_id)
+        if quantity > stock:
+            raise HTTPException(409, f"Giacenza insufficiente: disponibili {float(stock):g}")
     unit_cost = payload.get("unit_cost")
     movement = WarehouseMovement(
         product_id=product.id,
