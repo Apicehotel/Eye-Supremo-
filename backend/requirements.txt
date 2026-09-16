@@ -6,6 +6,7 @@ python-multipart==0.0.20
 httpx==0.28.1
 rapidfuzz==3.12.1
 pypdf==5.2.0
+markitdown[pdf,docx,xlsx,pptx]==0.1.7
 pillow==11.1.0
 python-dateutil==2.9.0.post0
 pytest==8.3.4
