@@ -96,7 +96,7 @@ def invoice_detail(invoice_id: int, db: Session = Depends(get_db)):
     return {**serialize_invoice(inv), "testo_estratto": inv.testo_estratto, "rows": [{"id": r.id, "descrizione_originale": r.descrizione_originale, "descrizione_normalizzata": r.descrizione_normalizzata, "product": r.product.nome_canonico if r.product else None, "quantita": float(r.quantita), "unita_originale": r.unita_originale, "unita_normalizzata": r.unita_normalizzata, "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "totale_riga": float(r.totale_riga), "aliquota_iva": float(r.aliquota_iva) if r.aliquota_iva else None, "confidence": float(r.confidence)} for r in inv.rows]}
 
 
-ALLOWED = {".pdf", ".xml", ".jpg", ".jpeg", ".png", ".csv"}
+ALLOWED = {".pdf", ".xml", ".docx", ".xlsx", ".pptx", ".jpg", ".jpeg", ".png", ".csv"}
 
 
 @router.post("/imports/preview")
