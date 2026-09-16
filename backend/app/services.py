@@ -7,7 +7,7 @@ from rapidfuzz import fuzz
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .config import settings
-from .models import AuditLog, Invoice, InvoiceRow, Product, Supplier
+from .models import AuditLog, Invoice, InvoiceRow, InvoiceSnapshot, Product, Supplier
 from .normalization import normalize_text, normalized_price
 
 
@@ -24,17 +24,38 @@ def duplicate_candidates(db: Session, file_hash=None, numero=None, data=None, su
     return list(db.scalars(query.where(or_(*clauses))).all())
 
 
+def snapshot_payload(inv: Invoice, supplier: Supplier, rows: list[dict]) -> dict:
+    return {
+        "invoice": {"id": inv.id, "numero": inv.numero, "data": inv.data.isoformat(), "imponibile": str(inv.imponibile), "iva": str(inv.iva), "totale": str(inv.totale), "valuta": inv.valuta, "file_originale": inv.file_originale, "hash_file": inv.hash_file, "stato_importazione": inv.stato_importazione},
+        "supplier": {"id": supplier.id, "ragione_sociale": supplier.ragione_sociale, "partita_iva": supplier.partita_iva, "codice_fiscale": supplier.codice_fiscale, "indirizzo": supplier.indirizzo, "email": supplier.email, "telefono": supplier.telefono},
+        "rows": rows,
+        "captured_at": datetime.now().isoformat(timespec="seconds"),
+        "schema": 1,
+    }
+
+
 def create_invoice(db: Session, payload):
     data = payload.model_dump(exclude={"rows"})
     inv = Invoice(**data, stato_importazione="confermata")
     db.add(inv); db.flush()
+    snapshot_rows = []
     for row in payload.rows:
         r = row.model_dump()
         r["descrizione_normalizzata"] = r["descrizione_normalizzata"] or normalize_text(r["descrizione_originale"])
         unit, price = normalized_price(Decimal(r["prezzo_unitario"]), Decimal(r["quantita"]), r["unita_originale"])
         db.add(InvoiceRow(invoice_id=inv.id, unita_normalizzata=unit, prezzo_normalizzato=price, **r))
+        snapshot_rows.append({**{k:(str(v) if isinstance(v, Decimal) else v) for k,v in r.items()}, "unita_normalizzata": unit, "prezzo_normalizzato": str(price) if price is not None else None})
+    db.add(InvoiceSnapshot(invoice_id=inv.id, reason="created", snapshot_json=json.dumps(snapshot_payload(inv, db.get(Supplier, inv.supplier_id), snapshot_rows), ensure_ascii=False)))
     audit(db, "invoice.created", f"Fattura {inv.numero} registrata", entity_type="invoice", entity_id=inv.id)
     db.commit(); db.refresh(inv); return inv
+
+
+def ensure_invoice_snapshot(db: Session, inv: Invoice) -> InvoiceSnapshot:
+    existing = db.scalar(select(InvoiceSnapshot).where(InvoiceSnapshot.invoice_id == inv.id).order_by(InvoiceSnapshot.created_at.desc()))
+    if existing: return existing
+    rows = [{"id": r.id, "descrizione_originale": r.descrizione_originale, "descrizione_normalizzata": r.descrizione_normalizzata, "product_id": r.product_id, "quantita": str(r.quantita), "unita_originale": r.unita_originale, "unita_normalizzata": r.unita_normalizzata, "prezzo_unitario": str(r.prezzo_unitario), "prezzo_normalizzato": str(r.prezzo_normalizzato) if r.prezzo_normalizzato is not None else None, "totale_riga": str(r.totale_riga), "aliquota_iva": str(r.aliquota_iva) if r.aliquota_iva is not None else None, "confidence": str(r.confidence)} for r in inv.rows]
+    snap = InvoiceSnapshot(invoice_id=inv.id, reason="legacy_capture", snapshot_json=json.dumps(snapshot_payload(inv, inv.supplier, rows), ensure_ascii=False))
+    db.add(snap); audit(db, "invoice.snapshot", f"Snapshot storico creato per fattura {inv.numero}", entity_type="invoice", entity_id=inv.id); db.commit(); db.refresh(snap); return snap
 
 
 def search_records(db: Session, query: str, limit=20):
@@ -99,3 +120,34 @@ def create_backup() -> Path:
             if path.is_file() and path != target and "backups" not in path.parts:
                 archive.write(path, path.relative_to(settings.data_dir))
     return target
+
+
+def validate_backup(path: Path) -> dict:
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        if "randfatture.db" not in names: raise ValueError("Backup non valido: database mancante")
+        for name in names:
+            resolved = (settings.data_dir / name).resolve()
+            if settings.data_dir.resolve() not in resolved.parents and resolved != settings.data_dir.resolve(): raise ValueError("Backup non valido: percorso non sicuro")
+        return {"files": len(names), "has_database": True, "names": names[:100]}
+
+
+def restore_backup(path: Path) -> dict:
+    info = validate_backup(path)
+    safety = create_backup()
+    staging = settings.data_dir / f"restore-{datetime.now():%Y%m%d-%H%M%S}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(path) as archive: archive.extractall(staging)
+        restored_db = staging / "randfatture.db"
+        if not restored_db.exists() or restored_db.stat().st_size == 0: raise ValueError("Backup non valido: database vuoto")
+        for item in staging.iterdir():
+            target = settings.data_dir / item.name
+            if item.name == "backups": continue
+            if target.exists():
+                if target.is_dir(): shutil.rmtree(target)
+                else: target.unlink()
+            shutil.move(str(item), str(target))
+        return {"ok": True, "safety_backup": safety.name, "files": info["files"], "restart_required": True}
+    finally:
+        if staging.exists(): shutil.rmtree(staging, ignore_errors=True)
