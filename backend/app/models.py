@@ -96,6 +96,27 @@ class InvoiceSnapshot(Base):
     invoice: Mapped[Invoice] = relationship(back_populates="snapshots")
 
 
+class WarehouseMovement(Base):
+    __tablename__ = "warehouse_movements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    invoice_row_id: Mapped[int | None] = mapped_column(ForeignKey("invoice_rows.id", ondelete="SET NULL"), unique=True, index=True)
+    movement_type: Mapped[str] = mapped_column(String(20), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    unit: Mapped[str] = mapped_column(String(20), default="pz")
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    note: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    __table_args__ = (Index("ix_warehouse_product_date", "product_id", "created_at"),)
+
+
+class WarehouseStockSetting(Base):
+    __tablename__ = "warehouse_stock_settings"
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)
+    min_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class ImportJob(Base):
     __tablename__ = "import_jobs"
     id: Mapped[int] = mapped_column(primary_key=True)
