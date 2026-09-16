@@ -63,6 +63,7 @@ class Invoice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
     supplier: Mapped[Supplier] = relationship(back_populates="invoices")
     rows: Mapped[list["InvoiceRow"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
+    snapshots: Mapped[list["InvoiceSnapshot"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
     __table_args__ = (Index("ix_invoice_supplier_date", "supplier_id", "data"),)
 
 
@@ -83,6 +84,16 @@ class InvoiceRow(Base):
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=1)
     invoice: Mapped[Invoice] = relationship(back_populates="rows")
     product: Mapped[Product | None] = relationship()
+
+
+class InvoiceSnapshot(Base):
+    __tablename__ = "invoice_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id", ondelete="CASCADE"), index=True)
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(String(40), default="created")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    invoice: Mapped[Invoice] = relationship(back_populates="snapshots")
 
 
 class ImportJob(Base):
