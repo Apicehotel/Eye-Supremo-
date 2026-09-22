@@ -38,12 +38,18 @@ eye-invoices/apice/xml/2026/07/30ed1ecb27af6bd9_IT03618500403_41sVr.xml
 
 ```env
 RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
-RANDFATTURE_SUPABASE_SERVICE_KEY=...   # service role, solo sul PC
+RANDFATTURE_SUPABASE_SERVICE_KEY=...   # service role, solo sul PC (upload blob)
+RANDFATTURE_SUPABASE_ANON_KEY=...      # opzionale: basta per leggere il catalogo
 RANDFATTURE_SUPABASE_BUCKET=eye-invoices
 RANDFATTURE_SUPABASE_PATH_PREFIX=apice
+RANDFATTURE_SUPABASE_CENTRAL_USERNAME=sviluppatore
+RANDFATTURE_SUPABASE_CENTRAL_PIN=...   # PIN MultiHotel per RPC (non è il PIN locale Eye)
 ```
 
 Senza service key l’app continua con mirror locale `data/supabase_mirror/` (stessi path relativi).
+Con URL + chiave (service o anon) + PIN centrale, la pagina **Catalogo centrale** legge i ~20k metadati via `eye_central_invoice_page`.
+
+All’upload su Supabase, Eye prova anche a registrare la riga in `eye_invoice_files` (richiede la migration).
 
 ## Separazione responsabilità
 

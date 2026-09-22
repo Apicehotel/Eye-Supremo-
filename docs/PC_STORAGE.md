@@ -14,8 +14,11 @@ Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fa
 ```env
 RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
 RANDFATTURE_SUPABASE_SERVICE_KEY=eyJ...   # service role, solo sul PC
+RANDFATTURE_SUPABASE_ANON_KEY=           # opzionale, per catalogo senza service key
 RANDFATTURE_SUPABASE_BUCKET=eye-invoices
 RANDFATTURE_SUPABASE_PATH_PREFIX=apice
+RANDFATTURE_SUPABASE_CENTRAL_USERNAME=sviluppatore
+RANDFATTURE_SUPABASE_CENTRAL_PIN=        # PIN MultiHotel (RPC eye_central_invoice_page)
 ```
 
 Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/test) con gli stessi path relativi.
@@ -28,6 +31,8 @@ Progetto MultiHotel (`ooqlfldcrnkudhgjnied`). Creare il bucket privato `eye-invo
 Path file: `apice/xml|pdf/YYYY/MM/<hash16>_<filename>`.
 
 La service key resta nel backend locale: non esporla nel frontend.
+
+In app: **Catalogo centrale** elenca i metadati MultiHotel (~20k) senza scaricare i blob.
 
 ## Ruoli
 

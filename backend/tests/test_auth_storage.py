@@ -108,3 +108,22 @@ def test_operator_inbox_and_reject(client):
 
     rejected = client.post(f"/api/storage/{upload_id}/reject", headers=headers)
     assert rejected.status_code == 200
+
+
+def test_central_requires_config(client):
+    boot = _bootstrap(client)
+    headers = {"X-Eye-Session": boot["session"]}
+    res = client.get("/api/storage/central", headers=headers)
+    assert res.status_code == 503
+
+
+def test_build_storage_path_convention():
+    from datetime import datetime, timezone
+    from app.storage_service import build_storage_path
+
+    path = build_storage_path(
+        "IT03618500403_41sVr.xml",
+        "30ed1ecb27af6bd9aaaaaaaaaaaaaaaa",
+        datetime(2026, 7, 15, tzinfo=timezone.utc),
+    )
+    assert path == "apice/xml/2026/07/30ed1ecb27af6bd9_IT03618500403_41sVr.xml"
