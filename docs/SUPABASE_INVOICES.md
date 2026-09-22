@@ -38,6 +38,20 @@ Perché così:
 
 ## Come creare la locazione
 
+### Da PowerShell (PC)
+
+1. Compila `.env` con `RANDFATTURE_SUPABASE_URL` e `RANDFATTURE_SUPABASE_SERVICE_KEY`.
+2. (Consigliato) aggiungi anche `RANDFATTURE_SUPABASE_DB_URL` (URI Postgres dal dashboard).
+3. Dalla root del repo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\applica-locazione-supabase.ps1
+```
+
+Lo script crea/verifica il bucket `eye-invoices`. Con `DB_URL` (+ `psql` o Node/`npx`) applica anche la migration SQL; altrimenti copia lo SQL negli appunti per il SQL Editor.
+
+### Da SQL Editor (alternativo)
+
 1. Supabase → MultiHotel → **SQL Editor**
 2. Esegui `supabase/migrations/20260922090000_eye_invoices_storage.sql`
 3. Verifica bucket `eye-invoices` in **Storage**
