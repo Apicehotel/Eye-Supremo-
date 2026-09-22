@@ -2,10 +2,14 @@
 
 RandFatture è un monolite modulare locale-first: React comunica con una API FastAPI su `localhost`; i documenti e SQLite rimangono nella cartella dati locale. I confini REST permettono in futuro di sostituire SQLite con PostgreSQL o collegare RandAI senza accoppiare i moduli.
 
+Vedi anche [PC_STORAGE.md](PC_STORAGE.md) per login PC, ruolo Caricatore e Supabase **solo file**.
+
 ## Moduli
 
+- **Auth locale**: PIN per ruoli (`developer`…`uploader`); il Caricatore vede solo l’upload.
 - **Archivio**: fornitori, fatture, righe, prodotti canonici, alias e categorie.
 - **Importazione**: rilevamento formato → estrazione → parsing → anteprima con confidenza → conferma esplicita.
+- **Storage remoto**: upload file su Supabase Storage (o mirror locale); coda con hash/doppioni prima dell’import.
 - **Analisi**: prezzi normalizzati, storico, dashboard, anomalie e duplicati.
 - **Ricerca**: SQL/FTS5 + fuzzy; Ollama interpreta la domanda solo quando disponibile e riceve esclusivamente record recuperati.
 - **Operazioni**: impostazioni, log di audit e backup ZIP verificabile.

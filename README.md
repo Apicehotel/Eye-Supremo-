@@ -8,9 +8,11 @@ RandFatture è un gestionale locale-first per archiviare fatture aziendali, norm
 - FastAPI + SQLAlchemy 2 per le API REST.
 - SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
 - File e backup nella cartella locale `data` (ignorata da Git).
-- Ollama opzionale su `http://127.0.0.1:11434`.
+- Login locale con PIN; ruolo **Caricatore** solo per upload file.
+- Supabase opzionale **solo come Storage file** (non database fatture).
+- Ollama opzionale (profilo light: `qwen3:4b` + `nomic-embed-text` per PC ~16 GB).
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/PC_STORAGE.md](docs/PC_STORAGE.md). Copia `.env.example` in `.env` per configurare Storage.
 
 ## Requisiti e avvio
 
