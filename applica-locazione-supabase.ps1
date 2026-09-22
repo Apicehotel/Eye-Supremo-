@@ -134,21 +134,19 @@ if (-not $sqlApplied) {
 # --- 3) Verifica indice (REST) ---------------------------------------------
 Write-Host "[3/3] Verifica tabella eye_central_invoice_blobs…"
 try {
-  $probeHeaders = $headers.Clone()
-  $probeHeaders['Accept'] = 'application/json'
-  $probeHeaders['Prefer'] = 'count=exact'
-  $null = Invoke-WebRequest -Method Get `
+  $probe = @{
+    apikey        = $key
+    Authorization = "Bearer $key"
+    Accept        = 'application/json'
+  }
+  Invoke-RestMethod -Method Get `
     -Uri "$url/rest/v1/eye_central_invoice_blobs?select=source_hash&limit=1" `
-    -Headers $probeHeaders
+    -Headers $probe | Out-Null
   Write-Host "      tabella OK (raggiungibile con service role)." -ForegroundColor Green
 } catch {
-  $code = $_.Exception.Response.StatusCode.value__
-  if ($code -eq 404 -or $code -eq PGRST205) {
-    Write-Host "      tabella ancora assente → esegui lo SQL (passo 2)." -ForegroundColor Yellow
-  } else {
-    Write-Host "      risposta: $($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host "      Se hai appena lanciato lo SQL, attendi qualche secondo e rilancia lo script." -ForegroundColor Yellow
-  }
+  $msg = $_.Exception.Message
+  Write-Host "      non verificata: $msg" -ForegroundColor Yellow
+  Write-Host "      Se manca la tabella, esegui lo SQL (passo 2) e rilancia." -ForegroundColor Yellow
 }
 
 Write-Host ""
