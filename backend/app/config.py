@@ -10,10 +10,11 @@ class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11434"
     chat_model: str = "qwen3:4b"
     embedding_model: str = "nomic-embed-text"
-    # Supabase = solo Storage file (non database fatture)
+    # Supabase MultiHotel = solo Storage file (blob XML/PDF)
     supabase_url: str | None = None
     supabase_service_key: str | None = None
-    supabase_bucket: str = "invoices"
+    supabase_bucket: str = "eye-invoices"
+    supabase_path_prefix: str = "apice"
     model_config = SettingsConfigDict(env_prefix="RANDFATTURE_", env_file=".env", extra="ignore")
 
     @property

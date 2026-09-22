@@ -79,10 +79,8 @@ async def upload_invoice(
     digest = hashlib.sha256(content).hexdigest()
     matches = duplicate_candidates(db, file_hash=digest)
     status = "possible_duplicate" if matches else "pending_review"
-    day = datetime.now().strftime("%Y/%m/%d")
-    safe_name = f"{secrets.token_hex(12)}{suffix}"
-    storage_path = f"{day}/{safe_name}"
     original = Path(file.filename or "documento").name
+    storage_path = storage_service.build_storage_path(original, digest)
 
     try:
         backend = storage_service.upload_bytes(storage_path, content, file.content_type)

@@ -42,6 +42,10 @@ def test_bootstrap_and_uploader_sees_only_own_flow(client, db):
     body = uploaded.json()
     assert body["backend"] == "local_mirror"
     assert body["upload"]["status"] == "pending_review"
+    path = body["upload"]["storage_path"]
+    assert path.startswith("apice/xml/")
+    assert path.endswith("_fattura.xml")
+    assert "/xml/" in path
 
     inbox_uploader = client.get("/api/storage/inbox", headers=up_headers).json()
     assert len(inbox_uploader) == 1

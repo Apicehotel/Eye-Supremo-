@@ -12,16 +12,22 @@ Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fa
 ## Variabili `.env`
 
 ```env
-RANDFATTURE_SUPABASE_URL=https://xxxx.supabase.co
+RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
 RANDFATTURE_SUPABASE_SERVICE_KEY=eyJ...   # service role, solo sul PC
-RANDFATTURE_SUPABASE_BUCKET=invoices
+RANDFATTURE_SUPABASE_BUCKET=eye-invoices
+RANDFATTURE_SUPABASE_PATH_PREFIX=apice
 ```
 
-Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/test).
+Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/test) con gli stessi path relativi.
 
 ## Bucket Supabase
 
-Creare un bucket privato `invoices`. La service key resta nel backend locale: non esporla nel frontend.
+Progetto MultiHotel (`ooqlfldcrnkudhgjnied`). Creare il bucket privato `eye-invoices` eseguendo
+`supabase/migrations/20260922090000_eye_invoices_storage.sql` (vedi `docs/SUPABASE_INVOICES.md`).
+
+Path file: `apice/xml|pdf/YYYY/MM/<hash16>_<filename>`.
+
+La service key resta nel backend locale: non esporla nel frontend.
 
 ## Ruoli
 
