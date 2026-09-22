@@ -43,9 +43,10 @@ def test_bootstrap_and_uploader_sees_only_own_flow(client, db):
     assert body["backend"] == "local_mirror"
     assert body["upload"]["status"] == "pending_review"
     path = body["upload"]["storage_path"]
-    assert path.startswith("apice/xml/")
-    assert path.endswith("_fattura.xml")
-    assert "/xml/" in path
+    assert path.startswith("invoices/xml/")
+    assert path.endswith(".xml")
+    assert body["upload"]["file_hash"][:2] in path
+    assert body["upload"]["file_hash"] in path
 
     inbox_uploader = client.get("/api/storage/inbox", headers=up_headers).json()
     assert len(inbox_uploader) == 1
@@ -118,12 +119,11 @@ def test_central_requires_config(client):
 
 
 def test_build_storage_path_convention():
-    from datetime import datetime, timezone
-    from app.storage_service import build_storage_path
+    from app.storage_service import build_storage_path, resolve_blob_path
 
-    path = build_storage_path(
-        "IT03618500403_41sVr.xml",
-        "30ed1ecb27af6bd9aaaaaaaaaaaaaaaa",
-        datetime(2026, 7, 15, tzinfo=timezone.utc),
-    )
-    assert path == "apice/xml/2026/07/30ed1ecb27af6bd9_IT03618500403_41sVr.xml"
+    digest = "30ed1ecb27af6bd9757a864c3c51d0077942865462dbb16f431fd75c40c8f6a9"
+    path = build_storage_path("IT03618500403_41sVr.xml", digest)
+    assert path == f"invoices/xml/30/{digest}.xml"
+    assert resolve_blob_path(digest, "xml") == path
+    pdf = build_storage_path("fattura.pdf", digest)
+    assert pdf == f"invoices/pdf/30/{digest}.pdf"

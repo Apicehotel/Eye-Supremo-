@@ -16,7 +16,7 @@ RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
 RANDFATTURE_SUPABASE_SERVICE_KEY=eyJ...   # service role, solo sul PC
 RANDFATTURE_SUPABASE_ANON_KEY=           # opzionale, per catalogo senza service key
 RANDFATTURE_SUPABASE_BUCKET=eye-invoices
-RANDFATTURE_SUPABASE_PATH_PREFIX=apice
+RANDFATTURE_SUPABASE_STORAGE_ROOT=invoices
 RANDFATTURE_SUPABASE_CENTRAL_USERNAME=sviluppatore
 RANDFATTURE_SUPABASE_CENTRAL_PIN=        # PIN MultiHotel (RPC eye_central_invoice_page)
 ```
@@ -25,10 +25,10 @@ Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/te
 
 ## Bucket Supabase
 
-Progetto MultiHotel (`ooqlfldcrnkudhgjnied`). Creare il bucket privato `eye-invoices` eseguendo
+Progetto MultiHotel (`ooqlfldcrnkudhgjnied`). Creare bucket + indice eseguendo
 `supabase/migrations/20260922090000_eye_invoices_storage.sql` (vedi `docs/SUPABASE_INVOICES.md`).
 
-Path file: `apice/xml|pdf/YYYY/MM/<hash16>_<filename>`.
+Path content-addressable: `invoices/{xml|pdf|doc}/{hh}/{sha256}{ext}`.
 
 La service key resta nel backend locale: non esporla nel frontend.
 

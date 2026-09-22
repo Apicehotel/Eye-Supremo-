@@ -1,15 +1,17 @@
--- Eye Supremo · locazione fatture su progetto Supabase MultiHotel
--- Progetto: ooqlfldcrnkudhgjnied (Apice MultiHotel)
--- Applicare da Supabase SQL Editor (o CLI) con ruolo service/postgres.
+-- Eye Supremo · locazione blob fatture su MultiHotel (ooqlfldcrnkudhgjnied)
 --
--- Locazione file:
---   bucket: eye-invoices  (privato)
---   path:   apice/xml/YYYY/MM/<hash16>_<filename>
---           apice/pdf/YYYY/MM/<hash16>_<filename>
+-- Allineata all'ecosistema già presente:
+--   metadati  → public.eye_central_invoices (+ RPC eye_central_invoice_page)
+--   righe     → public.eye_central_invoice_rows
+--   blob      → Storage bucket eye-invoices + public.eye_central_invoice_blobs
 --
--- I ~20k metadati restano accessibili via RPC eye_central_invoice_page.
--- Questo bucket è la cassaforte dei blob XML/PDF originali.
+-- Path content-addressable (stabile, dedup naturale con x-upsert):
+--   invoices/{xml|pdf|doc}/{hh}/{source_hash}{ext}
+--   es. invoices/xml/30/30ed1ecb27af6bd9….xml
+--
+-- Applicare da SQL Editor (service/postgres). Idempotente.
 
+-- 1) Bucket privato ----------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'eye-invoices',
@@ -30,34 +32,80 @@ set public = false,
     file_size_limit = excluded.file_size_limit,
     allowed_mime_types = excluded.allowed_mime_types;
 
--- Indice di locazione: collega hash/filename Eye central → path Storage
-create table if not exists public.eye_invoice_files (
-  id uuid primary key default gen_random_uuid(),
-  source_hash text not null,
+-- 2) Indice blob (naming eye_central_* , PK = source_hash come i metadati) ---
+-- Se esiste la vecchia bozza eye_invoice_files, la migriamo e la rimuoviamo.
+create table if not exists public.eye_central_invoice_blobs (
+  source_hash text primary key,
   source_filename text not null,
+  kind text not null check (kind in ('xml', 'pdf', 'doc')),
   storage_bucket text not null default 'eye-invoices',
   storage_path text not null,
   content_type text,
   size_bytes bigint,
-  invoice_id uuid,
-  uploaded_by uuid references auth.users(id) on delete set null,
+  invoice_id uuid,              -- opzionale: id in eye_central_invoices
+  uploaded_by text,             -- username Eye PC (non auth.users)
   created_at timestamptz not null default now(),
-  unique (storage_bucket, storage_path),
-  unique (source_hash)
+  updated_at timestamptz not null default now(),
+  constraint eye_central_invoice_blobs_path_uidx unique (storage_bucket, storage_path)
 );
 
-create index if not exists eye_invoice_files_filename_idx
-  on public.eye_invoice_files (source_filename);
+-- Migrazione soft dalla bozza precedente (se presente)
+do $$
+begin
+  if to_regclass('public.eye_invoice_files') is not null then
+    insert into public.eye_central_invoice_blobs as b (
+      source_hash, source_filename, kind, storage_bucket, storage_path,
+      content_type, size_bytes, invoice_id, uploaded_by, created_at, updated_at
+    )
+    select
+      f.source_hash,
+      f.source_filename,
+      case
+        when f.storage_path like '%/xml/%' or f.source_filename ilike '%.xml%' then 'xml'
+        when f.storage_path like '%/pdf/%' or f.source_filename ilike '%.pdf' then 'pdf'
+        else 'doc'
+      end,
+      coalesce(f.storage_bucket, 'eye-invoices'),
+      f.storage_path,
+      f.content_type,
+      f.size_bytes,
+      f.invoice_id,
+      null,
+      coalesce(f.created_at, now()),
+      now()
+    from public.eye_invoice_files f
+    on conflict (source_hash) do update
+      set source_filename = excluded.source_filename,
+          kind = excluded.kind,
+          storage_bucket = excluded.storage_bucket,
+          storage_path = excluded.storage_path,
+          content_type = excluded.content_type,
+          size_bytes = excluded.size_bytes,
+          invoice_id = coalesce(excluded.invoice_id, b.invoice_id),
+          updated_at = now();
+    drop table public.eye_invoice_files;
+  end if;
+end $$;
 
-create index if not exists eye_invoice_files_created_idx
-  on public.eye_invoice_files (created_at desc);
+create index if not exists eye_central_invoice_blobs_filename_idx
+  on public.eye_central_invoice_blobs (source_filename);
 
-alter table public.eye_invoice_files enable row level security;
+create index if not exists eye_central_invoice_blobs_kind_created_idx
+  on public.eye_central_invoice_blobs (kind, created_at desc);
 
-revoke all on public.eye_invoice_files from anon, authenticated;
-grant select, insert, update on public.eye_invoice_files to service_role;
+create index if not exists eye_central_invoice_blobs_invoice_id_idx
+  on public.eye_central_invoice_blobs (invoice_id)
+  where invoice_id is not null;
 
--- Storage: solo service_role (PC Eye Supremo con service key). Niente accesso anon.
+alter table public.eye_central_invoice_blobs enable row level security;
+
+revoke all on public.eye_central_invoice_blobs from anon, authenticated;
+grant select, insert, update on public.eye_central_invoice_blobs to service_role;
+
+comment on table public.eye_central_invoice_blobs is
+  'Locazione blob XML/PDF. Join metadati: eye_central_invoices.source_hash = eye_central_invoice_blobs.source_hash';
+
+-- 3) Storage policies: solo service_role (PC Eye con service key) ------------
 drop policy if exists eye_invoices_service_all on storage.objects;
 create policy eye_invoices_service_all
 on storage.objects
@@ -66,5 +114,5 @@ to service_role
 using (bucket_id = 'eye-invoices')
 with check (bucket_id = 'eye-invoices');
 
-comment on table public.eye_invoice_files is
-  'Locazione blob fatture Eye Supremo nel bucket eye-invoices (XML/PDF).';
+-- Rimuovi eventuale policy della bozza se rinominata uguale
+drop policy if exists eye_invoice_files_service_all on storage.objects;

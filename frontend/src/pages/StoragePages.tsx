@@ -8,7 +8,8 @@ type StorageStatus = {
   central_configured?: boolean;
   mode: string;
   bucket: string;
-  path_prefix?: string;
+  storage_root?: string;
+  index_table?: string;
   location_example?: string;
   message?: string | null;
 };
@@ -130,7 +131,7 @@ export function UploaderPage() {
               Storage: <b>{status.mode}</b>
               {status.message
                 ? ` — ${status.message}`
-                : ` · bucket ${status.bucket}${status.path_prefix ? ` · ${status.path_prefix}/…` : ''}`}
+                : ` · ${status.bucket}/${status.storage_root || 'invoices'}/…`}
             </div>
           )}
           {error && <div className="error">{error}</div>}
@@ -318,7 +319,7 @@ export function CentralCatalogPage() {
     <>
       <PageHeader
         title="Catalogo centrale"
-        subtitle="Metadati MultiHotel (~20k) via eye_central_invoice_page. I blob stanno nel bucket eye-invoices."
+        subtitle="Metadati MultiHotel (~20k). I blob stanno in eye-invoices/invoices/{kind}/{hh}/{hash}."
       >
         <button className="secondary-btn" onClick={() => refresh(offset)}>
           <RefreshCw size={16} /> Aggiorna

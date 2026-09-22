@@ -1,61 +1,73 @@
-"""Supabase Storage adapter: file only. Falls back to local mirror when not configured.
+"""Supabase adapter: blob Storage + catalogo eye_central_* (MultiHotel).
 
-Locazione MultiHotel:
-  bucket: eye-invoices
-  path:   {prefix}/{kind}/YYYY/MM/<hash16>_<filename>
-  default prefix: apice
+Struttura ottimale
+------------------
+Metadati (già in MultiHotel):
+  eye_central_invoices / eye_central_invoice_rows
+  RPC eye_central_invoice_page(p_username, p_pin, p_limit, p_offset, p_since)
 
-Metadati centrali (~20k): RPC eye_central_invoice_page
-  params: p_username, p_pin, p_limit, p_offset, p_since
-Indice blob: public.eye_invoice_files (hash → path)
+Blob (nuovi):
+  bucket  eye-invoices  (privato, solo service_role)
+  path    invoices/{xml|pdf|doc}/{hh}/{source_hash}{ext}
+          es. invoices/xml/30/30ed1ecb27af6bd9….xml
+  indice  public.eye_central_invoice_blobs  (PK = source_hash)
+
+Il path è content-addressable: stesso hash → stesso path → dedup con x-upsert.
 """
 from __future__ import annotations
 
 import mimetypes
-import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 from .config import settings
 
-_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+Kind = Literal["xml", "pdf", "doc"]
 
 
-def build_storage_path(original_name: str, file_hash: str, when: datetime | None = None) -> str:
-    """Path relativo nel bucket: apice/xml|pdf|doc/YYYY/MM/<hash16>_<safe_name>."""
+def detect_kind(original_name: str) -> Kind:
     suffix = Path(original_name).suffix.lower()
-    if suffix in {".xml", ".xml.p7m"}:
-        kind = "xml"
-    elif suffix == ".pdf":
-        kind = "pdf"
-    else:
-        kind = "doc"
-    stamp = when or datetime.now(timezone.utc)
-    safe = _SAFE_NAME.sub("_", Path(original_name).name).strip("._") or "documento"
-    if len(safe) > 120:
-        stem = Path(safe).stem[:100]
-        safe = f"{stem}{Path(safe).suffix}"
-    hash16 = (file_hash or "")[:16] or "unknown"
-    prefix = (settings.supabase_path_prefix or "apice").strip("/")
-    return f"{prefix}/{kind}/{stamp:%Y}/{stamp:%m}/{hash16}_{safe}"
+    if suffix in {".xml", ".p7m"} or original_name.lower().endswith(".xml.p7m"):
+        return "xml"
+    if suffix == ".pdf":
+        return "pdf"
+    return "doc"
+
+
+def build_storage_path(original_name: str, file_hash: str, when=None) -> str:  # noqa: ARG001
+    """Path stabile content-addressable: invoices/{kind}/{hh}/{hash}{ext}.
+
+    `when` è ignorato (tenuto per compatibilità chiamate): la data non entra nel path
+    così un re-upload dello stesso file non produce una seconda locazione.
+    """
+    digest = (file_hash or "").strip().lower()
+    if len(digest) < 16:
+        raise ValueError("file_hash troppo corto per path content-addressable")
+    kind = detect_kind(original_name)
+    ext = Path(original_name).suffix.lower()
+    if original_name.lower().endswith(".xml.p7m"):
+        ext = ".xml.p7m"
+    elif not ext:
+        ext = {"xml": ".xml", "pdf": ".pdf", "doc": ""}.get(kind, "")
+    shard = digest[:2]
+    root = (settings.supabase_storage_root or "invoices").strip("/")
+    return f"{root}/{kind}/{shard}/{digest}{ext}"
 
 
 def storage_status() -> dict:
+    root = (settings.supabase_storage_root or "invoices").strip("/")
     return {
         "configured": settings.storage_configured,
         "central_configured": settings.central_configured,
         "mode": "supabase" if settings.storage_configured else "local_mirror",
         "project_ref": "ooqlfldcrnkudhgjnied",
         "bucket": settings.supabase_bucket,
-        "path_prefix": settings.supabase_path_prefix,
+        "storage_root": root,
+        "index_table": "eye_central_invoice_blobs",
         "url": settings.supabase_url,
-        "location_example": (
-            f"{settings.supabase_bucket}/{settings.supabase_path_prefix}"
-            "/xml/YYYY/MM/<hash16>_<file>.xml"
-        ),
+        "location_example": f"{settings.supabase_bucket}/{root}/xml/30/<sha256>.xml",
         "message": None
         if settings.storage_configured
         else "Supabase non configurato: i file restano nel mirror locale data/supabase_mirror",
@@ -77,10 +89,7 @@ def _rest_key() -> str:
 
 def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     key = _rest_key()
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "apikey": key,
-    }
+    headers = {"Authorization": f"Bearer {key}", "apikey": key}
     if extra:
         headers.update(extra)
     return headers
@@ -99,8 +108,9 @@ def upload_bytes(
     *,
     file_hash: str | None = None,
     original_name: str | None = None,
+    uploaded_by: str | None = None,
 ) -> dict:
-    """Upload file to Supabase Storage or local mirror. Returns backend metadata."""
+    """Upload su Supabase Storage o mirror locale; indicizza in eye_central_invoice_blobs."""
     ctype = content_type or mimetypes.guess_type(storage_path)[0] or "application/octet-stream"
     if not settings.storage_configured:
         target = _mirror_root() / storage_path
@@ -116,24 +126,28 @@ def upload_bytes(
         }
 
     url = _rest_url(f"storage/v1/object/{settings.supabase_bucket}/{storage_path}")
-    headers = {**_headers(), "Content-Type": ctype, "x-upsert": "true"}
     with httpx.Client(timeout=60) as client:
-        res = client.post(url, content=content, headers=headers)
+        res = client.post(
+            url,
+            content=content,
+            headers={**_headers(), "Content-Type": ctype, "x-upsert": "true"},
+        )
         res.raise_for_status()
 
     indexed = False
     index_error = None
     if file_hash:
         try:
-            register_invoice_file(
+            register_invoice_blob(
                 source_hash=file_hash,
                 source_filename=original_name or Path(storage_path).name,
                 storage_path=storage_path,
                 content_type=ctype,
                 size_bytes=len(content),
+                uploaded_by=uploaded_by,
             )
             indexed = True
-        except Exception as exc:  # noqa: BLE001 — indice best-effort finché la migration non è applicata
+        except Exception as exc:  # noqa: BLE001 — best-effort finché la migration non è applicata
             index_error = str(exc)
 
     out: dict[str, Any] = {
@@ -163,7 +177,7 @@ def download_bytes(storage_path: str) -> bytes:
         return res.content
 
 
-def register_invoice_file(
+def register_invoice_blob(
     *,
     source_hash: str,
     source_filename: str,
@@ -171,20 +185,24 @@ def register_invoice_file(
     content_type: str | None,
     size_bytes: int,
     invoice_id: str | None = None,
+    uploaded_by: str | None = None,
 ) -> dict | None:
-    """Scrive/aggiorna la riga in public.eye_invoice_files (richiede migration applicata)."""
+    """Upsert su public.eye_central_invoice_blobs (PK = source_hash)."""
     if not settings.storage_configured:
         return None
+    digest = source_hash.strip().lower()
     row = {
-        "source_hash": source_hash,
+        "source_hash": digest,
         "source_filename": source_filename,
+        "kind": detect_kind(source_filename),
         "storage_bucket": settings.supabase_bucket,
         "storage_path": storage_path,
         "content_type": content_type,
         "size_bytes": size_bytes,
         "invoice_id": invoice_id,
+        "uploaded_by": uploaded_by,
     }
-    url = _rest_url("rest/v1/eye_invoice_files?on_conflict=source_hash")
+    url = _rest_url("rest/v1/eye_central_invoice_blobs?on_conflict=source_hash")
     headers = _headers(
         {
             "Content-Type": "application/json",
@@ -198,6 +216,10 @@ def register_invoice_file(
         return data[0] if isinstance(data, list) and data else data
 
 
+# Alias retrocompatibile
+register_invoice_file = register_invoice_blob
+
+
 def central_invoice_page(
     *,
     limit: int = 50,
@@ -206,7 +228,7 @@ def central_invoice_page(
     username: str | None = None,
     pin: str | None = None,
 ) -> dict:
-    """Legge il catalogo metadati MultiHotel via RPC eye_central_invoice_page."""
+    """Catalogo metadati MultiHotel via RPC eye_central_invoice_page."""
     if not settings.central_configured and not (settings.supabase_url and settings.supabase_rest_key and pin):
         raise RuntimeError(
             "Catalogo centrale non configurato: servono URL + chiave Supabase e PIN centrale"
@@ -226,3 +248,13 @@ def central_invoice_page(
     if not isinstance(data, dict):
         return {"items": data, "limit": body["p_limit"], "offset": body["p_offset"], "total": None}
     return data
+
+
+def resolve_blob_path(source_hash: str, kind: Kind | None = None, ext: str = ".xml") -> str:
+    """Calcola il path atteso per un hash noto (senza I/O)."""
+    name = f"{source_hash}{ext}"
+    if kind == "pdf":
+        name = f"{source_hash}.pdf"
+    elif kind == "doc":
+        name = source_hash
+    return build_storage_path(name, source_hash)

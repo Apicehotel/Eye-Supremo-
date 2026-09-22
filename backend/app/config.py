@@ -10,13 +10,14 @@ class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11434"
     chat_model: str = "qwen3:4b"
     embedding_model: str = "nomic-embed-text"
-    # Supabase MultiHotel = Storage file + catalogo metadati centrale
+    # Supabase MultiHotel = Storage blob + catalogo metadati eye_central_*
     supabase_url: str | None = None
     supabase_service_key: str | None = None
     supabase_anon_key: str | None = None
     supabase_bucket: str = "eye-invoices"
-    supabase_path_prefix: str = "apice"
-    # Credenziali RPC eye_central_invoice_page (PIN MultiHotel, non il PIN locale Eye)
+    # Radice path content-addressable: invoices/{kind}/{hh}/{hash}{ext}
+    supabase_storage_root: str = "invoices"
+    # Credenziali RPC eye_central_invoice_page (PIN MultiHotel, non PIN locale Eye)
     supabase_central_username: str = "sviluppatore"
     supabase_central_pin: str | None = None
     model_config = SettingsConfigDict(env_prefix="RANDFATTURE_", env_file=".env", extra="ignore")

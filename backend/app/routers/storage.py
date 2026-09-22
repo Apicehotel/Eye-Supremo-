@@ -109,6 +109,7 @@ async def upload_invoice(
             file.content_type,
             file_hash=digest,
             original_name=original,
+            uploaded_by=user.username,
         )
     except Exception as exc:
         raise HTTPException(502, f"Upload Storage fallito: {exc}") from exc
