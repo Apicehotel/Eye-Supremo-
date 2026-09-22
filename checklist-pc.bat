@@ -25,5 +25,8 @@ echo.
 echo Avvio consigliato: setup.bat  (una volta) poi start.bat
 echo Doc: docs\PC_STORAGE.md
 echo.
+echo Locazione Supabase (bucket + SQL):
+echo   powershell -ExecutionPolicy Bypass -File .\applica-locazione-supabase.ps1
+echo.
 pause
 endlocal
