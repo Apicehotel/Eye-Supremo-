@@ -21,6 +21,24 @@ type RemoteItem = {
   note?: string | null;
 };
 
+const STATUS_IT: Record<string, string> = {
+  pending_review: 'Da verificare',
+  possible_duplicate: 'Possibile duplicato',
+  in_preview: 'In anteprima',
+  imported: 'Importata',
+  rejected: 'Scartata',
+};
+
+function statusLabel(status: string) {
+  return STATUS_IT[status] || status;
+}
+
+function statusTone(status: string): 'ok' | 'warn' | 'danger' | undefined {
+  if (status === 'possible_duplicate' || status === 'in_preview') return 'warn';
+  if (status === 'rejected') return 'danger';
+  return 'ok';
+}
+
 export function UploaderPage() {
   const input = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<StorageStatus>();
@@ -134,7 +152,7 @@ export function UploaderPage() {
                         <b>{x.original_name}</b>
                       </td>
                       <td>
-                        <Status tone={x.status === 'possible_duplicate' ? 'warn' : 'ok'}>{x.status}</Status>
+                        <Status tone={statusTone(x.status)}>{statusLabel(x.status)}</Status>
                       </td>
                       <td>{new Date(x.created_at).toLocaleString('it-IT')}</td>
                     </tr>
@@ -231,7 +249,7 @@ export function StorageInboxPage({onPreview}: {onPreview?: (jobPreview: any) => 
                       <code style={{fontSize: 10}}>{x.file_hash.slice(0, 12)}…</code>
                     </td>
                     <td>
-                      <Status tone={x.status === 'possible_duplicate' ? 'warn' : 'ok'}>{x.status}</Status>
+                      <Status tone={statusTone(x.status)}>{statusLabel(x.status)}</Status>
                     </td>
                     <td>{x.duplicate_invoice_ids?.length ? `#${x.duplicate_invoice_ids.join(', #')}` : '—'}</td>
                     <td>{new Date(x.created_at).toLocaleString('it-IT')}</td>
