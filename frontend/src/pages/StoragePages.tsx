@@ -1,12 +1,16 @@
 import {useEffect, useRef, useState} from 'react';
-import {CloudUpload, FileCheck2, RefreshCw} from 'lucide-react';
+import {CloudUpload, FileCheck2, RefreshCw, Library} from 'lucide-react';
 import {api} from '../lib/api';
 import {Empty, PageHeader, Status} from '../components/UI';
 
 type StorageStatus = {
   configured: boolean;
+  central_configured?: boolean;
   mode: string;
   bucket: string;
+  storage_root?: string;
+  index_table?: string;
+  location_example?: string;
   message?: string | null;
 };
 
@@ -19,6 +23,24 @@ type RemoteItem = {
   duplicate_invoice_ids: number[];
   created_at: string;
   note?: string | null;
+};
+
+type CentralItem = {
+  id: string;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  supplier_name?: string | null;
+  total?: number | null;
+  currency?: string | null;
+  source_filename?: string | null;
+  source_hash?: string | null;
+};
+
+type CentralPage = {
+  items: CentralItem[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 const STATUS_IT: Record<string, string> = {
@@ -125,7 +147,9 @@ export function UploaderPage() {
           {status && (
             <div className={status.configured ? 'success' : 'warning'} style={{marginTop: 16, maxWidth: '90%'}}>
               Storage: <b>{status.mode}</b>
-              {status.message ? ` — ${status.message}` : ` · bucket ${status.bucket}`}
+              {status.message
+                ? ` — ${status.message}`
+                : ` · ${status.bucket}/${status.storage_root || 'invoices'}/…`}
             </div>
           )}
           {error && <div className="error">{error}</div>}
@@ -275,6 +299,122 @@ export function StorageInboxPage({onPreview}: {onPreview?: (jobPreview: any) => 
           </div>
         ) : (
           <Empty title="Coda vuota" text="Quando il Caricatore invia file, appariranno qui per la verifica." />
+        )}
+      </section>
+    </>
+  );
+}
+
+export function CentralCatalogPage() {
+  const [data, setData] = useState<CentralPage>();
+  const [status, setStatus] = useState<StorageStatus>();
+  const [error, setError] = useState('');
+  const [offset, setOffset] = useState(0);
+  const limit = 50;
+
+  async function refresh(nextOffset = offset) {
+    setError('');
+    try {
+      setStatus(await api<StorageStatus>('/storage/status'));
+      const page = await api<CentralPage>(`/storage/central?limit=${limit}&offset=${nextOffset}`);
+      setData(page);
+      setOffset(page.offset ?? nextOffset);
+    } catch (e: any) {
+      setData(undefined);
+      setError(e.message || 'Catalogo centrale non disponibile');
+    }
+  }
+
+  useEffect(() => {
+    refresh(0);
+  }, []);
+
+  const total = data?.total ?? 0;
+  const canPrev = offset > 0;
+  const canNext = data ? offset + limit < total : false;
+
+  return (
+    <>
+      <PageHeader
+        title="Catalogo centrale"
+        subtitle="Metadati MultiHotel (~20k). I blob stanno in eye-invoices/invoices/{kind}/{hh}/{hash}."
+      >
+        <button className="secondary-btn" onClick={() => refresh(offset)}>
+          <RefreshCw size={16} /> Aggiorna
+        </button>
+      </PageHeader>
+      {status && (
+        <div className={status.central_configured ? 'success' : 'warning'} style={{margin: '0 0 12px'}}>
+          {status.central_configured
+            ? `Connesso · ${status.location_example || status.bucket}`
+            : 'Configura URL + chiave Supabase e RANDFATTURE_SUPABASE_CENTRAL_PIN nel .env'}
+        </div>
+      )}
+      {error && <div className="error" style={{marginBottom: 12}}>{error}</div>}
+      <section className="panel list-panel">
+        {data?.items?.length ? (
+          <>
+            <div
+              className="panel-title"
+              style={{padding: 17, margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12}}
+            >
+              <h2>
+                <Library size={18} style={{verticalAlign: 'middle', marginRight: 8}} />
+                {total.toLocaleString('it-IT')} fatture centrali
+              </h2>
+              <div style={{display: 'flex', gap: 8}}>
+                <button
+                  className="secondary-btn"
+                  disabled={!canPrev}
+                  onClick={() => refresh(Math.max(0, offset - limit))}
+                >
+                  Precedenti
+                </button>
+                <button className="secondary-btn" disabled={!canNext} onClick={() => refresh(offset + limit)}>
+                  Successive
+                </button>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Numero</th>
+                    <th>Fornitore</th>
+                    <th>Totale</th>
+                    <th>File</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((x) => (
+                    <tr key={x.id}>
+                      <td>{x.invoice_date || '—'}</td>
+                      <td>
+                        <b>{x.invoice_number || '—'}</b>
+                      </td>
+                      <td>{x.supplier_name || '—'}</td>
+                      <td>
+                        {x.total != null
+                          ? `${Number(x.total).toLocaleString('it-IT', {minimumFractionDigits: 2})} ${x.currency || 'EUR'}`
+                          : '—'}
+                      </td>
+                      <td>
+                        <code style={{fontSize: 11}}>{x.source_filename || '—'}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          !error && (
+            <Empty
+              title="Nessun risultato"
+              text="Il catalogo centrale risponderà quando le credenziali MultiHotel sono impostate."
+            />
+          )
         )}
       </section>
     </>

@@ -2,13 +2,13 @@ import {ReactNode} from 'react';
 import {
   LayoutDashboard, FileText, FilePenLine, Package, Boxes, Users, Upload, Sparkles,
   ChartNoAxesCombined, History, TriangleAlert, Tags, Settings, MonitorCog, Menu, X,
-  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut,
+  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut, Library,
 } from 'lucide-react';
 import {clearAuth, AuthUser} from '../lib/api';
 
 export type Page =
   | 'dashboard' | 'invoices' | 'editor' | 'products' | 'warehouse' | 'suppliers'
-  | 'import' | 'storage-inbox' | 'ai' | 'reports' | 'history' | 'anomalies'
+  | 'import' | 'storage-inbox' | 'central-catalog' | 'ai' | 'reports' | 'history' | 'anomalies'
   | 'categories' | 'settings' | 'system' | 'uploader';
 
 const nav: [Page, string, any][] = [
@@ -20,6 +20,7 @@ const nav: [Page, string, any][] = [
   ['suppliers', 'Fornitori', Users],
   ['import', 'Importa', Upload],
   ['storage-inbox', 'Coda Storage', Inbox],
+  ['central-catalog', 'Catalogo centrale', Library],
   ['ai', 'Ricerca IA', Sparkles],
   ['reports', 'Report', ChartNoAxesCombined],
   ['history', 'Storico', History],

@@ -42,6 +42,11 @@ def test_bootstrap_and_uploader_sees_only_own_flow(client, db):
     body = uploaded.json()
     assert body["backend"] == "local_mirror"
     assert body["upload"]["status"] == "pending_review"
+    path = body["upload"]["storage_path"]
+    assert path.startswith("invoices/xml/")
+    assert path.endswith(".xml")
+    assert body["upload"]["file_hash"][:2] in path
+    assert body["upload"]["file_hash"] in path
 
     inbox_uploader = client.get("/api/storage/inbox", headers=up_headers).json()
     assert len(inbox_uploader) == 1
@@ -104,3 +109,21 @@ def test_operator_inbox_and_reject(client):
 
     rejected = client.post(f"/api/storage/{upload_id}/reject", headers=headers)
     assert rejected.status_code == 200
+
+
+def test_central_requires_config(client):
+    boot = _bootstrap(client)
+    headers = {"X-Eye-Session": boot["session"]}
+    res = client.get("/api/storage/central", headers=headers)
+    assert res.status_code == 503
+
+
+def test_build_storage_path_convention():
+    from app.storage_service import build_storage_path, resolve_blob_path
+
+    digest = "30ed1ecb27af6bd9757a864c3c51d0077942865462dbb16f431fd75c40c8f6a9"
+    path = build_storage_path("IT03618500403_41sVr.xml", digest)
+    assert path == f"invoices/xml/30/{digest}.xml"
+    assert resolve_blob_path(digest, "xml") == path
+    pdf = build_storage_path("fattura.pdf", digest)
+    assert pdf == f"invoices/pdf/30/{digest}.pdf"

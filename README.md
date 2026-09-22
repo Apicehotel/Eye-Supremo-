@@ -12,7 +12,7 @@ RandFatture è un gestionale locale-first per archiviare fatture aziendali, norm
 - Supabase opzionale **solo come Storage file** (non database fatture).
 - Ollama opzionale (profilo light: `qwen3:4b` + `nomic-embed-text` per PC ~16 GB).
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/PC_STORAGE.md](docs/PC_STORAGE.md). Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
+Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PC_STORAGE.md](docs/PC_STORAGE.md) e [docs/SUPABASE_INVOICES.md](docs/SUPABASE_INVOICES.md) (bucket `eye-invoices` su MultiHotel). Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
 
 ## Requisiti e avvio
 

@@ -5,11 +5,12 @@ Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fa
 ## Checklist go-live (PC hotel)
 
 1. Copia `.env.example` → `.env` nella root del progetto (o accanto all’eseguibile).
-2. Su Supabase: crea bucket privato `invoices` (Storage → New bucket → Private).
+2. Su Supabase MultiHotel: esegui `supabase/migrations/20260922090000_eye_invoices_storage.sql` (crea bucket `eye-invoices` + indice).
 3. Incolla in `.env`:
    - `RANDFATTURE_SUPABASE_URL`
    - `RANDFATTURE_SUPABASE_SERVICE_KEY` (service role, **mai** nel browser)
-   - `RANDFATTURE_SUPABASE_BUCKET=invoices`
+   - `RANDFATTURE_SUPABASE_BUCKET=eye-invoices`
+   - (opzionale catalogo) `RANDFATTURE_SUPABASE_ANON_KEY` + `RANDFATTURE_SUPABASE_CENTRAL_PIN`
 4. Avvia l’app (`start.bat` o backend+frontend).
 5. Primo accesso: PIN **Sviluppatore**.
 6. Impostazioni → PIN per **Caricatore** (e altri utenti).
@@ -29,10 +30,27 @@ Senza `.env` Supabase l’app resta operativa con mirror locale `data/supabase_m
 ## Variabili `.env`
 
 ```env
-RANDFATTURE_SUPABASE_URL=https://xxxx.supabase.co
+RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
 RANDFATTURE_SUPABASE_SERVICE_KEY=eyJ...   # service role, solo sul PC
-RANDFATTURE_SUPABASE_BUCKET=invoices
+RANDFATTURE_SUPABASE_ANON_KEY=           # opzionale, per catalogo senza service key
+RANDFATTURE_SUPABASE_BUCKET=eye-invoices
+RANDFATTURE_SUPABASE_STORAGE_ROOT=invoices
+RANDFATTURE_SUPABASE_CENTRAL_USERNAME=sviluppatore
+RANDFATTURE_SUPABASE_CENTRAL_PIN=        # PIN MultiHotel (RPC eye_central_invoice_page)
 ```
+
+Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/test) con gli stessi path relativi.
+
+## Bucket Supabase
+
+Progetto MultiHotel (`ooqlfldcrnkudhgjnied`). Creare bucket + indice eseguendo
+`supabase/migrations/20260922090000_eye_invoices_storage.sql` (vedi `docs/SUPABASE_INVOICES.md`).
+
+Path content-addressable: `invoices/{xml|pdf|doc}/{hh}/{sha256}{ext}`.
+
+La service key resta nel backend locale: non esporla nel frontend.
+
+In app: **Catalogo centrale** elenca i metadati MultiHotel (~20k) senza scaricare i blob.
 
 ## Ruoli
 

@@ -62,6 +62,26 @@ def status(user: UserProfile = Depends(current_user)):
     return storage_service.storage_status()
 
 
+@router.get("/central")
+def central_catalog(
+    limit: int = 50,
+    offset: int = 0,
+    user: UserProfile = Depends(current_user),
+):
+    """Catalogo metadati MultiHotel (~20k) via RPC eye_central_invoice_page."""
+    _guard(user, OPERATOR_ROLES)
+    if not settings.central_configured:
+        raise HTTPException(
+            503,
+            "Catalogo centrale non configurato: imposta RANDFATTURE_SUPABASE_URL, "
+            "chiave (service o anon) e RANDFATTURE_SUPABASE_CENTRAL_PIN",
+        )
+    try:
+        return storage_service.central_invoice_page(limit=limit, offset=offset)
+    except Exception as exc:
+        raise HTTPException(502, f"Catalogo centrale non raggiungibile: {exc}") from exc
+
+
 @router.post("/upload")
 async def upload_invoice(
     file: UploadFile = File(...),
@@ -79,13 +99,18 @@ async def upload_invoice(
     digest = hashlib.sha256(content).hexdigest()
     matches = duplicate_candidates(db, file_hash=digest)
     status = "possible_duplicate" if matches else "pending_review"
-    day = datetime.now().strftime("%Y/%m/%d")
-    safe_name = f"{secrets.token_hex(12)}{suffix}"
-    storage_path = f"{day}/{safe_name}"
     original = Path(file.filename or "documento").name
+    storage_path = storage_service.build_storage_path(original, digest)
 
     try:
-        backend = storage_service.upload_bytes(storage_path, content, file.content_type)
+        backend = storage_service.upload_bytes(
+            storage_path,
+            content,
+            file.content_type,
+            file_hash=digest,
+            original_name=original,
+            uploaded_by=user.username,
+        )
     except Exception as exc:
         raise HTTPException(502, f"Upload Storage fallito: {exc}") from exc
 
@@ -113,6 +138,8 @@ async def upload_invoice(
     return {
         "ok": True,
         "backend": backend.get("backend"),
+        "indexed": backend.get("indexed"),
+        "index_error": backend.get("index_error"),
         "upload": _serialize(item),
         "duplicate_matches": [i.id for i in matches],
     }

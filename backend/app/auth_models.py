@@ -41,7 +41,8 @@ class RemoteUpload(Base):
     __tablename__ = "remote_uploads"
     id: Mapped[int] = mapped_column(primary_key=True)
     original_name: Mapped[str] = mapped_column(String(300))
-    storage_path: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+    # Stesso path content-addressable per hash identici (più tentativi → stessa locazione blob)
+    storage_path: Mapped[str] = mapped_column(String(500), index=True)
     file_hash: Mapped[str] = mapped_column(String(64), index=True)
     size_bytes: Mapped[int] = mapped_column(default=0)
     content_type: Mapped[str | None] = mapped_column(String(120))
