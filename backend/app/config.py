@@ -1,10 +1,14 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Repo root (…/Eye-Supremo-): config vive in backend/app/
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _REPO_ROOT / ".env"
+
 
 class Settings(BaseSettings):
     app_name: str = "RandFatture"
-    data_dir: Path = Path(__file__).resolve().parents[2] / "data"
+    data_dir: Path = _REPO_ROOT / "data"
     max_upload_mb: int = 30
     # Profilo light per PC ~16 GB RAM
     ollama_url: str = "http://127.0.0.1:11434"
@@ -20,7 +24,12 @@ class Settings(BaseSettings):
     # Credenziali RPC eye_central_invoice_page (PIN MultiHotel, non PIN locale Eye)
     supabase_central_username: str = "sviluppatore"
     supabase_central_pin: str | None = None
-    model_config = SettingsConfigDict(env_prefix="RANDFATTURE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="RANDFATTURE_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @property
     def database_url(self) -> str:
