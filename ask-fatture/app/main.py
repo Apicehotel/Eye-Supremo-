@@ -7,10 +7,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .ask import ask, ollama_ready
-from .catalog import supplier_to_dict, upsert_product, upsert_supplier
+from .catalog import product_pack, set_product_pack, supplier_to_dict, upsert_product, upsert_supplier
 from .config import settings
 from .db import db, dump_sconti, init_db
 from .import_xml import parse_fatturapa
+from .normalize import normalize_line
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -50,6 +51,14 @@ class SupplierUpdate(BaseModel):
     pec: str | None = None
     note: str | None = None
     sconti: list[ScontoIn] | None = None
+
+
+class ProductPackUpdate(BaseModel):
+    """Contenuto pezzo/confezione noto in cucina (es. bombolone = 200 g)."""
+    contenuto: float = Field(gt=0)
+    unita: str = Field(min_length=1, max_length=20)  # g, kg, etti, ml, cl, lt, l
+    note: str | None = None
+    updated_by: str | None = Field(default="cucina", max_length=80)
 
 
 @app.get("/api/health")
@@ -116,6 +125,18 @@ async def import_invoice(file: UploadFile = File(...)):
                 row.get("descrizione_norm"),
                 row.get("unita_normalizzata") or row.get("unita"),
             )
+            product = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+            pack = product_pack(product)
+            # Se il XML non ha i grammi ma a catalogo sì, ricalcola la normalizzazione
+            if pack and not row.get("contenuto_base"):
+                row = normalize_line(
+                    description=row["descrizione"],
+                    quantita=row.get("quantita"),
+                    unita=row.get("unita"),
+                    prezzo_unitario=row.get("prezzo_unitario"),
+                    totale_riga=row.get("totale_riga"),
+                    known_pack=pack,
+                )
             conn.execute(
                 """INSERT INTO lines(
                      invoice_id, product_id, descrizione, descrizione_norm, quantita, unita,
@@ -279,6 +300,27 @@ def get_product(product_id: int):
             (product_id,),
         ).fetchall()
     return {"product": dict(product), "history": [dict(h) for h in history]}
+
+
+@app.put("/api/products/{product_id}/pack")
+def update_product_pack(product_id: int, payload: ProductPackUpdate):
+    """Riona/cucina inserisce i grammi (o litri) del pezzo: vale per tutti su quel prodotto."""
+    with db() as conn:
+        product = conn.execute("SELECT id FROM products WHERE id=?", (product_id,)).fetchone()
+        if not product:
+            raise HTTPException(404, "Prodotto non trovato")
+        try:
+            result = set_product_pack(
+                conn,
+                product_id,
+                contenuto=payload.contenuto,
+                unita=payload.unita,
+                note=payload.note,
+                updated_by=payload.updated_by,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    return result
 
 
 @app.post("/api/ask")

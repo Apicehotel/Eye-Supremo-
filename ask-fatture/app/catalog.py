@@ -84,6 +84,74 @@ def upsert_product(conn, nome: str, nome_norm: str | None, unita_base: str | Non
     return int(cur.lastrowid)
 
 
+def product_pack(row) -> dict | None:
+    if not row:
+        return None
+    contenuto = row["pack_contenuto"] if "pack_contenuto" in row.keys() else None
+    unita = row["pack_unita"] if "pack_unita" in row.keys() else None
+    if contenuto is None or not unita:
+        return None
+    return {"contenuto": float(contenuto), "unita": str(unita)}
+
+
+def set_product_pack(
+    conn,
+    product_id: int,
+    *,
+    contenuto: float,
+    unita: str,
+    note: str | None = None,
+    updated_by: str | None = None,
+) -> dict:
+    from .normalize import lookup_unit, normalize_line
+
+    base, factor = lookup_unit(unita)
+    if not base or base not in {"kg", "l"}:
+        raise ValueError("Unità pack non valida: usa g, kg, etti, ml, cl, lt, l")
+    if contenuto <= 0:
+        raise ValueError("Contenuto pack deve essere > 0")
+
+    conn.execute(
+        """UPDATE products
+           SET pack_contenuto=?, pack_unita=?, pack_note=?, pack_updated_by=?,
+               unita_base=COALESCE(unita_base, ?)
+           WHERE id=?""",
+        (contenuto, unita.strip().lower(), note, updated_by or "cucina", base, product_id),
+    )
+
+    # Ricalcola tutte le righe di questo prodotto con il pack noto
+    lines = conn.execute(
+        "SELECT id, descrizione, quantita, unita, prezzo_unitario, totale_riga FROM lines WHERE product_id=?",
+        (product_id,),
+    ).fetchall()
+    pack = {"contenuto": contenuto, "unita": unita}
+    updated = 0
+    for line in lines:
+        norm = normalize_line(
+            description=line["descrizione"],
+            quantita=line["quantita"],
+            unita=line["unita"],
+            prezzo_unitario=line["prezzo_unitario"],
+            totale_riga=line["totale_riga"],
+            known_pack=pack,
+        )
+        conn.execute(
+            """UPDATE lines
+               SET unita_normalizzata=?, prezzo_normalizzato=?, contenuto_base=?
+               WHERE id=?""",
+            (
+                norm["unita_normalizzata"],
+                norm["prezzo_normalizzato"],
+                norm["contenuto_base"],
+                line["id"],
+            ),
+        )
+        updated += 1
+
+    row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+    return {"product": dict(row), "lines_updated": updated, "pack_base": float(contenuto) * float(factor), "base": base}
+
+
 def supplier_to_dict(row) -> dict:
     d = dict(row)
     d["sconti"] = parse_sconti(d.pop("sconti_json", None))

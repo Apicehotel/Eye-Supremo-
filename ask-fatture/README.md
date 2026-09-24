@@ -5,13 +5,14 @@ Programmino **separato** da Eye Supremo / RandAI.
 Serve a:
 1. Importare fatture (XML FatturaPA)
 2. **Catalogare** per **fornitore** (ragione sociale, nome commerciale, P.IVA, CF, indirizzo, scontistiche) e per **prodotto**
+   - Su ogni prodotto, chi conosce la merce (es. Riona) può inserire il **pack** (es. bombolone = 200 g): vale per tutti e ricalcola i prezzi
 3. **Scartare il rumore** (carburante, sconti a riga, bollo, CONAI, trasporto…)
-3. Salvare **prezzo unitario** (come in fattura) e **prezzo normalizzato** confrontabile:
+4. Salvare **prezzo unitario** (come in fattura) e **prezzo normalizzato** confrontabile:
    - peso: conf 50g a 2€ → **40 €/kg**; bombolone 3kg a 30€ → **10 €/kg**
    - litri: bottiglia 1,5L a 1,50€ → **1 €/l**; 0,002 €/ml → **2 €/l**; UM `LT` resta **€/l**
    - solo pezzo (senza kg/l in descrizione): normalizzato = **prezzo unitario €/pz**
-4. Chiedere in italiano cose tipo *«quanto pago il latte?»*, *«dove lo pago meno?»*
-5. Rispondere **solo** con i dati utili, via **Ollama locale**
+5. Chiedere in italiano cose tipo *«quanto pago il latte?»*, *«dove lo pago meno?»*
+6. Rispondere **solo** con i dati utili, via **Ollama locale**
 
 Niente cloud, niente RandAI, niente magazzino Eye.
 

@@ -143,34 +143,57 @@ def normalize_line(
     unita: str | None,
     prezzo_unitario: float | None,
     totale_riga: float | None = None,
+    known_pack: dict | None = None,
 ) -> dict:
     """
     Calcola prezzo dichiarato (unitario in fattura) e prezzo normalizzato confrontabile.
 
     Regole (peso e litri allo stesso modo):
     - UM g/kg → €/kg; UM ml/cl/dl/lt/l → €/l
-      (es. 0,45 €/g → 450 €/kg; 0,002 €/ml → 2 €/l).
-    - UM pz/conf + contenuto in descrizione (50g, 3kg, 1,5L, 75cl):
+    - UM pz/conf + contenuto in descrizione OPPURE pack noto a catalogo (inserito da Riona/cucina):
       prezzo_normalizzato = prezzo_unitario / contenuto_in_base
-      (es. 2 € conf 50g → 40 €/kg; 1,5 € bottiglia 1,5L → 1 €/l).
     - Solo pezzo senza contenuto: normalizzato = prezzo_unitario in €/pz.
+
+    known_pack: {"contenuto": 50, "unita": "g"} oppure già {"contenuto_base": 0.05, "base": "kg"}
     """
     noise = is_noise_line(description)
     qty = _dec(quantita) or Decimal("1")
     price = _dec(prezzo_unitario)
     um_base, um_factor = lookup_unit(unita)
     content_qty, content_base, content_in_base = extract_content(description)
+    pack_source = "descrizione" if content_in_base else None
+
+    # Pack manuale da catalogo prodotto (se la fattura non dice i grammi/litri del pezzo)
+    if content_in_base is None and known_pack:
+        if known_pack.get("contenuto_base") and known_pack.get("base"):
+            content_in_base = _dec(known_pack["contenuto_base"])
+            content_base = known_pack.get("base")
+            content_qty = _dec(known_pack.get("contenuto")) or content_in_base
+            pack_source = "catalogo"
+        elif known_pack.get("contenuto") and known_pack.get("unita"):
+            content_qty = _dec(known_pack["contenuto"])
+            content_base, factor = lookup_unit(str(known_pack["unita"]))
+            if content_qty is not None and content_base and factor:
+                content_in_base = content_qty * factor
+                pack_source = "catalogo"
+
     piece_units = {"pz", "confezione", "scatola"}
 
     prezzo_norm: Decimal | None = None
     unita_norm: str | None = um_base
     note = ""
+    pezzi_stimati: float | None = None
 
     if price is not None and um_base in {"kg", "l"} and um_factor != 0:
-        # Prezzo unitario già per g/kg/ml/lt → porta a €/kg o €/l
         prezzo_norm = price / um_factor
         unita_norm = um_base
         note = f"unitario {unita or um_base} → €/{um_base}"
+        # Se conosciamo il pezzo (es. bombolone 200g) e la riga è in kg, stima i pezzi
+        if content_in_base and content_in_base > 0 and content_base == um_base:
+            # qty è in unità di fattura (es. 40 kg); porta a base
+            qty_base = qty * um_factor
+            pezzi_stimati = float(qty_base / content_in_base)
+            note += f" · ~{pezzi_stimati:.0f} pezzi da pack"
     elif (
         price is not None
         and content_in_base
@@ -178,15 +201,13 @@ def normalize_line(
         and content_base in {"kg", "l"}
         and (um_base in piece_units or um_base is None or um_base not in {"kg", "l"})
     ):
-        # Prezzo unitario a pezzo/conf con contenuto (kg o litri) in descrizione
         prezzo_norm = price / content_in_base
         unita_norm = content_base
-        note = f"unitario/pz su pack {content_qty} → €/{content_base}"
+        note = f"unitario/pz su pack ({pack_source}) → €/{content_base}"
     elif price is not None and (um_base in piece_units or um_base is None):
-        # Prezzo unitario a pezzo, senza peso/volume ricavabile
         prezzo_norm = price
         unita_norm = "pz"
-        note = "prezzo unitario €/pz"
+        note = "prezzo unitario €/pz (pack sconosciuto: inseriscilo a catalogo)"
     elif price is not None:
         prezzo_norm = price
         unita_norm = um_base or (unita.lower() if unita else "pz")
@@ -201,6 +222,8 @@ def normalize_line(
         "prezzo_unitario": float(price) if price is not None else None,
         "prezzo_normalizzato": float(prezzo_norm) if prezzo_norm is not None else None,
         "contenuto_base": float(content_in_base) if content_in_base is not None else None,
+        "pezzi_stimati": pezzi_stimati,
+        "pack_source": pack_source,
         "totale_riga": totale_riga,
         "is_noise": noise,
         "norm_note": note,
