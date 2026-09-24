@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo === Eye / RandFatture · checklist PC ===
+echo === Eye Supremo · checklist PC ===
 echo.
 
 if not exist ".env" (

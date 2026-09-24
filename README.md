@@ -1,6 +1,6 @@
-# RandFatture
+# Eye Supremo
 
-RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
+Eye Supremo è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi, gestire recensioni multi-hotel e interrogare lo storico con Ollama. Continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
 
 > **Ask Fatture** (cartella `ask-fatture/`, v0.3.0) è incluso nell’**installer unico** `EyeSupremo-Setup.exe` insieme a Eye Supremo: import XML, catalogo fornitori/prodotti, pack **Chili / Litri / Pezzi**, domande con `qwen3:8b` locale. Non usa RandAI.
 
@@ -9,9 +9,9 @@ RandFatture è un gestionale locale-first per archiviare fatture aziendali, norm
 - React + TypeScript + Vite per l'interfaccia responsive.
 - FastAPI + SQLAlchemy 2 per le API REST.
 - SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
-- File e backup nella cartella locale `data` (ignorata da Git).
+- File e backup nella cartella locale `data` (ignorata da Git) o `%LOCALAPPDATA%\EyeSupremo` con l’exe.
 - Login locale con PIN; ruolo **Caricatore** solo per upload file.
-- Supabase opzionale **solo come Storage file** (non database fatture).
+- Supabase opzionale **solo come Storage file** + catalogo centrale MultiHotel (non database fatture PC).
 - Ollama opzionale (profilo light: `qwen3:4b` + `nomic-embed-text` per PC ~16 GB).
 
 Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PC_STORAGE.md](docs/PC_STORAGE.md), [docs/SUPABASE_INVOICES.md](docs/SUPABASE_INVOICES.md) (bucket `eye-invoices` su MultiHotel) e [docs/SUPABASE_REVIEWS.md](docs/SUPABASE_REVIEWS.md) (`eye_central_reviews`). Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
@@ -28,7 +28,7 @@ Un solo installer per **Eye Supremo + Ask Fatture**:
 powershell -ExecutionPolicy Bypass -File .\scripts\build_suite.ps1
 ```
 
-Oppure in due passi:
+Oppure i passi singoli:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
 ```
 
-Produce `release\EyeSupremo-Setup.exe` (v1.4.1) con:
+Produce `release\EyeSupremo-Setup.exe` (v1.4.2) con:
 
 - `EyeSupremo.exe` — gestionale (dati in `%LOCALAPPDATA%\EyeSupremo`)
 - `AskFatture.exe` — domande/catalogo/pack Chili·Litri·Pezzi (dati in `%LOCALAPPDATA%\AskFatture`)
@@ -50,13 +50,18 @@ Serve **Microsoft Edge WebView2**. CI: `windows-installer.yml` (smoke headless d
 ### Aggiornamenti sui PC (senza girarli a mano)
 
 1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe`  
-   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.4.0`).
+   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.4.2`).
+   Download: https://github.com/Apicehotel/Eye-Supremo-/releases/latest
 2. Su ogni PC, in **Impostazioni → Aggiornamenti**:
    - **Controlla ora** / **Scarica e installa**, oppure
    - attiva **Installa automaticamente**.
 3. L’installer aggiorna entrambi i programmi; i dati restano nelle cartelle LocalAppData.
 
 Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` non basta).
+
+## Variabili ambiente
+
+Le variabili restano con prefisso `RANDFATTURE_` per compatibilità con i `.env` già in produzione (es. `RANDFATTURE_SUPABASE_URL`). Il nome prodotto mostrato in UI è **Eye Supremo**.
 
 ## Importazione
 
@@ -68,11 +73,11 @@ Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/
 
 ## Ollama
 
-Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. RandAI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
+Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. Eye AI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
 
 ## Backup e test
 
-Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups`.
+Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups` (o `%LOCALAPPDATA%\EyeSupremo\backups`).
 
 ```powershell
 cd backend

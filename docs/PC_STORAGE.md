@@ -1,6 +1,6 @@
 # PC-only · Supabase Storage (solo file)
 
-Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fatture: è solo lo **Storage** dei file caricati.
+Momentaneamente Eye Supremo resta sul **PC**. Supabase non è il database fatture: è solo lo **Storage** dei file caricati.
 
 ## Checklist go-live (PC hotel)
 

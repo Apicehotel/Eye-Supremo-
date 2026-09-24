@@ -83,7 +83,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
       <div className="auth-screen">
         <div className="auth-card">
           <ShieldCheck />
-          <h1>RandFatture</h1>
+          <h1>Eye Supremo</h1>
           <p>Avvio sicurezza locale…</p>
         </div>
       </div>
@@ -96,7 +96,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <LockKeyhole size={38} />
-        <h1>RandFatture</h1>
+        <h1>Eye Supremo</h1>
         {configured ? (
           <>
             <p>Accedi al profilo locale sul PC.</p>

@@ -21,7 +21,7 @@ def _env_files() -> tuple[str, ...]:
 
 
 class Settings(BaseSettings):
-    app_name: str = "RandFatture"
+    app_name: str = "Eye Supremo"
     data_dir: Path = default_data_dir()
     max_upload_mb: int = 30
     # Profilo light per PC ~16 GB RAM

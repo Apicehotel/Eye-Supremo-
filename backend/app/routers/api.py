@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api")
 def health():
     from ..version import APP_VERSION
 
-    return {"status": "ok", "app": "RandFatture", "version": APP_VERSION}
+    return {"status": "ok", "app": "Eye Supremo", "version": APP_VERSION}
 
 
 @router.get("/dashboard")

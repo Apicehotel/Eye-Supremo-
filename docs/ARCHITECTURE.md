@@ -1,6 +1,6 @@
-# Architettura RandFatture
+# Architettura Eye Supremo
 
-RandFatture è un monolite modulare locale-first: React comunica con una API FastAPI su `localhost`; i documenti e SQLite rimangono nella cartella dati locale. I confini REST permettono in futuro di sostituire SQLite con PostgreSQL o collegare RandAI senza accoppiare i moduli.
+Eye Supremo è un monolite modulare locale-first: React comunica con una API FastAPI su `localhost`; i documenti e SQLite rimangono nella cartella dati locale. I confini REST permettono in futuro di sostituire SQLite con PostgreSQL o collegare RandAI senza accoppiare i moduli.
 
 Vedi anche [PC_STORAGE.md](PC_STORAGE.md) per login PC, ruolo Caricatore e Supabase **solo file**.
 
