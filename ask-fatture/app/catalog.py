@@ -115,7 +115,6 @@ def set_product_pack(
     # UI cucina: Chili / Litri / Pezzi — se arriva g/ml ecc. converti in chili/litri
     store_unit = {"kg": "chili", "l": "litri", "pz": "pezzi"}[base]
     store_qty = float(Decimal(str(contenuto)) * factor)
-    store_factor = Decimal("1")
 
     conn.execute(
         """UPDATE products
