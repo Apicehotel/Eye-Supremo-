@@ -13,9 +13,9 @@ Niente cloud, niente RandAI, niente magazzino Eye.
 
 | Modello | Peso circa | Perché |
 |---------|------------|--------|
-| **`qwen3:1.7b`** (default) | ~1,4 GB | Veloce, multilingua (italiano ok), buon compromesso 2025–26 |
-| `qwen3:0.6b` | ~0,5 GB | Ancora più veloce, risposte più grezze |
-| `qwen3:4b` | ~2,5 GB | Più preciso se il PC ha ~16 GB RAM |
+| **`qwen3:8b`** (default) | ~5 GB | Più preciso su italiano e confronti prezzo; ancora locale e veloce su PC moderni |
+| `qwen3:4b` | ~2,5 GB | Compromesso se la RAM è ~8–12 GB |
+| `qwen3:1.7b` | ~1,4 GB | Massimo snappy / PC più deboli |
 
 Cambia modello in Impostazioni nell’app o con variabile `ASKFATTURE_MODEL`.
 

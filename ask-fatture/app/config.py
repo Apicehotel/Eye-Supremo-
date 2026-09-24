@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     app_name: str = "Ask Fatture"
     data_dir: Path = default_data_dir()
     ollama_url: str = "http://127.0.0.1:11434"
-    # Piccolo e veloce; italiano decente. Alternative: qwen3:0.6b | qwen3:4b
-    model: str = "qwen3:1.7b"
+    # Più capace: ~5 GB. Alternative: qwen3:4b (più leggero) | qwen3:1.7b (più veloce)
+    model: str = "qwen3:8b"
     host: str = "127.0.0.1"
     port: int = 8787
     model_config = SettingsConfigDict(env_prefix="ASKFATTURE_", env_file=".env", extra="ignore")
