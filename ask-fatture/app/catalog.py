@@ -104,19 +104,25 @@ def set_product_pack(
     updated_by: str | None = None,
 ) -> dict:
     from .normalize import lookup_unit, normalize_line
+    from decimal import Decimal
 
-    base, factor = lookup_unit(unita)
-    if not base or base not in {"kg", "l"}:
-        raise ValueError("Unità pack non valida: usa g, kg, etti, ml, cl, lt, l")
+    raw = unita.strip().lower()
+    base, factor = lookup_unit(raw)
+    if not base or base not in {"kg", "l", "pz"}:
+        raise ValueError("Unità pack non valida: scegli Chili, Litri o Pezzi")
     if contenuto <= 0:
         raise ValueError("Contenuto pack deve essere > 0")
+    # UI cucina: Chili / Litri / Pezzi — se arriva g/ml ecc. converti in chili/litri
+    store_unit = {"kg": "chili", "l": "litri", "pz": "pezzi"}[base]
+    store_qty = float(Decimal(str(contenuto)) * factor)
+    store_factor = Decimal("1")
 
     conn.execute(
         """UPDATE products
            SET pack_contenuto=?, pack_unita=?, pack_note=?, pack_updated_by=?,
                unita_base=COALESCE(unita_base, ?)
            WHERE id=?""",
-        (contenuto, unita.strip().lower(), note, updated_by or "cucina", base, product_id),
+        (store_qty, store_unit, note, updated_by or "cucina", base, product_id),
     )
 
     # Ricalcola tutte le righe di questo prodotto con il pack noto
@@ -124,7 +130,7 @@ def set_product_pack(
         "SELECT id, descrizione, quantita, unita, prezzo_unitario, totale_riga FROM lines WHERE product_id=?",
         (product_id,),
     ).fetchall()
-    pack = {"contenuto": contenuto, "unita": unita}
+    pack = {"contenuto": store_qty, "unita": store_unit}
     updated = 0
     for line in lines:
         norm = normalize_line(
@@ -149,7 +155,12 @@ def set_product_pack(
         updated += 1
 
     row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
-    return {"product": dict(row), "lines_updated": updated, "pack_base": float(contenuto) * float(factor), "base": base}
+    return {
+        "product": dict(row),
+        "lines_updated": updated,
+        "pack_base": store_qty,
+        "base": base,
+    }
 
 
 def supplier_to_dict(row) -> dict:

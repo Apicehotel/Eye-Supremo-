@@ -149,17 +149,14 @@
   <section class="card" style="margin-top:14px" id="productDetail" hidden>
     <h2>Pack prodotto (conoscenza cucina)</h2>
     <div id="productBody"></div>
-    <p class="status">Es. fattura «40 kg bomboloni» senza grammi per pezzo: Riona (o chiunque conosca la merce) inserisce qui il contenuto (es. 200 g). Vale per tutti e stima i pezzi.</p>
+    <p class="status">Scrivi il numero e a fianco scegli cosa è: Chili, Litri o Pezzi. Es. 40 + Chili, oppure 12 + Pezzi. Vale per tutti.</p>
     <div class="grid two">
-      <label>Contenuto pezzo<input id="packQty" type="number" step="any" min="0" placeholder="200" /></label>
+      <label>Quantità<input id="packQty" type="number" step="any" min="0" placeholder="40" /></label>
       <label>Unità
         <select id="packUnit">
-          <option value="g">g</option>
-          <option value="kg">kg</option>
-          <option value="etti">etti</option>
-          <option value="ml">ml</option>
-          <option value="cl">cl</option>
-          <option value="l">l / lt</option>
+          <option value="chili">Chili</option>
+          <option value="litri">Litri</option>
+          <option value="pezzi">Pezzi</option>
         </select>
       </label>
     </div>
@@ -325,13 +322,28 @@ async function openProduct(id) {
   const data = await fetch(`/api/products/${id}`).then(r => r.json());
   const p = data.product;
   $('productDetail').hidden = false;
+  const unitLabel = ({chili:'Chili', litri:'Litri', pezzi:'Pezzi', kg:'Chili', l:'Litri', pz:'Pezzi'})[p.pack_unita] || p.pack_unita;
   $('productBody').innerHTML =
     `<p><b>${p.nome}</b></p>` +
-    `<p class="status">Pack attuale: ${p.pack_contenuto ? (p.pack_contenuto + ' ' + p.pack_unita) : 'non impostato'}` +
+    `<p class="status">Pack attuale: ${p.pack_contenuto != null ? (p.pack_contenuto + ' ' + (unitLabel || '')) : 'non impostato'}` +
     `${p.pack_updated_by ? ' · da ' + p.pack_updated_by : ''}` +
     `${p.pack_note ? ' · ' + p.pack_note : ''}</p>`;
-  $('packQty').value = p.pack_contenuto || '';
-  if (p.pack_unita) $('packUnit').value = p.pack_unita;
+  let qty = p.pack_contenuto;
+  let unit = 'chili';
+  const u = (p.pack_unita || '').toLowerCase();
+  if (['l','lt','litri','litro','ml','cl'].includes(u)) {
+    unit = 'litri';
+    if (u === 'ml' && qty != null) qty = qty / 1000;
+    if (u === 'cl' && qty != null) qty = qty / 100;
+  } else if (['pz','pezzi','pezzo','pcs','pc'].includes(u)) {
+    unit = 'pezzi';
+  } else {
+    unit = 'chili';
+    if (['g','gr','grammi','grammo'].includes(u) && qty != null) qty = qty / 1000;
+    if (['etti','etto','hg'].includes(u) && qty != null) qty = qty / 10;
+  }
+  $('packQty').value = qty != null ? qty : '';
+  $('packUnit').value = unit;
   $('packBy').value = p.pack_updated_by || 'Riona';
   $('packNote').value = p.pack_note || '';
   $('productMsg').textContent = '';
