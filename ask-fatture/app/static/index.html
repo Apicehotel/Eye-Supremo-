@@ -114,9 +114,41 @@
       <ul class="sources" id="sources"></ul>
     </div>
   </section>
+
+  <div class="grid two" style="margin-top:14px">
+    <section class="card">
+      <h2>Catalogo fornitori</h2>
+      <p class="status">Nome, P.IVA, scontistiche. Si aggiorna all&apos;import XML.</p>
+      <div class="actions">
+        <button class="secondary" type="button" id="loadSuppliers">Ricarica</button>
+      </div>
+      <ul class="sources" id="suppliers"></ul>
+    </section>
+    <section class="card">
+      <h2>Catalogo prodotti</h2>
+      <p class="status">Per prodotto: min/max prezzo normalizzato e n° fornitori.</p>
+      <div class="actions">
+        <button class="secondary" type="button" id="loadProducts">Ricarica</button>
+      </div>
+      <ul class="sources" id="products"></ul>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:14px" id="supplierDetail" hidden>
+    <h2>Dettaglio fornitore</h2>
+    <div id="supplierBody"></div>
+    <label style="margin-top:10px">Scontistiche (JSON: label, percentuale, note, prodotto)</label>
+    <textarea id="scontiJson" style="min-height:70px" placeholder='[{"label":"Listino hotel","percentuale":5,"note":"su secca"}]'></textarea>
+    <div class="actions">
+      <button type="button" id="saveSconti">Salva sconti</button>
+      <button class="secondary" type="button" id="closeSupplier">Chiudi</button>
+    </div>
+    <p class="status" id="supplierMsg"></p>
+  </section>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+let selectedSupplierId = null;
 async function loadStatus() {
   try {
     const s = await fetch('/api/status').then(r => r.json());
@@ -129,7 +161,7 @@ async function loadStatus() {
       msg = `Ollama ok, ma manca ${s.model}. Esegui scarica-modello.bat`;
     } else {
       cls = 'ok';
-      msg = `Ollama pronto · ${s.model} · ${s.invoices} fatture · ${s.lines} righe`;
+      msg = `Ollama pronto · ${s.model} · ${s.invoices} fatture · ${s.lines} righe · ${s.suppliers||0} fornitori · ${s.products||0} prodotti`;
     }
     $('status').className = 'status ' + cls;
     $('status').textContent = msg;
@@ -151,8 +183,10 @@ $('upload').onclick = async () => {
     if (!r.ok) throw new Error(j.detail || r.statusText);
     $('importMsg').className = 'status ok';
     const skipped = j.skipped ? ` · scartate ${j.skipped} (rumore)` : '';
-    $('importMsg').textContent = `OK: ${j.fornitore} · fattura ${j.numero} · ${j.rows} righe utili${skipped}`;
+    const piva = j.supplier?.partita_iva ? ` · P.IVA ${j.supplier.partita_iva}` : '';
+    $('importMsg').textContent = `OK: ${j.fornitore}${piva} · fattura ${j.numero} · ${j.rows} righe utili${skipped}`;
     loadStatus();
+    loadCatalog();
   } catch (e) {
     $('importMsg').className = 'status warn';
     $('importMsg').textContent = String(e.message || e);
@@ -182,7 +216,7 @@ $('ask').onclick = async () => {
       `<li><b>${s.descrizione}</b>` +
       `dichiarato ${s.prezzo_unitario ?? '—'} €/${s.unita || 'u'} · ` +
       `normalizzato <b style="color:var(--text)">${s.prezzo_normalizzato ?? '—'}</b> €/${s.unita_normalizzata || 'u'} · ` +
-      `${s.fornitore} · fatt. ${s.fattura} · ${s.data || '—'}</li>`
+      `${s.fornitore}${s.partita_iva ? ' P.IVA '+s.partita_iva : ''} · fatt. ${s.fattura} · ${s.data || '—'}</li>`
     ).join('');
   } catch (e) {
     $('out').style.display = 'block';
@@ -193,6 +227,69 @@ $('ask').onclick = async () => {
   }
 };
 loadStatus();
+async function loadCatalog() {
+  try {
+    const [suppliers, products] = await Promise.all([
+      fetch('/api/suppliers').then(r => r.json()),
+      fetch('/api/products').then(r => r.json()),
+    ]);
+    $('suppliers').innerHTML = suppliers.map(s =>
+      `<li style="cursor:pointer" data-sid="${s.id}"><b>${s.ragione_sociale}</b>` +
+      `${s.nome_commerciale ? s.nome_commerciale + ' · ' : ''}` +
+      `P.IVA ${s.partita_iva || '—'} · CF ${s.codice_fiscale || '—'} · ` +
+      `${s.citta || ''} ${s.provincia || ''} · sconti ${(s.sconti||[]).length}</li>`
+    ).join('') || '<li>Nessun fornitore</li>';
+    $('suppliers').querySelectorAll('[data-sid]').forEach(el => {
+      el.onclick = () => openSupplier(Number(el.dataset.sid));
+    });
+    $('products').innerHTML = products.map(p =>
+      `<li><b>${p.nome}</b>` +
+      `${p.righe || 0} righe · ${p.fornitori || 0} fornitori · ` +
+      `min ${p.prezzo_min ?? '—'} / max ${p.prezzo_max ?? '—'} €/${p.unita_base || 'u'}</li>`
+    ).join('') || '<li>Nessun prodotto</li>';
+  } catch (e) {
+    $('suppliers').innerHTML = `<li>${e}</li>`;
+  }
+}
+async function openSupplier(id) {
+  selectedSupplierId = id;
+  const s = await fetch(`/api/suppliers/${id}`).then(r => r.json());
+  $('supplierDetail').hidden = false;
+  $('supplierBody').innerHTML =
+    `<p><b>${s.ragione_sociale}</b>${s.nome_commerciale ? ' · ' + s.nome_commerciale : ''}</p>` +
+    `<p class="status">P.IVA ${s.partita_iva || '—'} · CF ${s.codice_fiscale || '—'}<br>` +
+    `${[s.indirizzo, s.cap, s.citta, s.provincia].filter(Boolean).join(', ') || 'Indirizzo —'}<br>` +
+    `Tel ${s.telefono || '—'} · Email ${s.email || '—'} · PEC ${s.pec || '—'}</p>` +
+    `<p class="status">Prodotti da questo fornitore: ${(s.prodotti||[]).length}</p>` +
+    `<ul class="sources">${(s.prodotti||[]).slice(0,12).map(p =>
+      `<li><b>${p.nome}</b>${p.righe} righe · ${p.prezzo_min ?? '—'}–${p.prezzo_max ?? '—'} €/${p.unita_base || 'u'}</li>`
+    ).join('')}</ul>`;
+  $('scontiJson').value = JSON.stringify(s.sconti || [], null, 2);
+  $('supplierMsg').textContent = '';
+}
+$('loadSuppliers').onclick = loadCatalog;
+$('loadProducts').onclick = loadCatalog;
+$('closeSupplier').onclick = () => { $('supplierDetail').hidden = true; selectedSupplierId = null; };
+$('saveSconti').onclick = async () => {
+  if (!selectedSupplierId) return;
+  try {
+    const sconti = JSON.parse($('scontiJson').value || '[]');
+    const r = await fetch(`/api/suppliers/${selectedSupplierId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sconti }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    $('supplierMsg').className = 'status ok';
+    $('supplierMsg').textContent = `Sconti salvati (${(j.sconti||[]).length})`;
+    loadCatalog();
+  } catch (e) {
+    $('supplierMsg').className = 'status warn';
+    $('supplierMsg').textContent = String(e.message || e);
+  }
+};
+loadCatalog();
 </script>
 </body>
 </html>

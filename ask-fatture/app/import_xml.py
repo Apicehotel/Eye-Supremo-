@@ -18,20 +18,73 @@ def _local(tag: str) -> str:
     return tag.split("}")[-1] if "}" in tag else tag
 
 
+def _extract_supplier(root) -> dict:
+    cedente = None
+    for el in root.iter():
+        if _local(el.tag) == "CedentePrestatore":
+            cedente = el
+            break
+
+    ragione = ""
+    nome = cognome = ""
+    piva = cf = ""
+    indirizzo = cap = citta = provincia = nazione = ""
+
+    scope = cedente if cedente is not None else root
+    for el in scope.iter():
+        name = _local(el.tag)
+        val = _text(el)
+        if not val:
+            continue
+        if name == "Denominazione" and not ragione:
+            ragione = val
+        elif name == "Nome" and not nome:
+            nome = val
+        elif name == "Cognome" and not cognome:
+            cognome = val
+        elif name == "IdCodice" and not piva:
+            # IdFiscaleIVA/IdCodice = P.IVA
+            piva = val
+        elif name == "CodiceFiscale" and not cf:
+            cf = val
+        elif name == "Indirizzo" and not indirizzo:
+            indirizzo = val
+        elif name == "CAP" and not cap:
+            cap = val
+        elif name == "Comune" and not citta:
+            citta = val
+        elif name == "Provincia" and not provincia:
+            provincia = val
+        elif name == "Nazione" and not nazione:
+            nazione = val
+
+    if not ragione:
+        ragione = " ".join(x for x in [nome, cognome] if x).strip()
+    nome_commerciale = None
+    if nome or cognome:
+        nome_commerciale = " ".join(x for x in [nome, cognome] if x).strip() or None
+
+    return {
+        "ragione_sociale": ragione or "Fornitore sconosciuto",
+        "nome_commerciale": nome_commerciale,
+        "partita_iva": piva or None,
+        "codice_fiscale": cf or None,
+        "indirizzo": indirizzo or None,
+        "cap": cap or None,
+        "citta": citta or None,
+        "provincia": provincia or None,
+        "nazione": nazione or "IT",
+        "email": None,
+        "telefono": None,
+        "pec": None,
+        "sconti": [],
+        "note": None,
+    }
+
+
 def parse_fatturapa(path: Path) -> dict:
     root = etree.parse(str(path)).getroot()
-    fornitore = ""
-    for el in root.iter():
-        if _local(el.tag) == "Denominazione" and not fornitore:
-            parent_names = [_local(p.tag) for p in el.iterancestors()]
-            if any("Cedente" in n or "Prestatore" in n for n in parent_names):
-                fornitore = _text(el)
-                break
-    if not fornitore:
-        for el in root.iter():
-            if _local(el.tag) == "Denominazione":
-                fornitore = _text(el)
-                break
+    supplier = _extract_supplier(root)
 
     numero = data = ""
     totale = 0.0
@@ -89,7 +142,8 @@ def parse_fatturapa(path: Path) -> dict:
     return {
         "numero": numero or path.stem,
         "data": data or None,
-        "fornitore": fornitore or "Fornitore sconosciuto",
+        "supplier": supplier,
+        "fornitore": supplier["ragione_sociale"],
         "totale": totale,
         "rows": rows,
         "skipped": skipped,
