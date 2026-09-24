@@ -1,9 +1,11 @@
-"""Parser minimale FatturaPA → fattura + righe."""
+"""Parser minimale FatturaPA → fatture + righe normalizzate (senza rumore)."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from lxml import etree
+
+from .normalize import normalize_line
 
 
 def _text(el) -> str:
@@ -21,7 +23,6 @@ def parse_fatturapa(path: Path) -> dict:
     fornitore = ""
     for el in root.iter():
         if _local(el.tag) == "Denominazione" and not fornitore:
-            # prima denominazione di solito è cedente
             parent_names = [_local(p.tag) for p in el.iterancestors()]
             if any("Cedente" in n or "Prestatore" in n for n in parent_names):
                 fornitore = _text(el)
@@ -47,6 +48,7 @@ def parse_fatturapa(path: Path) -> dict:
                 pass
 
     rows: list[dict] = []
+    skipped: list[dict] = []
     for dettaglio in root.iter():
         if _local(dettaglio.tag) != "DettaglioLinee":
             continue
@@ -72,15 +74,17 @@ def parse_fatturapa(path: Path) -> dict:
             except (ValueError, AttributeError):
                 return None
 
-        rows.append(
-            {
-                "descrizione": desc,
-                "quantita": num(qty),
-                "unita": unit or None,
-                "prezzo_unitario": num(price),
-                "totale_riga": num(line_total),
-            }
+        normalized = normalize_line(
+            description=desc,
+            quantita=num(qty),
+            unita=unit or None,
+            prezzo_unitario=num(price),
+            totale_riga=num(line_total),
         )
+        if normalized["is_noise"]:
+            skipped.append({"descrizione": desc, "motivo": "rumore (sconto/carburante/bollo/…)"})
+            continue
+        rows.append(normalized)
 
     return {
         "numero": numero or path.stem,
@@ -88,4 +92,5 @@ def parse_fatturapa(path: Path) -> dict:
         "fornitore": fornitore or "Fornitore sconosciuto",
         "totale": totale,
         "rows": rows,
+        "skipped": skipped,
     }

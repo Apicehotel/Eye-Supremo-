@@ -1,6 +1,5 @@
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 
 from .config import settings
 
@@ -18,13 +17,25 @@ CREATE TABLE IF NOT EXISTS lines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   descrizione TEXT NOT NULL,
+  descrizione_norm TEXT,
   quantita REAL,
   unita TEXT,
+  unita_normalizzata TEXT,
   prezzo_unitario REAL,
+  prezzo_normalizzato REAL,
+  contenuto_base REAL,
   totale_riga REAL
 );
 CREATE INDEX IF NOT EXISTS idx_lines_desc ON lines(descrizione);
+CREATE INDEX IF NOT EXISTS idx_lines_desc_norm ON lines(descrizione_norm);
 """
+
+_EXTRA_COLS = {
+    "descrizione_norm": "TEXT",
+    "unita_normalizzata": "TEXT",
+    "prezzo_normalizzato": "REAL",
+    "contenuto_base": "REAL",
+}
 
 
 def connect() -> sqlite3.Connection:
@@ -36,9 +47,17 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(lines)").fetchall()}
+    for col, typ in _EXTRA_COLS.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE lines ADD COLUMN {col} {typ}")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
 
 
 @contextmanager

@@ -150,7 +150,8 @@ $('upload').onclick = async () => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || r.statusText);
     $('importMsg').className = 'status ok';
-    $('importMsg').textContent = `OK: ${j.fornitore} · fattura ${j.numero} · ${j.rows} righe`;
+    const skipped = j.skipped ? ` · scartate ${j.skipped} (rumore)` : '';
+    $('importMsg').textContent = `OK: ${j.fornitore} · fattura ${j.numero} · ${j.rows} righe utili${skipped}`;
     loadStatus();
   } catch (e) {
     $('importMsg').className = 'status warn';
@@ -178,7 +179,10 @@ $('ask').onclick = async () => {
     $('mode').textContent = `Modo: ${j.mode} · modello ${j.model}`;
     $('answer').textContent = j.answer;
     $('sources').innerHTML = (j.sources || []).map(s =>
-      `<li><b>${s.descrizione}</b>${s.prezzo_unitario ?? '—'} € · ${s.fornitore} · fatt. ${s.fattura} · ${s.data || '—'}</li>`
+      `<li><b>${s.descrizione}</b>` +
+      `dichiarato ${s.prezzo_unitario ?? '—'} €/${s.unita || 'u'} · ` +
+      `normalizzato <b style="color:var(--text)">${s.prezzo_normalizzato ?? '—'}</b> €/${s.unita_normalizzata || 'u'} · ` +
+      `${s.fornitore} · fatt. ${s.fattura} · ${s.data || '—'}</li>`
     ).join('');
   } catch (e) {
     $('out').style.display = 'block';

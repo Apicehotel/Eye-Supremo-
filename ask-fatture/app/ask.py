@@ -51,8 +51,12 @@ def search_lines(query: str, limit: int = 25) -> list[dict]:
                 (limit,),
             ).fetchall()
         else:
-            clauses = " OR ".join(["lower(l.descrizione) LIKE ?" for _ in tokens])
-            params = [f"%{t}%" for t in tokens]
+            clauses = " OR ".join(
+                ["lower(l.descrizione) LIKE ? OR ifnull(l.descrizione_norm,'') LIKE ?" for _ in tokens]
+            )
+            params: list[str] = []
+            for t in tokens:
+                params.extend([f"%{t}%", f"%{t}%"])
             rows = conn.execute(
                 f"""
                 SELECT l.*, i.numero, i.data, i.fornitore
@@ -89,8 +93,11 @@ async def ask(question: str) -> dict:
     sources = [
         {
             "descrizione": r["descrizione"],
-            "prezzo_unitario": r["prezzo_unitario"],
-            "quantita": r["quantita"],
+            "prezzo_unitario": r.get("prezzo_unitario"),
+            "prezzo_normalizzato": r.get("prezzo_normalizzato"),
+            "unita_normalizzata": r.get("unita_normalizzata"),
+            "quantita": r.get("quantita"),
+            "unita": r.get("unita"),
             "fornitore": r["fornitore"],
             "fattura": r["numero"],
             "data": r["data"],
@@ -107,14 +114,24 @@ async def ask(question: str) -> dict:
         }
 
     if not status.get("available") or not status.get("model_present"):
-        # Fallback deterministico: min prezzo
-        priced = [s for s in sources if s["prezzo_unitario"] is not None]
+        # Fallback: confronta su prezzo normalizzato se c'è, altrimenti unitario
+        def key_price(s):
+            p = s.get("prezzo_normalizzato")
+            if p is None:
+                p = s.get("prezzo_unitario")
+            return float(p) if p is not None else float("inf")
+
+        priced = [s for s in sources if key_price(s) != float("inf")]
         if priced:
-            best = min(priced, key=lambda s: float(s["prezzo_unitario"]))
+            best = min(priced, key=key_price)
+            um = best.get("unita_normalizzata") or best.get("unita") or "u"
+            pn = best.get("prezzo_normalizzato")
+            pu = best.get("prezzo_unitario")
             answer = (
                 f"(Senza Ollama) Trovate {len(priced)} righe. "
-                f"Prezzo più basso: {best['prezzo_unitario']} € "
-                f"da {best['fornitore']} (fattura {best['fattura']} del {best['data']}) "
+                f"Miglior prezzo: {pn if pn is not None else pu} €/{um} "
+                f"(dichiarato {pu} €) da {best['fornitore']} "
+                f"(fattura {best['fattura']} del {best['data']}) "
                 f"per «{best['descrizione']}»."
             )
         else:
@@ -122,15 +139,18 @@ async def ask(question: str) -> dict:
         return {"mode": "local", "answer": answer, "sources": sources, "model": settings.model}
 
     context = "\n".join(
-        f"- {s['descrizione']} | prezzo {s['prezzo_unitario']} | qty {s['quantita']} | "
-        f"fornitore {s['fornitore']} | fattura {s['fattura']} | data {s['data']}"
+        f"- {s['descrizione']} | prezzo dichiarato {s['prezzo_unitario']} €/{s.get('unita') or 'u'} | "
+        f"prezzo normalizzato {s.get('prezzo_normalizzato')} €/{s.get('unita_normalizzata') or 'u'} | "
+        f"qty {s['quantita']} | fornitore {s['fornitore']} | fattura {s['fattura']} | data {s['data']}"
         for s in sources
     )
     system = (
         "Sei Ask Fatture, assistente locale sulle fatture aziendali. "
         "Rispondi in italiano, in modo breve e concreto. "
-        "Usa SOLO i dati forniti. Se non bastano, dillo. "
-        "Quando confronti prezzi indica fornitore, data e importo."
+        "Usa SOLO i dati forniti. Per confronti usa il PREZZO NORMALIZZATO "
+        "(es. €/kg o €/l), non solo il prezzo a pezzo. "
+        "Ignora mentalmente carburante, sconti e bollo: non sono in archivio. "
+        "Quando confronti prezzi indica fornitore, data, prezzo normalizzato e dichiarato."
     )
     prompt = f"Dati estratti dall'archivio:\n{context}\n\nDomanda: {question}"
 
