@@ -220,6 +220,96 @@ def register_invoice_blob(
 register_invoice_file = register_invoice_blob
 
 
+def _normalize_central_page(data, *, limit: int, offset: int) -> dict:
+    if not isinstance(data, dict):
+        return {"items": data if isinstance(data, list) else [], "limit": limit, "offset": offset, "total": None}
+    # Alcuni gateway wrappano in {data:{...}} o {result:{...}}
+    for key in ("data", "result", "payload", "page"):
+        inner = data.get(key)
+        if isinstance(inner, dict) and ("items" in inner or "rows" in inner):
+            data = inner
+            break
+    items = data.get("items")
+    if items is None:
+        items = data.get("rows")
+    if items is None and isinstance(data.get("invoices"), list):
+        items = data["invoices"]
+    if not isinstance(items, list):
+        items = []
+    return {
+        "items": items,
+        "total": data.get("total"),
+        "limit": data.get("limit", limit),
+        "offset": data.get("offset", offset),
+    }
+
+
+def _central_via_gateway(
+    *,
+    limit: int,
+    offset: int,
+    since: str | None,
+    username: str,
+    pin: str,
+) -> dict:
+    gateway = (settings.supabase_central_gateway or "").strip().rstrip("/")
+    if not gateway:
+        raise RuntimeError("Gateway centrale non configurato")
+    action = (settings.supabase_central_gateway_action or "invoice_page").strip()
+    body = {
+        "action": action,
+        "username": username,
+        "pin": pin,
+        "limit": limit,
+        "offset": offset,
+        "p_username": username,
+        "p_pin": pin,
+        "p_limit": limit,
+        "p_offset": offset,
+        "p_since": since,
+    }
+    headers = {"Content-Type": "application/json"}
+    if settings.supabase_rest_key:
+        headers["apikey"] = settings.supabase_rest_key
+        headers["Authorization"] = f"Bearer {settings.supabase_rest_key}"
+    with httpx.Client(timeout=60) as client:
+        res = client.post(gateway, json=body, headers=headers)
+        if res.status_code >= 400:
+            detail = res.text
+            try:
+                detail = res.json().get("error") or res.text
+            except Exception:
+                pass
+            raise RuntimeError(f"Gateway centrale ({res.status_code}): {detail}")
+        data = res.json()
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(str(data["error"]))
+    return _normalize_central_page(data, limit=limit, offset=offset)
+
+
+def _central_via_rpc(
+    *,
+    limit: int,
+    offset: int,
+    since: str | None,
+    username: str,
+    pin: str,
+) -> dict:
+    body = {
+        "p_username": username,
+        "p_pin": pin,
+        "p_limit": limit,
+        "p_offset": offset,
+        "p_since": since,
+    }
+    url = _rest_url("rest/v1/rpc/eye_central_invoice_page")
+    with httpx.Client(timeout=60) as client:
+        res = client.post(url, json=body, headers=_headers({"Content-Type": "application/json"}))
+        res.raise_for_status()
+        data = res.json()
+    return _normalize_central_page(data, limit=limit, offset=offset)
+
+
 def central_invoice_page(
     *,
     limit: int = 50,
@@ -228,26 +318,35 @@ def central_invoice_page(
     username: str | None = None,
     pin: str | None = None,
 ) -> dict:
-    """Catalogo metadati MultiHotel via RPC eye_central_invoice_page."""
-    if not settings.central_configured and not (settings.supabase_url and settings.supabase_rest_key and pin):
+    """Catalogo metadati MultiHotel: Edge gateway (preferito) oppure RPC."""
+    user = username or settings.supabase_central_username
+    secret = pin or settings.supabase_central_pin
+    lim = max(1, min(int(limit), 200))
+    off = max(0, int(offset))
+    if not secret:
         raise RuntimeError(
-            "Catalogo centrale non configurato: servono URL + chiave Supabase e PIN centrale"
+            "Catalogo centrale non configurato: serve RANDFATTURE_SUPABASE_CENTRAL_PIN"
         )
-    body = {
-        "p_username": username or settings.supabase_central_username,
-        "p_pin": pin or settings.supabase_central_pin,
-        "p_limit": max(1, min(int(limit), 200)),
-        "p_offset": max(0, int(offset)),
-        "p_since": since,
-    }
-    url = _rest_url("rest/v1/rpc/eye_central_invoice_page")
-    with httpx.Client(timeout=60) as client:
-        res = client.post(url, json=body, headers=_headers({"Content-Type": "application/json"}))
-        res.raise_for_status()
-        data = res.json()
-    if not isinstance(data, dict):
-        return {"items": data, "limit": body["p_limit"], "offset": body["p_offset"], "total": None}
-    return data
+    if settings.supabase_central_gateway:
+        try:
+            return _central_via_gateway(
+                limit=lim, offset=off, since=since, username=user, pin=secret
+            )
+        except Exception as gateway_exc:
+            # Fallback RPC se gateway fallisce e abbiamo chiave REST
+            if settings.supabase_url and settings.supabase_rest_key:
+                try:
+                    return _central_via_rpc(
+                        limit=lim, offset=off, since=since, username=user, pin=secret
+                    )
+                except Exception:
+                    raise gateway_exc from None
+            raise
+    if not (settings.supabase_url and settings.supabase_rest_key):
+        raise RuntimeError(
+            "Catalogo centrale non configurato: gateway oppure URL+chiave Supabase"
+        )
+    return _central_via_rpc(limit=lim, offset=off, since=since, username=user, pin=secret)
 
 
 def resolve_blob_path(source_hash: str, kind: Kind | None = None, ext: str = ".xml") -> str:

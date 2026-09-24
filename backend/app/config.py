@@ -35,9 +35,15 @@ class Settings(BaseSettings):
     supabase_bucket: str = "eye-invoices"
     # Radice path content-addressable: invoices/{kind}/{hh}/{hash}{ext}
     supabase_storage_root: str = "invoices"
-    # Credenziali RPC eye_central_invoice_page (PIN MultiHotel, non PIN locale Eye)
+    # Credenziali catalogo centrale MultiHotel (PIN ≠ PIN locale Eye)
     supabase_central_username: str = "sviluppatore"
     supabase_central_pin: str | None = None
+    # Edge Function gateway (preferito). Se vuoto → RPC rest/v1/rpc/eye_central_invoice_page
+    supabase_central_gateway: str | None = (
+        "https://ooqlfldcrnkudhgjnied.supabase.co/functions/v1/eye-central-gateway"
+    )
+    # Azione richiesta dal gateway (es. invoice_page). Vuoto = prova elenco azioni note.
+    supabase_central_gateway_action: str = "invoice_page"
     model_config = SettingsConfigDict(
         env_prefix="RANDFATTURE_",
         env_file=_env_files(),
@@ -58,7 +64,11 @@ class Settings(BaseSettings):
 
     @property
     def central_configured(self) -> bool:
-        return bool(self.supabase_url and self.supabase_rest_key and self.supabase_central_pin)
+        if not self.supabase_central_pin:
+            return False
+        if self.supabase_central_gateway:
+            return True
+        return bool(self.supabase_url and self.supabase_rest_key)
 
 
 settings = Settings()

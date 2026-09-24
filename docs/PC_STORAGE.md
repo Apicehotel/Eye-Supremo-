@@ -10,7 +10,8 @@ Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fa
    - `RANDFATTURE_SUPABASE_URL`
    - `RANDFATTURE_SUPABASE_SERVICE_KEY` (service role, **mai** nel browser)
    - `RANDFATTURE_SUPABASE_BUCKET=eye-invoices`
-   - (opzionale catalogo) `RANDFATTURE_SUPABASE_ANON_KEY` + `RANDFATTURE_SUPABASE_CENTRAL_PIN`
+   - `RANDFATTURE_SUPABASE_CENTRAL_GATEWAY=https://ooqlfldcrnkudhgjnied.supabase.co/functions/v1/eye-central-gateway`
+   - `RANDFATTURE_SUPABASE_CENTRAL_PIN` (+ opzionale `ANON_KEY`)
    - (opzionale PowerShell SQL) `RANDFATTURE_SUPABASE_DB_URL`
 4. Avvia l’app: **`EyeSupremo.exe`** (finestra nativa consigliata) oppure `start.bat` in sviluppo.
 5. Primo accesso: PIN **Sviluppatore**.
@@ -32,11 +33,13 @@ Senza `.env` Supabase l’app resta operativa con mirror locale `data/supabase_m
 ```env
 RANDFATTURE_SUPABASE_URL=https://ooqlfldcrnkudhgjnied.supabase.co
 RANDFATTURE_SUPABASE_SERVICE_KEY=eyJ...   # service role, solo sul PC
-RANDFATTURE_SUPABASE_ANON_KEY=           # opzionale, per catalogo senza service key
+RANDFATTURE_SUPABASE_ANON_KEY=           # opzionale
 RANDFATTURE_SUPABASE_BUCKET=eye-invoices
 RANDFATTURE_SUPABASE_STORAGE_ROOT=invoices
+RANDFATTURE_SUPABASE_CENTRAL_GATEWAY=https://ooqlfldcrnkudhgjnied.supabase.co/functions/v1/eye-central-gateway
+RANDFATTURE_SUPABASE_CENTRAL_GATEWAY_ACTION=invoice_page
 RANDFATTURE_SUPABASE_CENTRAL_USERNAME=sviluppatore
-RANDFATTURE_SUPABASE_CENTRAL_PIN=        # PIN MultiHotel (RPC eye_central_invoice_page)
+RANDFATTURE_SUPABASE_CENTRAL_PIN=        # PIN MultiHotel (non PIN locale Eye)
 ```
 
 Senza queste variabili l’app usa `data/supabase_mirror/` (utile in sviluppo/test) con gli stessi path relativi.
