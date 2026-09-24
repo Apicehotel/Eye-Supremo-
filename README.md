@@ -2,7 +2,7 @@
 
 RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
 
-> **Ask Fatture** (cartella `ask-fatture/`) è un **programmino separato**: solo import XML + domande tipo «quanto pago il latte?» con modello locale `qwen3:1.7b`. Non usa RandAI.
+> **Ask Fatture** (cartella `ask-fatture/`) è un **programmino separato**: solo import XML + domande tipo «quanto pago il latte?» con modello locale `qwen3:8b`. Non usa RandAI.
 
 ## Architettura
 

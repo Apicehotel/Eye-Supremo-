@@ -34,7 +34,7 @@ def test_parse_fixture():
 
 def test_import_and_ask_without_ollama(monkeypatch):
     async def no_ollama():
-        return {"available": False, "model": "qwen3:1.7b", "model_present": False}
+        return {"available": False, "model": "qwen3:8b", "model_present": False}
 
     monkeypatch.setattr("app.ask.ollama_ready", no_ollama)
     with TestClient(app) as client:

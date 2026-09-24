@@ -1,8 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo Scarico modello veloce qwen3:1.7b (circa 1.4 GB)...
-ollama pull qwen3:1.7b
+echo Scarico modello qwen3:8b (circa 5 GB)...
+ollama pull qwen3:8b
 if errorlevel 1 (
   echo Ollama non trovato o errore download. Installa da https://ollama.com
   pause
