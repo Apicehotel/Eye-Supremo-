@@ -72,14 +72,21 @@ async def import_invoice(file: UploadFile = File(...)):
         invoice_id = cur.lastrowid
         for row in parsed["rows"]:
             conn.execute(
-                """INSERT INTO lines(invoice_id, descrizione, quantita, unita, prezzo_unitario, totale_riga)
-                   VALUES (?,?,?,?,?,?)""",
+                """INSERT INTO lines(
+                     invoice_id, descrizione, descrizione_norm, quantita, unita,
+                     unita_normalizzata, prezzo_unitario, prezzo_normalizzato,
+                     contenuto_base, totale_riga
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     invoice_id,
                     row["descrizione"],
+                    row.get("descrizione_norm"),
                     row["quantita"],
                     row["unita"],
+                    row.get("unita_normalizzata"),
                     row["prezzo_unitario"],
+                    row.get("prezzo_normalizzato"),
+                    row.get("contenuto_base"),
                     row["totale_riga"],
                 ),
             )
@@ -89,6 +96,8 @@ async def import_invoice(file: UploadFile = File(...)):
         "fornitore": parsed["fornitore"],
         "numero": parsed["numero"],
         "rows": len(parsed["rows"]),
+        "skipped": len(parsed.get("skipped") or []),
+        "skipped_details": (parsed.get("skipped") or [])[:20],
     }
 
 
