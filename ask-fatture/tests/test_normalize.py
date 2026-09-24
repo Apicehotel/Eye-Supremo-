@@ -116,3 +116,30 @@ def test_75cl_wine():
     )
     assert row["unita_normalizzata"] == "l"
     assert abs(row["prezzo_normalizzato"] - 4.0) < 1e-9  # 3 / 0.75
+
+
+def test_known_pack_from_catalog_for_pz():
+    # Fattura senza grammi; Riona ha messo pack 200g a catalogo
+    row = normalize_line(
+        description="BOMBOLONI FORNO",
+        quantita=10,
+        unita="PZ",
+        prezzo_unitario=0.8,
+        known_pack={"contenuto": 200, "unita": "g"},
+    )
+    assert row["pack_source"] == "catalogo"
+    assert abs(row["prezzo_normalizzato"] - 4.0) < 1e-9  # 0.8 / 0.2 kg
+
+
+def test_kg_line_estimates_pieces_with_pack():
+    # 40 kg bomboloni, ogni pezzo 200g → ~200 pezzi
+    row = normalize_line(
+        description="BOMBOLONI",
+        quantita=40,
+        unita="KG",
+        prezzo_unitario=3.5,
+        known_pack={"contenuto": 200, "unita": "g"},
+    )
+    assert row["unita_normalizzata"] == "kg"
+    assert abs(row["prezzo_normalizzato"] - 3.5) < 1e-9
+    assert row["pezzi_stimati"] == 200.0

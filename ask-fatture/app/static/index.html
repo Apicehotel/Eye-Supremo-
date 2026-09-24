@@ -126,7 +126,7 @@
     </section>
     <section class="card">
       <h2>Catalogo prodotti</h2>
-      <p class="status">Per prodotto: min/max prezzo normalizzato e n° fornitori.</p>
+      <p class="status">Clicca un prodotto per inserire i grammi/litri del pezzo (vale per tutti).</p>
       <div class="actions">
         <button class="secondary" type="button" id="loadProducts">Ricarica</button>
       </div>
@@ -145,10 +145,37 @@
     </div>
     <p class="status" id="supplierMsg"></p>
   </section>
+
+  <section class="card" style="margin-top:14px" id="productDetail" hidden>
+    <h2>Pack prodotto (conoscenza cucina)</h2>
+    <div id="productBody"></div>
+    <p class="status">Es. fattura «40 kg bomboloni» senza grammi per pezzo: Riona (o chiunque conosca la merce) inserisce qui il contenuto (es. 200 g). Vale per tutti e stima i pezzi.</p>
+    <div class="grid two">
+      <label>Contenuto pezzo<input id="packQty" type="number" step="any" min="0" placeholder="200" /></label>
+      <label>Unità
+        <select id="packUnit">
+          <option value="g">g</option>
+          <option value="kg">kg</option>
+          <option value="etti">etti</option>
+          <option value="ml">ml</option>
+          <option value="cl">cl</option>
+          <option value="l">l / lt</option>
+        </select>
+      </label>
+    </div>
+    <label>Chi aggiorna<input id="packBy" value="Riona" /></label>
+    <label>Nota<input id="packNote" placeholder="es. bombolone standard forno" /></label>
+    <div class="actions">
+      <button type="button" id="savePack">Salva pack e ricalcola prezzi</button>
+      <button class="secondary" type="button" id="closeProduct">Chiudi</button>
+    </div>
+    <p class="status" id="productMsg"></p>
+  </section>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
 let selectedSupplierId = null;
+let selectedProductId = null;
 async function loadStatus() {
   try {
     const s = await fetch('/api/status').then(r => r.json());
@@ -243,10 +270,14 @@ async function loadCatalog() {
       el.onclick = () => openSupplier(Number(el.dataset.sid));
     });
     $('products').innerHTML = products.map(p =>
-      `<li><b>${p.nome}</b>` +
+      `<li style="cursor:pointer" data-pid="${p.id}"><b>${p.nome}</b>` +
       `${p.righe || 0} righe · ${p.fornitori || 0} fornitori · ` +
-      `min ${p.prezzo_min ?? '—'} / max ${p.prezzo_max ?? '—'} €/${p.unita_base || 'u'}</li>`
+      `min ${p.prezzo_min ?? '—'} / max ${p.prezzo_max ?? '—'} €/${p.unita_base || 'u'}` +
+      `${p.pack_contenuto ? ` · pack ${p.pack_contenuto}${p.pack_unita}` : ' · pack ?'}</li>`
     ).join('') || '<li>Nessun prodotto</li>';
+    $('products').querySelectorAll('[data-pid]').forEach(el => {
+      el.onclick = () => openProduct(Number(el.dataset.pid));
+    });
   } catch (e) {
     $('suppliers').innerHTML = `<li>${e}</li>`;
   }
@@ -287,6 +318,47 @@ $('saveSconti').onclick = async () => {
   } catch (e) {
     $('supplierMsg').className = 'status warn';
     $('supplierMsg').textContent = String(e.message || e);
+  }
+};
+async function openProduct(id) {
+  selectedProductId = id;
+  const data = await fetch(`/api/products/${id}`).then(r => r.json());
+  const p = data.product;
+  $('productDetail').hidden = false;
+  $('productBody').innerHTML =
+    `<p><b>${p.nome}</b></p>` +
+    `<p class="status">Pack attuale: ${p.pack_contenuto ? (p.pack_contenuto + ' ' + p.pack_unita) : 'non impostato'}` +
+    `${p.pack_updated_by ? ' · da ' + p.pack_updated_by : ''}` +
+    `${p.pack_note ? ' · ' + p.pack_note : ''}</p>`;
+  $('packQty').value = p.pack_contenuto || '';
+  if (p.pack_unita) $('packUnit').value = p.pack_unita;
+  $('packBy').value = p.pack_updated_by || 'Riona';
+  $('packNote').value = p.pack_note || '';
+  $('productMsg').textContent = '';
+}
+$('closeProduct').onclick = () => { $('productDetail').hidden = true; selectedProductId = null; };
+$('savePack').onclick = async () => {
+  if (!selectedProductId) return;
+  try {
+    const r = await fetch(`/api/products/${selectedProductId}/pack`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contenuto: Number($('packQty').value),
+        unita: $('packUnit').value,
+        note: $('packNote').value || null,
+        updated_by: $('packBy').value || 'cucina',
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    $('productMsg').className = 'status ok';
+    $('productMsg').textContent = `Pack salvato. Ricalcolate ${j.lines_updated} righe.`;
+    loadCatalog();
+    openProduct(selectedProductId);
+  } catch (e) {
+    $('productMsg').className = 'status warn';
+    $('productMsg').textContent = String(e.message || e);
   }
 };
 loadCatalog();

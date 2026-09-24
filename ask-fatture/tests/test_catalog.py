@@ -62,3 +62,29 @@ def test_upsert_supplier_by_piva(tmp_path, monkeypatch):
         row = conn.execute("SELECT * FROM suppliers WHERE id=?", (a,)).fetchone()
         assert row["citta"] == "Roma"
         assert row["ragione_sociale"] == "Alpha Spa"
+
+
+def test_product_pack_recalculates_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASKFATTURE_DATA_DIR", str(tmp_path))
+    from app import config
+
+    config.settings.data_dir = tmp_path
+    (tmp_path / "uploads").mkdir(exist_ok=True)
+    monkeypatch.setattr(type(config.settings), "database_path", property(lambda self: tmp_path / "ask.db"))
+    init_db()
+    with TestClient(app) as client:
+        with FIXTURE.open("rb") as f:
+            # mutate: use fixture then set pack on lamp product
+            r = client.post("/api/import", files={"file": ("fattura.xml", f, "application/xml")})
+        assert r.status_code == 200
+        products = client.get("/api/products").json()
+        pid = products[0]["id"]
+        pack = client.put(
+            f"/api/products/{pid}/pack",
+            json={"contenuto": 50, "unita": "g", "updated_by": "Riona", "note": "prova"},
+        )
+        assert pack.status_code == 200, pack.text
+        assert pack.json()["lines_updated"] >= 1
+        detail = client.get(f"/api/products/{pid}").json()
+        assert detail["product"]["pack_contenuto"] == 50
+        assert detail["product"]["pack_updated_by"] == "Riona"

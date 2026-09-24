@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS products (
   nome TEXT NOT NULL,
   nome_norm TEXT NOT NULL UNIQUE,
   unita_base TEXT,
+  pack_contenuto REAL,
+  pack_unita TEXT,
+  pack_note TEXT,
+  pack_updated_by TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_products_nome ON products(nome);
@@ -74,6 +78,12 @@ _LINE_EXTRA = {
     "product_id": "INTEGER",
 }
 _INV_EXTRA = {"supplier_id": "INTEGER"}
+_PRODUCT_EXTRA = {
+    "pack_contenuto": "REAL",
+    "pack_unita": "TEXT",
+    "pack_note": "TEXT",
+    "pack_updated_by": "TEXT",
+}
 
 
 def connect() -> sqlite3.Connection:
@@ -97,6 +107,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for col, typ in _INV_EXTRA.items():
             if col not in existing:
                 conn.execute(f"ALTER TABLE invoices ADD COLUMN {col} {typ}")
+    if "products" in tables:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(products)").fetchall()}
+        for col, typ in _PRODUCT_EXTRA.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE products ADD COLUMN {col} {typ}")
 
 
 def init_db() -> None:
