@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
 ```
 
-Produce `release\EyeSupremo-Setup.exe` (v1.4.0) con:
+Produce `release\EyeSupremo-Setup.exe` (v1.4.1) con:
 
 - `EyeSupremo.exe` — gestionale (dati in `%LOCALAPPDATA%\EyeSupremo`)
 - `AskFatture.exe` — domande/catalogo/pack Chili·Litri·Pezzi (dati in `%LOCALAPPDATA%\AskFatture`)
