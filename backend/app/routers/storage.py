@@ -82,6 +82,29 @@ def central_catalog(
         raise HTTPException(502, f"Catalogo centrale non raggiungibile: {exc}") from exc
 
 
+@router.get("/central/reviews")
+def central_reviews(
+    hotel: str | None = None,
+    q: str = "",
+    limit: int = 2000,
+    user: UserProfile = Depends(current_user),
+):
+    """Recensioni MultiHotel (eye_central_reviews via eye_central_review_page)."""
+    _guard(user, OPERATOR_ROLES)
+    if not settings.reviews_configured:
+        raise HTTPException(
+            503,
+            "Recensioni centrali non configurate: imposta RANDFATTURE_SUPABASE_URL, "
+            "RANDFATTURE_SUPABASE_ANON_KEY (o SERVICE_KEY) e RANDFATTURE_SUPABASE_CENTRAL_PIN",
+        )
+    try:
+        return storage_service.central_reviews_catalog(
+            hotel_code=hotel, q=q, limit=limit
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Recensioni centrali non raggiungibili: {exc}") from exc
+
+
 @router.post("/upload")
 async def upload_invoice(
     file: UploadFile = File(...),

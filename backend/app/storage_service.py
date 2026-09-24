@@ -5,6 +5,8 @@ Struttura ottimale
 Metadati (già in MultiHotel):
   eye_central_invoices / eye_central_invoice_rows
   RPC eye_central_invoice_page(p_username, p_pin, p_limit, p_offset, p_since)
+  eye_central_reviews
+  RPC eye_central_review_page(p_username, p_pin, p_limit, p_offset, p_since)
 
 Blob (nuovi):
   bucket  eye-invoices  (privato, solo service_role)
@@ -61,11 +63,13 @@ def storage_status() -> dict:
     return {
         "configured": settings.storage_configured,
         "central_configured": settings.central_configured,
+        "reviews_configured": settings.reviews_configured,
         "mode": "supabase" if settings.storage_configured else "local_mirror",
         "project_ref": "ooqlfldcrnkudhgjnied",
         "bucket": settings.supabase_bucket,
         "storage_root": root,
         "index_table": "eye_central_invoice_blobs",
+        "reviews_table": "eye_central_reviews",
         "url": settings.supabase_url,
         "central_gateway": settings.supabase_central_gateway,
         "location_example": f"{settings.supabase_bucket}/{root}/xml/30/<sha256>.xml",
@@ -348,6 +352,278 @@ def central_invoice_page(
             "Catalogo centrale non configurato: gateway oppure URL+chiave Supabase"
         )
     return _central_via_rpc(limit=lim, offset=off, since=since, username=user, pin=secret)
+
+
+def _central_review_via_gateway(
+    *,
+    limit: int,
+    offset: int,
+    since: str | None,
+    username: str,
+    pin: str,
+) -> dict:
+    gateway = (settings.supabase_central_gateway or "").strip().rstrip("/")
+    if not gateway:
+        raise RuntimeError("Gateway centrale non configurato")
+    body = {
+        "action": "review_page",
+        "username": username,
+        "pin": pin,
+        "limit": limit,
+        "offset": offset,
+        "p_username": username,
+        "p_pin": pin,
+        "p_limit": limit,
+        "p_offset": offset,
+        "p_since": since,
+    }
+    headers = {"Content-Type": "application/json"}
+    if settings.supabase_rest_key:
+        headers["apikey"] = settings.supabase_rest_key
+        headers["Authorization"] = f"Bearer {settings.supabase_rest_key}"
+    with httpx.Client(timeout=60) as client:
+        res = client.post(gateway, json=body, headers=headers)
+        if res.status_code >= 400:
+            detail = res.text
+            try:
+                detail = res.json().get("error") or res.text
+            except Exception:
+                pass
+            raise RuntimeError(f"Gateway recensioni ({res.status_code}): {detail}")
+        data = res.json()
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(str(data["error"]))
+    return _normalize_central_page(data, limit=limit, offset=offset)
+
+
+def _central_review_via_rpc(
+    *,
+    limit: int,
+    offset: int,
+    since: str | None,
+    username: str,
+    pin: str,
+) -> dict:
+    body = {
+        "p_username": username,
+        "p_pin": pin,
+        "p_limit": limit,
+        "p_offset": offset,
+        "p_since": since,
+    }
+    url = _rest_url("rest/v1/rpc/eye_central_review_page")
+    with httpx.Client(timeout=60) as client:
+        res = client.post(url, json=body, headers=_headers({"Content-Type": "application/json"}))
+        if res.status_code >= 400:
+            detail = res.text
+            try:
+                detail = res.json().get("message") or res.json().get("error") or res.text
+            except Exception:
+                pass
+            raise RuntimeError(f"RPC eye_central_review_page ({res.status_code}): {detail}")
+        data = res.json()
+    return _normalize_central_page(data, limit=limit, offset=offset)
+
+
+def central_review_page(
+    *,
+    limit: int = 200,
+    offset: int = 0,
+    since: str | None = None,
+    username: str | None = None,
+    pin: str | None = None,
+) -> dict:
+    """Catalogo recensioni MultiHotel (eye_central_reviews via RPC, gateway opzionale)."""
+    user = username or settings.supabase_central_username
+    secret = pin or settings.supabase_central_pin
+    lim = max(1, min(int(limit), 500))
+    off = max(0, int(offset))
+    if not secret:
+        raise RuntimeError(
+            "Recensioni centrali non configurate: serve RANDFATTURE_SUPABASE_CENTRAL_PIN"
+        )
+    if not (settings.supabase_url and settings.supabase_rest_key):
+        # Prova comunque il gateway se presente (alcuni deploy espongono review_page)
+        if settings.supabase_central_gateway:
+            return _central_review_via_gateway(
+                limit=lim, offset=off, since=since, username=user, pin=secret
+            )
+        raise RuntimeError(
+            "Recensioni centrali non configurate: URL + chiave Supabase (anon o service)"
+        )
+    if settings.supabase_central_gateway:
+        try:
+            return _central_review_via_gateway(
+                limit=lim, offset=off, since=since, username=user, pin=secret
+            )
+        except Exception:
+            pass
+    return _central_review_via_rpc(
+        limit=lim, offset=off, since=since, username=user, pin=secret
+    )
+
+
+# Codici hotel MultiHotel ↔ sezioni UI Eye
+HOTEL_CODE_ALIASES: dict[str, str] = {
+    "gio": "hotelgio",
+    "hotelgio": "hotelgio",
+    "choco": "chocohotel",
+    "chocohotel": "chocohotel",
+    "brigantino": "brigantino",
+    "ilbrigantino": "brigantino",
+}
+
+HOTEL_LABELS: dict[str, dict[str, str]] = {
+    "hotelgio": {"name": "Hotel Giò", "short": "Hotel Giò"},
+    "chocohotel": {"name": "Chocohotel", "short": "Chocohotel"},
+    "brigantino": {"name": "Hotel Il Brigantino", "short": "Il Brigantino"},
+}
+
+
+def normalize_hotel_code(code: str | None) -> str:
+    raw = (code or "").strip().lower()
+    return HOTEL_CODE_ALIASES.get(raw, raw or "unknown")
+
+
+def normalize_rating(value) -> tuple[float | None, float | None]:
+    """Restituisce (stelle_0_5, raw) ignorando outlier (>10, tipici digest Booking)."""
+    try:
+        raw = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    if raw is None:
+        return None, None
+    if 0 < raw <= 5:
+        return raw, raw
+    if 5 < raw <= 10:
+        return round(raw / 2, 2), raw
+    return None, raw
+
+
+def _serialize_central_review(item: dict[str, Any], index: int) -> dict[str, Any]:
+    hotel_ui = normalize_hotel_code(item.get("hotel_code"))
+    stars, raw = normalize_rating(item.get("rating"))
+    author = (item.get("author") or "").strip() or "Ospite"
+    if author.startswith("<") and author.endswith(">"):
+        author = author[1:-1]
+    return {
+        "id": item.get("sync_uuid") or f"r-{index}",
+        "sync_uuid": item.get("sync_uuid"),
+        "hotelId": hotel_ui,
+        "hotel_code": item.get("hotel_code"),
+        "author": author,
+        "source": item.get("source") or "—",
+        "rating": stars if stars is not None else 0,
+        "rating_raw": raw,
+        "rating_missing": stars is None,
+        "date": item.get("review_date") or "",
+        "text": item.get("text") or "",
+        "room_code": item.get("room_code"),
+        "status": "Importata",
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def central_reviews_catalog(
+    *,
+    hotel_code: str | None = None,
+    q: str = "",
+    limit: int = 2000,
+    username: str | None = None,
+    pin: str | None = None,
+) -> dict[str, Any]:
+    """Scarica (paginando) le recensioni centrali e aggrega i KPI per hotel."""
+    page_size = 200
+    collected: list[dict[str, Any]] = []
+    offset = 0
+    reported_total: int | None = None
+    max_items = max(1, min(int(limit), 5000))
+
+    while len(collected) < max_items:
+        page = central_review_page(
+            limit=page_size,
+            offset=offset,
+            username=username,
+            pin=pin,
+        )
+        batch = page.get("items") or []
+        if reported_total is None and page.get("total") is not None:
+            reported_total = int(page["total"])
+        if not batch:
+            break
+        collected.extend(batch)
+        offset += len(batch)
+        if reported_total is not None and offset >= reported_total:
+            break
+        if len(batch) < page_size:
+            break
+
+    hotel_filter = normalize_hotel_code(hotel_code) if hotel_code and hotel_code != "all" else None
+    query = (q or "").strip().lower()
+
+    serialized = [_serialize_central_review(item, i) for i, item in enumerate(collected)]
+    if hotel_filter:
+        serialized = [r for r in serialized if r["hotelId"] == hotel_filter]
+    if query:
+        serialized = [
+            r
+            for r in serialized
+            if query in f"{r['author']} {r['text']} {r['source']} {r.get('room_code') or ''}".lower()
+        ]
+
+    # KPI su tutto il catalogo scaricato (prima del filtro testo), per hotel
+    by_hotel: dict[str, list[dict[str, Any]]] = {hid: [] for hid in HOTEL_LABELS}
+    for item in collected:
+        hid = normalize_hotel_code(item.get("hotel_code"))
+        by_hotel.setdefault(hid, []).append(item)
+
+    def _hotel_stats(hid: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        label = HOTEL_LABELS.get(hid, {"name": hid, "short": hid})
+        ratings = []
+        for row in rows:
+            stars, _raw = normalize_rating(row.get("rating"))
+            if stars is not None:
+                ratings.append(stars)
+        avg = round(sum(ratings) / len(ratings), 2) if ratings else None
+        return {
+            "id": hid,
+            "name": label["name"],
+            "short": label["short"],
+            "count": len(rows),
+            "score": f"{avg:.2f}" if avg is not None else "—",
+            "avg_rating": avg,
+        }
+
+    hotels = [
+        {
+            "id": "all",
+            "name": "Tutti gli hotel",
+            "short": "Tutti",
+            "count": len(collected),
+            "score": "—",
+            "avg_rating": None,
+        }
+    ]
+    for hid in ("hotelgio", "chocohotel", "brigantino"):
+        hotels.append(_hotel_stats(hid, by_hotel.get(hid, [])))
+
+    all_ratings = []
+    for row in collected:
+        stars, _raw = normalize_rating(row.get("rating"))
+        if stars is not None:
+            all_ratings.append(stars)
+    if all_ratings:
+        hotels[0]["avg_rating"] = round(sum(all_ratings) / len(all_ratings), 2)
+        hotels[0]["score"] = f"{hotels[0]['avg_rating']:.2f}"
+
+    return {
+        "configured": True,
+        "total": reported_total if reported_total is not None else len(collected),
+        "returned": len(serialized),
+        "items": serialized,
+        "hotels": hotels,
+        "sources": sorted({str(i.get("source") or "") for i in collected if i.get("source")}),
+    }
 
 
 def resolve_blob_path(source_hash: str, kind: Kind | None = None, ext: str = ".xml") -> str:
