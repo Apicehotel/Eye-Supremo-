@@ -71,6 +71,38 @@ def wait_for_server(timeout: float = 30.0) -> bool:
     return False
 
 
+def maybe_auto_update() -> None:
+    """Se auto_install è attivo e c'è una release nuova, scarica e avvia il Setup."""
+    try:
+        import httpx
+
+        status = httpx.get(f"{URL}/api/updates/status", timeout=25.0).json()
+        if not status.get("auto_check", True):
+            write_log("Controllo aggiornamenti disattivato.")
+            return
+        if not status.get("available"):
+            write_log(
+                f"Nessun aggiornamento (locale {status.get('current_version')}, "
+                f"remoto {status.get('latest_version')})."
+            )
+            return
+        if not status.get("auto_install"):
+            write_log(
+                f"Aggiornamento disponibile v{status.get('latest_version')} "
+                "(attiva «Installa automaticamente» o usa Impostazioni)."
+            )
+            return
+        write_log(f"Auto-install v{status.get('latest_version')}…")
+        result = httpx.post(
+            f"{URL}/api/updates/download",
+            json={"install": True},
+            timeout=180.0,
+        ).json()
+        write_log(f"Esito auto-update: {result}")
+    except Exception as exc:
+        write_log(f"Controllo aggiornamenti non riuscito: {exc}")
+
+
 def ensure_stdio() -> None:
     """PyInstaller --windowed lascia stdout/stderr a None; uvicorn crasha su isatty()."""
     log_handle = None
@@ -157,6 +189,7 @@ def main() -> None:
         if not wait_for_server():
             raise TimeoutError(f"Server locale non raggiungibile su {URL}")
         write_log(f"Server pronto su {URL}")
+        maybe_auto_update()
         open_native_window()
         write_log("Finestra chiusa; uscita.")
         sys.exit(0)

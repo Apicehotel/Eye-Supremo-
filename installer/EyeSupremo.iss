@@ -1,7 +1,7 @@
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=1.3.0
+AppVersion=1.3.1
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa (WebView2) per fatture Eye Supremo
 DefaultDirName={autopf}\Eye Supremo

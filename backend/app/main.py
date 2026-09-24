@@ -12,9 +12,11 @@ from .routers.api import router
 from .routers.auth import router as auth_router
 from .routers.invoice_builder import router as invoice_builder_router
 from .routers.storage import router as storage_router
+from .routers.updates import router as updates_router
 from .routers.warehouse import router as warehouse_router
 # Ensure auth/storage tables are registered on Base.metadata
 from . import auth_models  # noqa: F401
+from .version import APP_VERSION
 
 
 @asynccontextmanager
@@ -28,7 +30,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="RandFatture API", version="1.3.0", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="RandFatture API", version=APP_VERSION, docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -46,6 +48,7 @@ app.include_router(auth_router)
 app.include_router(storage_router)
 app.include_router(invoice_builder_router)
 app.include_router(warehouse_router)
+app.include_router(updates_router)
 
 
 def frontend_dist() -> Path:

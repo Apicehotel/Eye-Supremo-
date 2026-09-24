@@ -1,0 +1,62 @@
+name: Publish Eye Supremo Release
+
+# Pubblica EyeSupremo-Setup.exe su GitHub Releases.
+# I PC lo trovano da Impostazioni → Aggiornamenti.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag versione (es. 1.3.1) senza v'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "name=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            RAW="${GITHUB_REF_NAME}"
+            echo "tag=${RAW}" >> "$GITHUB_OUTPUT"
+            echo "name=${RAW#v}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build portable executable
+        shell: powershell
+        run: ./scripts/build_windows.ps1
+      - name: Install Inno Setup if missing
+        shell: powershell
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+      - name: Compile setup
+        shell: powershell
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Eye Supremo ${{ steps.ver.outputs.name }}
+          files: release/EyeSupremo-Setup.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
