@@ -71,11 +71,49 @@ def wait_for_server(timeout: float = 30.0) -> bool:
     return False
 
 
+def ensure_stdio() -> None:
+    """PyInstaller --windowed lascia stdout/stderr a None; uvicorn crasha su isatty()."""
+    log_handle = None
+    if sys.stdout is None or sys.stderr is None:
+        log_handle = log_path().open("a", encoding="utf-8", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = log_handle  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = log_handle  # type: ignore[assignment]
+
+
 def run_api_server() -> None:
+    ensure_stdio()
     import uvicorn
     from app.main import app as fastapi_app
 
-    uvicorn.run(fastapi_app, host=HOST, port=PORT, log_level="warning")
+    # Formatter minimale: niente ColourFormatter che chiama isatty() su handle None.
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {"()": "logging.Formatter", "fmt": "%(levelname)s: %(message)s"},
+        },
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+            "uvicorn.access": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+        },
+    }
+    uvicorn.run(
+        fastapi_app,
+        host=HOST,
+        port=PORT,
+        log_level="warning",
+        log_config=log_config,
+    )
 
 
 def open_native_window() -> None:
@@ -103,6 +141,8 @@ def open_native_window() -> None:
 
 
 def main() -> None:
+    # Prima di qualsiasi logging uvicorn: ripristina stdout/stderr se --windowed.
+    ensure_stdio()
     os.environ.setdefault("RANDFATTURE_DATA_DIR", str(data_dir()))
     write_log("Avvio Eye Supremo desktop nativo.")
 
