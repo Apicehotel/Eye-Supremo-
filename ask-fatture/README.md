@@ -16,7 +16,7 @@ Serve a:
 
 Niente cloud, niente RandAI, niente magazzino Eye.
 
-Versione corrente: **0.3.0** (`app/version.py`).
+Versione corrente: **0.3.0** (`app/version.py`) — inclusa in **EyeSupremo-Setup.exe** v1.4.1.
 
 ## Modello locale (default)
 
