@@ -2,8 +2,7 @@
 
 RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
 
-> **Ask Fatture** (cartella `ask-fatture/`, v0.3.0) è un **programmino separato** con il suo `.exe`:
-> import XML FatturaPA, catalogo fornitori/prodotti (P.IVA, sconti), pack **Chili / Litri / Pezzi**, domande tipo «quanto pago il latte?» con `qwen3:8b` locale. Non usa RandAI.
+> **Ask Fatture** (cartella `ask-fatture/`, v0.3.0) è incluso nell’**installer unico** `EyeSupremo-Setup.exe` insieme a Eye Supremo: import XML, catalogo fornitori/prodotti, pack **Chili / Litri / Pezzi**, domande con `qwen3:8b` locale. Non usa RandAI.
 
 ## Architettura
 
@@ -21,47 +20,41 @@ Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
 
-### Installer Windows (app nativa `.exe`)
+### Installer Windows (unico Setup)
 
-Per un **programma vero** (finestra Eye Supremo, senza console nera e senza aprire il browser):
+Un solo installer per **Eye Supremo + Ask Fatture**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_suite.ps1
+```
+
+Oppure in due passi:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
-```
-
-Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea `release\EyeSupremo-Setup.exe`.
-
-- Doppio clic → si apre **solo la finestra dell’app** (WebView2 / Edge embedded).
-- Nessun `cmd`, nessun Chrome/Edge con barra indirizzi.
-- Fatture, import ed editor restano nel processo locale; dati in `%LOCALAPPDATA%\EyeSupremo`.
-- Serve il runtime **Microsoft Edge WebView2** (già presente su Windows 10/11 aggiornati).
-- In CI il workflow `windows-installer.yml` costruisce e fa smoke test headless dell’exe.
-
-`start.bat` resta solo per sviluppo (Vite + browser).
-
-### Ask Fatture (exe separato)
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
 ```
 
-Produce `dist\AskFatture.exe`. Con Inno Setup 6, `installer\AskFatture.iss` crea `release\AskFatture-Setup.exe`.
+Produce `release\EyeSupremo-Setup.exe` (v1.4.0) con:
 
-- Catalogo fornitori (P.IVA, sconti) e prodotti
-- Pack cucina: **numero + Chili / Litri / Pezzi**
-- Domande locali via Ollama (`qwen3:8b`)
-- Dati in `%LOCALAPPDATA%\AskFatture`
+- `EyeSupremo.exe` — gestionale (dati in `%LOCALAPPDATA%\EyeSupremo`)
+- `AskFatture.exe` — domande/catalogo/pack Chili·Litri·Pezzi (dati in `%LOCALAPPDATA%\AskFatture`)
+- collegamenti Start Menu / desktop per entrambi
+- script per scaricare i modelli Ollama
 
-Dettagli in [ask-fatture/README.md](ask-fatture/README.md).
+Serve **Microsoft Edge WebView2**. CI: `windows-installer.yml` (smoke headless di entrambi gli exe + Setup unico).
+
+`start.bat` resta solo per sviluppo (Vite + browser). Dettagli Ask Fatture in [ask-fatture/README.md](ask-fatture/README.md).
 
 ### Aggiornamenti sui PC (senza girarli a mano)
 
-1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe` e `AskFatture-Setup.exe`  
-   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.3.1`).
-2. Su ogni PC Eye Supremo, in **Impostazioni → Aggiornamenti**:
+1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe`  
+   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.4.0`).
+2. Su ogni PC, in **Impostazioni → Aggiornamenti**:
    - **Controlla ora** / **Scarica e installa**, oppure
-   - attiva **Installa automaticamente** (all’avvio l’app scarica il Setup e lo lancia).
-3. I dati restano in `%LOCALAPPDATA%\EyeSupremo` / `%LOCALAPPDATA%\AskFatture`; l’installer aggiorna solo il programma.
+   - attiva **Installa automaticamente**.
+3. L’installer aggiorna entrambi i programmi; i dati restano nelle cartelle LocalAppData.
 
 Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` non basta).
 

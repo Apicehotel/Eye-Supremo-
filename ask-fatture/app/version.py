@@ -2,4 +2,4 @@
 
 APP_VERSION = "0.3.0"
 GITHUB_REPO = "Apicehotel/Eye-Supremo-"
-RELEASE_ASSET_NAME = "AskFatture-Setup.exe"
+RELEASE_ASSET_NAME = "EyeSupremo-Setup.exe"  # suite unica (include anche Ask Fatture)
