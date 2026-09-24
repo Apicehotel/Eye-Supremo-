@@ -158,18 +158,43 @@ def open_native_window() -> None:
         ) from exc
 
     write_log(f"Apro finestra nativa {WINDOW_TITLE} → {URL}")
-    window = webview.create_window(
-        WINDOW_TITLE,
-        URL,
-        width=WINDOW_WIDTH,
-        height=WINDOW_HEIGHT,
-        min_size=(960, 640),
-        confirm_close=False,
-        text_select=True,
-    )
+    icon_path = _bundled_icon()
+    window_kwargs = {
+        "title": WINDOW_TITLE,
+        "url": URL,
+        "width": WINDOW_WIDTH,
+        "height": WINDOW_HEIGHT,
+        "min_size": (960, 640),
+        "confirm_close": False,
+        "text_select": True,
+    }
+    # Su Windows l'icona della taskbar/exe arriva da PyInstaller --icon;
+    # se supportato, impostiamo anche l'icona della finestra WebView.
+    if icon_path:
+        window_kwargs["icon"] = str(icon_path)
+    try:
+        window = webview.create_window(**window_kwargs)
+    except TypeError:
+        window_kwargs.pop("icon", None)
+        window = webview.create_window(**window_kwargs)
     # Edge WebView2 su Windows: aspetto di un'app, non di un browser.
     webview.start(gui="edgechromium")
     _ = window  # keep reference until start returns
+
+
+def _bundled_icon() -> Path | None:
+    """Icona Eye Supremo (bundled in exe o repo assets/)."""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        meipass = Path(sys._MEIPASS)
+        candidates.append(meipass / "assets" / "icons" / "eye-supremo.ico")
+        candidates.append(meipass / "eye-supremo.ico")
+    root = Path(__file__).resolve().parents[1]
+    candidates.append(root / "assets" / "icons" / "eye-supremo.ico")
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
 
 
 def main() -> None:

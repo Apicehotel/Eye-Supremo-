@@ -1,7 +1,7 @@
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=1.4.1
+AppVersion=1.4.2
 AppPublisher=Apicehotel
 AppComments=Suite desktop: Eye Supremo + Ask Fatture + catalogo Supabase (WebView2)
 DefaultDirName={autopf}\Eye Supremo
@@ -15,6 +15,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\EyeSupremo.exe
+SetupIconFile=..\assets\icons\eye-supremo.ico
 InfoBeforeFile=
 
 [Files]
