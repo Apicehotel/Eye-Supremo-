@@ -44,8 +44,11 @@ def search_lines(query: str, limit: int = 25) -> list[dict]:
         if not tokens:
             rows = conn.execute(
                 """
-                SELECT l.*, i.numero, i.data, i.fornitore
-                FROM lines l JOIN invoices i ON i.id = l.invoice_id
+                SELECT l.*, i.numero, i.data, i.fornitore, i.supplier_id,
+                       s.partita_iva, s.ragione_sociale, s.sconti_json
+                FROM lines l
+                JOIN invoices i ON i.id = l.invoice_id
+                LEFT JOIN suppliers s ON s.id = i.supplier_id
                 ORDER BY i.data DESC LIMIT ?
                 """,
                 (limit,),
@@ -59,8 +62,11 @@ def search_lines(query: str, limit: int = 25) -> list[dict]:
                 params.extend([f"%{t}%", f"%{t}%"])
             rows = conn.execute(
                 f"""
-                SELECT l.*, i.numero, i.data, i.fornitore
-                FROM lines l JOIN invoices i ON i.id = l.invoice_id
+                SELECT l.*, i.numero, i.data, i.fornitore, i.supplier_id,
+                       s.partita_iva, s.ragione_sociale, s.sconti_json
+                FROM lines l
+                JOIN invoices i ON i.id = l.invoice_id
+                LEFT JOIN suppliers s ON s.id = i.supplier_id
                 WHERE {clauses}
                 ORDER BY i.data DESC LIMIT ?
                 """,
@@ -98,7 +104,8 @@ async def ask(question: str) -> dict:
             "unita_normalizzata": r.get("unita_normalizzata"),
             "quantita": r.get("quantita"),
             "unita": r.get("unita"),
-            "fornitore": r["fornitore"],
+            "fornitore": r.get("ragione_sociale") or r["fornitore"],
+            "partita_iva": r.get("partita_iva"),
             "fattura": r["numero"],
             "data": r["data"],
         }
