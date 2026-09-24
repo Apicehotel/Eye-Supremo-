@@ -1,10 +1,28 @@
+import os
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def default_data_dir() -> Path:
+    """In exe Windows i dati restano in %LOCALAPPDATA%\\EyeSupremo."""
+    override = os.environ.get("RANDFATTURE_DATA_DIR")
+    if override:
+        return Path(override)
+    if getattr(sys, "frozen", False):
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "EyeSupremo"
+    return Path(__file__).resolve().parents[2] / "data"
+
+
+def _env_files() -> tuple[str, ...]:
+    candidates = [Path(".env"), default_data_dir() / ".env"]
+    return tuple(str(path) for path in candidates if path.exists()) or (".env",)
+
+
 class Settings(BaseSettings):
     app_name: str = "RandFatture"
-    data_dir: Path = Path(__file__).resolve().parents[2] / "data"
+    data_dir: Path = default_data_dir()
     max_upload_mb: int = 30
     # Profilo light per PC ~16 GB RAM
     ollama_url: str = "http://127.0.0.1:11434"
@@ -20,7 +38,11 @@ class Settings(BaseSettings):
     # Credenziali RPC eye_central_invoice_page (PIN MultiHotel, non PIN locale Eye)
     supabase_central_username: str = "sviluppatore"
     supabase_central_pin: str | None = None
-    model_config = SettingsConfigDict(env_prefix="RANDFATTURE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="RANDFATTURE_",
+        env_file=_env_files(),
+        extra="ignore",
+    )
 
     @property
     def database_url(self) -> str:
