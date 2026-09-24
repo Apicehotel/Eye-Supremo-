@@ -67,6 +67,7 @@ def storage_status() -> dict:
         "storage_root": root,
         "index_table": "eye_central_invoice_blobs",
         "url": settings.supabase_url,
+        "central_gateway": settings.supabase_central_gateway,
         "location_example": f"{settings.supabase_bucket}/{root}/xml/30/<sha256>.xml",
         "message": None
         if settings.storage_configured
