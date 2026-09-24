@@ -67,8 +67,8 @@ def updates_download(payload: dict | None = None, db: Session = Depends(get_db))
         raise HTTPException(502, f"Impossibile contattare GitHub: {exc}") from exc
     if not remote.get("asset_url"):
         raise HTTPException(404, remote.get("reason") or "Nessun installer nella release")
-    if not remote.get("update_available"):
-        raise HTTPException(409, "Sei già aggiornato all'ultima versione")
+    if not remote.get("available"):
+        raise HTTPException(409, remote.get("reason") or "Sei già aggiornato all'ultima versione")
     try:
         saved = download_setup(remote["asset_url"], remote.get("asset_name"))
     except Exception as exc:
