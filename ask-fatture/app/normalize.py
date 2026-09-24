@@ -204,6 +204,17 @@ def normalize_line(
         prezzo_norm = price / content_in_base
         unita_norm = content_base
         note = f"unitario/pz su pack ({pack_source}) → €/{content_base}"
+    elif (
+        price is not None
+        and content_in_base
+        and content_in_base > 0
+        and content_base == "pz"
+        and (um_base in piece_units or um_base in {"confezione", "scatola"} or um_base is None)
+    ):
+        # Es. conf da 12 pezzi a 6€ → 0,50 €/pz
+        prezzo_norm = price / content_in_base
+        unita_norm = "pz"
+        note = f"pack {content_in_base:g} pezzi ({pack_source}) → €/pz"
     elif price is not None and (um_base in piece_units or um_base is None):
         prezzo_norm = price
         unita_norm = "pz"

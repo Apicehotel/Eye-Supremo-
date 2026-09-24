@@ -5,7 +5,7 @@ Programmino **separato** da Eye Supremo / RandAI.
 Serve a:
 1. Importare fatture (XML FatturaPA)
 2. **Catalogare** per **fornitore** (ragione sociale, nome commerciale, P.IVA, CF, indirizzo, scontistiche) e per **prodotto**
-   - Su ogni prodotto, chi conosce la merce (es. Riona) può inserire il **pack** (es. bombolone = 200 g): vale per tutti e ricalcola i prezzi
+   - Su ogni prodotto: numero + tendina **Chili / Litri / Pezzi** (es. 40 Chili, 12 Pezzi): vale per tutti e ricalcola i prezzi
 3. **Scartare il rumore** (carburante, sconti a riga, bollo, CONAI, trasporto…)
 4. Salvare **prezzo unitario** (come in fattura) e **prezzo normalizzato** confrontabile:
    - peso: conf 50g a 2€ → **40 €/kg**; bombolone 3kg a 30€ → **10 €/kg**

@@ -81,10 +81,18 @@ def test_product_pack_recalculates_lines(tmp_path, monkeypatch):
         pid = products[0]["id"]
         pack = client.put(
             f"/api/products/{pid}/pack",
-            json={"contenuto": 50, "unita": "g", "updated_by": "Riona", "note": "prova"},
+            json={"contenuto": 0.05, "unita": "chili", "updated_by": "Riona", "note": "prova"},
         )
         assert pack.status_code == 200, pack.text
         assert pack.json()["lines_updated"] >= 1
         detail = client.get(f"/api/products/{pid}").json()
-        assert detail["product"]["pack_contenuto"] == 50
+        assert detail["product"]["pack_contenuto"] == 0.05
+        assert detail["product"]["pack_unita"] == "chili"
         assert detail["product"]["pack_updated_by"] == "Riona"
+
+        pezzi = client.put(
+            f"/api/products/{pid}/pack",
+            json={"contenuto": 12, "unita": "pezzi", "updated_by": "Riona"},
+        )
+        assert pezzi.status_code == 200, pezzi.text
+        assert pezzi.json()["product"]["pack_unita"] == "pezzi"

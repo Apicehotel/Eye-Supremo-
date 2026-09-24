@@ -119,27 +119,41 @@ def test_75cl_wine():
 
 
 def test_known_pack_from_catalog_for_pz():
-    # Fattura senza grammi; Riona ha messo pack 200g a catalogo
+    # Fattura senza grammi; Riona ha messo pack 0.2 chili (200 g) a catalogo
     row = normalize_line(
         description="BOMBOLONI FORNO",
         quantita=10,
         unita="PZ",
         prezzo_unitario=0.8,
-        known_pack={"contenuto": 200, "unita": "g"},
+        known_pack={"contenuto": 0.2, "unita": "chili"},
     )
     assert row["pack_source"] == "catalogo"
     assert abs(row["prezzo_normalizzato"] - 4.0) < 1e-9  # 0.8 / 0.2 kg
 
 
 def test_kg_line_estimates_pieces_with_pack():
-    # 40 kg bomboloni, ogni pezzo 200g → ~200 pezzi
+    # 40 chili bomboloni, ogni pezzo 0.2 chili → ~200 pezzi
     row = normalize_line(
         description="BOMBOLONI",
         quantita=40,
         unita="KG",
         prezzo_unitario=3.5,
-        known_pack={"contenuto": 200, "unita": "g"},
+        known_pack={"contenuto": 0.2, "unita": "chili"},
     )
     assert row["unita_normalizzata"] == "kg"
     assert abs(row["prezzo_normalizzato"] - 3.5) < 1e-9
     assert row["pezzi_stimati"] == 200.0
+
+
+def test_known_pack_pezzi_in_confezione():
+    # Conf da 12 pezzi a 6€ → 0,50 €/pz
+    row = normalize_line(
+        description="VASCHETTE MONOUSO",
+        quantita=1,
+        unita="CONF",
+        prezzo_unitario=6.0,
+        known_pack={"contenuto": 12, "unita": "pezzi"},
+    )
+    assert row["pack_source"] == "catalogo"
+    assert row["unita_normalizzata"] == "pz"
+    assert abs(row["prezzo_normalizzato"] - 0.5) < 1e-9
