@@ -36,6 +36,17 @@ Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea
 
 `start.bat` resta solo per sviluppo (Vite + browser).
 
+### Aggiornamenti sui PC (senza girarli a mano)
+
+1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe`  
+   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.3.1`).
+2. Su ogni PC, in **Impostazioni → Aggiornamenti**:
+   - **Controlla ora** / **Scarica e installa**, oppure
+   - attiva **Installa automaticamente** (all’avvio l’app scarica il Setup e lo lancia).
+3. I dati restano in `%LOCALAPPDATA%\EyeSupremo`; l’installer aggiorna solo il programma.
+
+Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` non basta).
+
 ## Importazione
 
 La pagina Importa accetta PDF, XML, DOCX, XLSX e PPTX. MarkItDown converte i documenti locali in Markdown per l'analisi; l'XML FatturaPA resta letto con il parser strutturato e il PDF mantiene il fallback pypdf. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
