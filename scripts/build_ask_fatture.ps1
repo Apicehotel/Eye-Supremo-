@@ -37,4 +37,4 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name AskFatture
   ask-fatture/desktop.py
 
 Write-Host 'Executable: dist/AskFatture.exe (app nativa WebView2)'
-Write-Host 'Per Setup.exe: Inno Setup 6 → installer/AskFatture.iss'
+Write-Host 'Per Setup.exe: Inno Setup 6 -> installer/AskFatture.iss'
