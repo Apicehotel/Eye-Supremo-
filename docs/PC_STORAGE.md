@@ -50,7 +50,7 @@ Path content-addressable: `invoices/{xml|pdf|doc}/{hh}/{sha256}{ext}`.
 
 La service key resta nel backend locale: non esporla nel frontend.
 
-In app: **Catalogo centrale** elenca i metadati MultiHotel (~20k) senza scaricare i blob.
+In app: la pagina **Fatture** elenca insieme archivio PC + metadati MultiHotel (quando `.env` è configurato). La **Coda Storage** resta per importare i file nel SQLite operativo.
 
 ## Ruoli
 

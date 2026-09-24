@@ -11,6 +11,7 @@ from ..importers import parse_document
 from ..models import AppSetting, AuditLog, ImportJob, Invoice, InvoiceRow, Product, Supplier
 from ..schemas import InvoiceIn, ProductIn, ProductOut, SupplierIn, SupplierOut
 from ..services import answer_with_ollama, audit, create_backup, create_invoice, duplicate_candidates, ollama_status, search_records
+from ..unified_invoices import list_unified_invoices
 
 router = APIRouter(prefix="/api")
 
@@ -32,11 +33,49 @@ def dashboard(db: Session = Depends(get_db)):
     product_count = db.scalar(select(func.count(Product.id))) or 0
     monthly = db.execute(select(func.strftime("%Y-%m", Invoice.data), func.sum(Invoice.totale)).group_by(func.strftime("%Y-%m", Invoice.data)).order_by(func.strftime("%Y-%m", Invoice.data)).limit(24)).all()
     recent = db.scalars(select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).order_by(Invoice.created_at.desc()).limit(6)).all()
-    return {"kpis": {"invoices": invoices, "total_spent": spent, "month_spent": month_spent, "suppliers": supplier_count, "products": product_count}, "monthly": [{"month": m, "total": float(v)} for m, v in monthly], "recent": [serialize_invoice(x) for x in recent], "anomalies": detect_anomalies(db)[:5]}
+    central_total = None
+    if settings.central_configured:
+        try:
+            from .. import storage_service
+
+            page = storage_service.central_invoice_page(limit=1, offset=0)
+            if isinstance(page, dict):
+                central_total = page.get("total")
+        except Exception:
+            central_total = None
+    return {
+        "kpis": {
+            "invoices": invoices,
+            "central_invoices": central_total,
+            "total_spent": spent,
+            "month_spent": month_spent,
+            "suppliers": supplier_count,
+            "products": product_count,
+        },
+        "monthly": [{"month": m, "total": float(v)} for m, v in monthly],
+        "recent": [serialize_invoice(x) for x in recent],
+        "anomalies": detect_anomalies(db)[:5],
+        "central_configured": settings.central_configured,
+    }
 
 
 def serialize_invoice(i):
-    return {"id": i.id, "numero": i.numero, "data": i.data.isoformat(), "imponibile": float(i.imponibile), "iva": float(i.iva), "totale": float(i.totale), "valuta": i.valuta, "stato_importazione": i.stato_importazione, "file_originale": i.file_originale, "supplier": {"id": i.supplier.id, "ragione_sociale": i.supplier.ragione_sociale}, "row_count": len(i.rows)}
+    return {
+        "id": i.id,
+        "source": "local",
+        "numero": i.numero,
+        "data": i.data.isoformat(),
+        "imponibile": float(i.imponibile),
+        "iva": float(i.iva),
+        "totale": float(i.totale),
+        "valuta": i.valuta,
+        "stato_importazione": i.stato_importazione,
+        "file_originale": i.file_originale,
+        "hash_file": i.hash_file,
+        "supplier": {"id": i.supplier.id, "ragione_sociale": i.supplier.ragione_sociale},
+        "row_count": len(i.rows),
+        "openable": True,
+    }
 
 
 @router.get("/suppliers")
@@ -77,12 +116,25 @@ def product_detail(product_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/invoices")
-def invoices(q: str = "", year: int | None = None, supplier_id: int | None = None, skip: int = 0, limit: int = Query(50, le=200), db: Session = Depends(get_db)):
-    stmt = select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows))
-    if q: stmt = stmt.join(Supplier).where((Invoice.numero.ilike(f"%{q}%")) | (Supplier.ragione_sociale.ilike(f"%{q}%")))
-    if year: stmt = stmt.where(func.strftime("%Y", Invoice.data) == str(year))
-    if supplier_id: stmt = stmt.where(Invoice.supplier_id == supplier_id)
-    return [serialize_invoice(i) for i in db.scalars(stmt.order_by(Invoice.data.desc()).offset(skip).limit(limit)).unique().all()]
+def invoices(
+    q: str = "",
+    year: int | None = None,
+    supplier_id: int | None = None,
+    skip: int = 0,
+    limit: int = Query(50, le=200),
+    include_central: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Lista unificata: PC locale + catalogo Supabase MultiHotel (se .env configurato)."""
+    return list_unified_invoices(
+        db,
+        q=q,
+        year=year,
+        supplier_id=supplier_id,
+        skip=skip,
+        limit=limit,
+        include_central=include_central,
+    )
 
 
 @router.post("/invoices")

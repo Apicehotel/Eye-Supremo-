@@ -7,7 +7,7 @@ import {AIPage, ImportPage, SettingsPage, SystemPage} from './pages/ImportAISett
 import Reviews from './pages/Reviews';
 import InvoiceEditor from './pages/InvoiceEditor';
 import Warehouse from './pages/Warehouse';
-import {StorageInboxPage, UploaderPage, CentralCatalogPage} from './pages/StoragePages';
+import {StorageInboxPage, UploaderPage} from './pages/StoragePages';
 import {currentUser, AuthUser} from './lib/api';
 import './pages/InvoiceEditor.css';
 
@@ -84,7 +84,8 @@ function AppInner() {
         );
         break;
       case 'central-catalog':
-        content = <CentralCatalogPage />;
+        // Unificato in Fatture (locale + Supabase)
+        content = <Invoices onOpen={openInvoice} />;
         break;
       case 'ai':
         content = <AIPage />;

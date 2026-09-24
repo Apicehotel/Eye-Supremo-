@@ -2,7 +2,7 @@ import {ReactNode} from 'react';
 import {
   LayoutDashboard, FileText, FilePenLine, Package, Boxes, Users, Upload, Sparkles,
   ChartNoAxesCombined, History, TriangleAlert, Tags, Settings, MonitorCog, Menu, X,
-  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut, Library,
+  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut,
 } from 'lucide-react';
 import {clearAuth, AuthUser} from '../lib/api';
 
@@ -20,7 +20,6 @@ const nav: [Page, string, any][] = [
   ['suppliers', 'Fornitori', Users],
   ['import', 'Importa', Upload],
   ['storage-inbox', 'Coda Storage', Inbox],
-  ['central-catalog', 'Catalogo centrale', Library],
   ['ai', 'Ricerca IA', Sparkles],
   ['reports', 'Report', ChartNoAxesCombined],
   ['history', 'Storico', History],
