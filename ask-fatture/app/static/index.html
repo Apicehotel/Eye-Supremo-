@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ask Fatture</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --text: #e8eef4;
+      --muted: #8b9aab;
+      --accent: #3d9a6a;
+      --accent2: #2a6f4e;
+      --warn: #c4a035;
+      --line: #2a3542;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1c3a2e 0%, transparent 50%),
+                  radial-gradient(900px 500px at 100% 0%, #1a2838 0%, transparent 45%),
+                  var(--bg);
+      color: var(--text);
+    }
+    main { max-width: 880px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); margin: 0 0 22px; }
+    .badge {
+      display: inline-block; font-size: 0.75rem; padding: 3px 8px; border-radius: 4px;
+      background: #243041; color: var(--muted); margin-bottom: 12px;
+    }
+    .grid { display: grid; gap: 14px; }
+    @media (min-width: 720px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+    .card {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 1rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+    textarea, input[type=file] {
+      width: 100%; background: #121820; color: var(--text);
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+      font: inherit;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button {
+      border: 0; border-radius: 8px; padding: 10px 14px; font: inherit; cursor: pointer;
+      background: var(--accent); color: #04140c; font-weight: 600;
+    }
+    button.secondary { background: #2a3544; color: var(--text); font-weight: 500; }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    .status { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+    .ok { color: #6dcca0; }
+    .warn { color: var(--warn); }
+    .answer {
+      white-space: pre-wrap; line-height: 1.45; margin: 0;
+      background: #121820; border-radius: 8px; padding: 12px; border: 1px solid var(--line);
+    }
+    .sources { margin: 12px 0 0; padding: 0; list-style: none; }
+    .sources li {
+      padding: 8px 0; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted);
+    }
+    .sources b { color: var(--text); display: block; }
+    .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .examples button {
+      background: transparent; border: 1px solid var(--line); color: var(--muted);
+      font-weight: 400; font-size: 0.8rem; padding: 6px 10px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="badge">Separato da Eye Supremo / RandAI · modello locale</div>
+  <h1>Ask Fatture</h1>
+  <p class="sub">Importa XML e chiedi prezzi. Motore: <span id="model">…</span></p>
+
+  <div class="grid two">
+    <section class="card">
+      <h2>Stato</h2>
+      <p class="status" id="status">Caricamento…</p>
+      <div class="actions">
+        <button class="secondary" type="button" id="refresh">Aggiorna stato</button>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Importa fattura XML</h2>
+      <label>FatturaPA (.xml)</label>
+      <input type="file" id="file" accept=".xml,application/xml,text/xml" />
+      <div class="actions">
+        <button type="button" id="upload">Importa</button>
+      </div>
+      <p class="status" id="importMsg"></p>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:14px">
+    <h2>Chiedi</h2>
+    <label for="q">Domanda</label>
+    <textarea id="q" placeholder="Es. Quanto pago il latte? Dove lo pago meno?"></textarea>
+    <div class="examples">
+      <button type="button" data-q="Quanto pago il latte?">Latte</button>
+      <button type="button" data-q="Dove pago meno la pasta?">Pasta meno cara</button>
+      <button type="button" data-q="Quali fornitori ho usato di recente?">Fornitori</button>
+    </div>
+    <div class="actions">
+      <button type="button" id="ask">Chiedi</button>
+    </div>
+    <div id="out" style="margin-top:14px;display:none">
+      <p class="status" id="mode"></p>
+      <pre class="answer" id="answer"></pre>
+      <ul class="sources" id="sources"></ul>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+async function loadStatus() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    $('model').textContent = s.model;
+    const o = s.ollama || {};
+    let cls = 'warn', msg = '';
+    if (!o.available) {
+      msg = `Ollama non raggiungibile. Avvia Ollama, poi: ollama pull ${s.model}`;
+    } else if (!o.model_present) {
+      msg = `Ollama ok, ma manca ${s.model}. Esegui scarica-modello.bat`;
+    } else {
+      cls = 'ok';
+      msg = `Ollama pronto · ${s.model} · ${s.invoices} fatture · ${s.lines} righe`;
+    }
+    $('status').className = 'status ' + cls;
+    $('status').textContent = msg;
+  } catch (e) {
+    $('status').className = 'status warn';
+    $('status').textContent = String(e);
+  }
+}
+$('refresh').onclick = loadStatus;
+$('upload').onclick = async () => {
+  const f = $('file').files?.[0];
+  if (!f) { $('importMsg').textContent = 'Scegli un file XML'; return; }
+  const body = new FormData();
+  body.append('file', f);
+  $('upload').disabled = true;
+  try {
+    const r = await fetch('/api/import', { method: 'POST', body });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    $('importMsg').className = 'status ok';
+    $('importMsg').textContent = `OK: ${j.fornitore} · fattura ${j.numero} · ${j.rows} righe`;
+    loadStatus();
+  } catch (e) {
+    $('importMsg').className = 'status warn';
+    $('importMsg').textContent = String(e.message || e);
+  } finally {
+    $('upload').disabled = false;
+  }
+};
+document.querySelectorAll('[data-q]').forEach(btn => {
+  btn.onclick = () => { $('q').value = btn.dataset.q; };
+});
+$('ask').onclick = async () => {
+  const question = $('q').value.trim();
+  if (!question) return;
+  $('ask').disabled = true;
+  try {
+    const r = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    $('out').style.display = 'block';
+    $('mode').textContent = `Modo: ${j.mode} · modello ${j.model}`;
+    $('answer').textContent = j.answer;
+    $('sources').innerHTML = (j.sources || []).map(s =>
+      `<li><b>${s.descrizione}</b>${s.prezzo_unitario ?? '—'} € · ${s.fornitore} · fatt. ${s.fattura} · ${s.data || '—'}</li>`
+    ).join('');
+  } catch (e) {
+    $('out').style.display = 'block';
+    $('answer').textContent = String(e.message || e);
+    $('sources').innerHTML = '';
+  } finally {
+    $('ask').disabled = false;
+  }
+};
+loadStatus();
+</script>
+</body>
+</html>
