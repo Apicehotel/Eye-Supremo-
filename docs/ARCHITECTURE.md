@@ -27,4 +27,4 @@ La ricerca deterministica produce un piccolo contesto citabile. Se Ollama è att
 - FastAPI + SQLAlchemy 2 per API tipizzate e migrazione futura semplice.
 - SQLite WAL, indici espliciti e paginazione; FTS5 è creato all'avvio.
 - Elaborazioni di import predisposte come job; la milestone locale le esegue nel processo per ridurre complessità operativa.
-- Nessun Electron: in sviluppo `start.bat` avvia browser + Vite + uvicorn. In produzione Windows, PyInstaller (`backend/desktop.py` → `EyeSupremo.exe`) serve frontend buildato e API sulla porta `8765`; i dati restano in `%LOCALAPPDATA%\EyeSupremo`. Tauri resta un’alternativa futura più nativa.
+- In sviluppo: `start.bat` avvia Vite + browser. In produzione Windows: `EyeSupremo.exe` è un’**app a finestra nativa** (pywebview + WebView2), senza console e senza aprire un browser esterno; FastAPI e le fatture restano locali sulla porta `8765` solo come motore interno. Tauri resta un’alternativa futura più “shell nativa”.

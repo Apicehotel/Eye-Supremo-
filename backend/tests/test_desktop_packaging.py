@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.main import frontend_dist
+import desktop as desktop_launcher
 
 
 def test_frontend_dist_points_to_repo_build():
@@ -11,6 +12,14 @@ def test_frontend_dist_points_to_repo_build():
 def test_api_docs_available_alongside_optional_static(client):
     response = client.get("/api/docs")
     assert response.status_code == 200
+
+
+def test_desktop_headless_flag(monkeypatch):
+    monkeypatch.delenv("EYE_SUPREMO_HEADLESS", raising=False)
+    monkeypatch.delenv("EYE_SUPREMO_NO_BROWSER", raising=False)
+    assert desktop_launcher.headless_mode() is False
+    monkeypatch.setenv("EYE_SUPREMO_HEADLESS", "1")
+    assert desktop_launcher.headless_mode() is True
 
 
 def test_packaged_style_invoice_flow_when_ui_built(client):
