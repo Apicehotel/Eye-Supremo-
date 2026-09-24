@@ -85,9 +85,18 @@ def fetch_latest_release(timeout: float = 20.0) -> dict:
         setup = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
 
     newer = is_newer(tag) if tag else False
+    has_asset = bool(setup)
+    available = newer and has_asset
+    reason = None
+    if not tag:
+        reason = "Nessuna release pubblicata su GitHub."
+    elif not has_asset:
+        reason = "Release trovata ma manca l'asset EyeSupremo-Setup.exe."
+    elif not newer:
+        reason = f"Sei già aggiornato (v{APP_VERSION})."
     return {
-        "available": newer and bool(setup),
-        "update_available": newer,
+        "available": available,
+        "update_available": available,
         "current_version": APP_VERSION,
         "latest_version": tag.lstrip("vV") if tag else None,
         "tag_name": tag or None,
@@ -98,9 +107,7 @@ def fetch_latest_release(timeout: float = 20.0) -> dict:
         "asset_name": setup.get("name") if setup else None,
         "asset_url": setup.get("browser_download_url") if setup else None,
         "asset_size": setup.get("size") if setup else None,
-        "reason": None
-        if setup
-        else "Release trovata ma manca l'asset EyeSupremo-Setup.exe.",
+        "reason": reason,
     }
 
 
