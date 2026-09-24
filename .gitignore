@@ -8,3 +8,7 @@ __pycache__/
 .env
 design/
 *.tsbuildinfo
+dist/
+build/
+release/
+*.spec

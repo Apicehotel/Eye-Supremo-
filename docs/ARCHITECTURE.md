@@ -27,4 +27,4 @@ La ricerca deterministica produce un piccolo contesto citabile. Se Ollama è att
 - FastAPI + SQLAlchemy 2 per API tipizzate e migrazione futura semplice.
 - SQLite WAL, indici espliciti e paginazione; FTS5 è creato all'avvio.
 - Elaborazioni di import predisposte come job; la milestone locale le esegue nel processo per ridurre complessità operativa.
-- Nessun Electron nella prima versione: `start.bat` avvia browser, frontend e backend. Tauri è il candidato futuro per il packaging Windows.
+- Nessun Electron: in sviluppo `start.bat` avvia browser + Vite + uvicorn. In produzione Windows, PyInstaller (`backend/desktop.py` → `EyeSupremo.exe`) serve frontend buildato e API sulla porta `8765`; i dati restano in `%LOCALAPPDATA%\EyeSupremo`. Tauri resta un’alternativa futura più nativa.

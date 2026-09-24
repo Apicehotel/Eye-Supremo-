@@ -18,6 +18,16 @@ Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
 
+### Installer Windows (`.exe`)
+
+Per un avvio senza Python/Node installati:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
+
+Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea `release\EyeSupremo-Setup.exe`. L’exe avvia API + UI su `http://127.0.0.1:8765` (fatture, import, editor inclusivi) e salva i dati in `%LOCALAPPDATA%\EyeSupremo`. In CI il workflow `windows-installer.yml` costruisce e fa smoke test dell’exe.
+
 ## Importazione
 
 La pagina Importa accetta PDF, XML, DOCX, XLSX e PPTX. MarkItDown converte i documenti locali in Markdown per l'analisi; l'XML FatturaPA resta letto con il parser strutturato e il PDF mantiene il fallback pypdf. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
@@ -60,4 +70,4 @@ Nessuna telemetria o invio cloud. Upload limitati, estensioni consentite, nomi f
 - Conferma completa dell'anteprima UI e riconciliazione alias assistita.
 - Embedding incrementali con indice vettoriale locale.
 - Report PDF/XLSX e ripristino backup guidato.
-- Multiutente con ruoli e cifratura; packaging Tauri; PostgreSQL opzionale.
+- Multiutente con ruoli e cifratura; packaging Tauri come alternativa al PyInstaller attuale; PostgreSQL opzionale.
