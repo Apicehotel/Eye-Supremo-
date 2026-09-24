@@ -84,9 +84,9 @@ jobs:
               if (Test-Path $log) { Get-Content $log }
               throw 'AskFatture.exe non ha risposto su http://127.0.0.1:8787/api/health'
             }
-            $home = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
-            if ($home.StatusCode -ne 200) { throw 'UI Ask Fatture non raggiungibile su /' }
-            if ($home.Content -notmatch 'Chili') { throw 'UI non allineata: manca tendina Chili/Litri/Pezzi' }
+            $page = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
+            if ($page.StatusCode -ne 200) { throw 'UI Ask Fatture non raggiungibile su /' }
+            if ($page.Content -notmatch 'Chili') { throw 'UI non allineata: manca tendina Chili/Litri/Pezzi' }
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
