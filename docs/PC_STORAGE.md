@@ -12,7 +12,7 @@ Momentaneamente Eye/RandFatture resta sul **PC**. Supabase non è il database fa
    - `RANDFATTURE_SUPABASE_BUCKET=eye-invoices`
    - (opzionale catalogo) `RANDFATTURE_SUPABASE_ANON_KEY` + `RANDFATTURE_SUPABASE_CENTRAL_PIN`
    - (opzionale PowerShell SQL) `RANDFATTURE_SUPABASE_DB_URL`
-4. Avvia l’app (`start.bat`, oppure `EyeSupremo.exe` / Setup → browser su `http://127.0.0.1:8765`).
+4. Avvia l’app: **`EyeSupremo.exe`** (finestra nativa consigliata) oppure `start.bat` in sviluppo.
 5. Primo accesso: PIN **Sviluppatore**.
 6. Impostazioni → PIN per **Caricatore** (e altri utenti).
 7. Login Caricatore → carica un PDF/XML di prova.

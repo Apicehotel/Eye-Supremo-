@@ -31,13 +31,17 @@ jobs:
       - name: Smoke test packaged executable
         shell: powershell
         run: |
-          $env:EYE_SUPREMO_NO_BROWSER = '1'
+          # Headless: niente finestra WebView2 in CI, solo processo + API
+          $env:EYE_SUPREMO_HEADLESS = '1'
           $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo.exe" -PassThru
           $ok = $false
           try {
             for ($i = 0; $i -lt 60; $i++) {
               Start-Sleep -Milliseconds 500
-              if ($proc.HasExited) { break }
+              if ($proc.HasExited) {
+                Write-Host "EyeSupremo.exe uscita anticipata, exit=$($proc.ExitCode)"
+                break
+              }
               try {
                 $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing -TimeoutSec 2
                 if ($response.StatusCode -eq 200) { $ok = $true; break }
@@ -48,7 +52,6 @@ jobs:
               if (Test-Path $log) { Get-Content $log }
               throw 'EyeSupremo.exe non ha risposto su http://127.0.0.1:8765/'
             }
-            # Verifica che le API fatture rispondano nello stesso processo
             $health = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/docs' -UseBasicParsing -TimeoutSec 5
             if ($health.StatusCode -ne 200) { throw 'API fatture non raggiungibili su /api/docs' }
           } finally {

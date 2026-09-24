@@ -18,15 +18,23 @@ Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
 
-### Installer Windows (`.exe`)
+### Installer Windows (app nativa `.exe`)
 
-Per un avvio senza Python/Node installati:
+Per un **programma vero** (finestra Eye Supremo, senza console nera e senza aprire il browser):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 ```
 
-Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea `release\EyeSupremo-Setup.exe`. L’exe avvia API + UI su `http://127.0.0.1:8765` (fatture, import, editor inclusivi) e salva i dati in `%LOCALAPPDATA%\EyeSupremo`. In CI il workflow `windows-installer.yml` costruisce e fa smoke test dell’exe.
+Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea `release\EyeSupremo-Setup.exe`.
+
+- Doppio clic → si apre **solo la finestra dell’app** (WebView2 / Edge embedded).
+- Nessun `cmd`, nessun Chrome/Edge con barra indirizzi.
+- Fatture, import ed editor restano nel processo locale; dati in `%LOCALAPPDATA%\EyeSupremo`.
+- Serve il runtime **Microsoft Edge WebView2** (già presente su Windows 10/11 aggiornati).
+- In CI il workflow `windows-installer.yml` costruisce e fa smoke test headless dell’exe.
+
+`start.bat` resta solo per sviluppo (Vite + browser).
 
 ## Importazione
 

@@ -22,9 +22,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo Avvio consigliato (sviluppo): setup.bat  (una volta) poi start.bat
-echo Avvio consigliato (hotel):    EyeSupremo-Setup.exe oppure dist\EyeSupremo.exe
+echo Avvio consigliato (hotel):    EyeSupremo-Setup.exe → app a finestra nativa
+echo   (niente console CMD, niente browser esterno)
 echo   Build: powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+echo Avvio sviluppo:               setup.bat poi start.bat
 echo Doc: docs\PC_STORAGE.md
 echo.
 echo Locazione Supabase (bucket + SQL):
