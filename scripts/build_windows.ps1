@@ -15,9 +15,11 @@ python -m pip install pyinstaller==6.16.0
 $sep = ';'
 # --windowed = nessun CMD nero; UI in WebView2 nativo via pywebview
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name EyeSupremo `
+  --icon "assets/icons/eye-supremo.ico" `
   --paths backend `
   --add-data "frontend/dist${sep}frontend_dist" `
   --add-data "backend/app/xsd${sep}app/xsd" `
+  --add-data "assets/icons/eye-supremo.ico${sep}assets/icons" `
   --collect-all pydantic `
   --collect-all pydantic_settings `
   --collect-all markitdown `

@@ -15,6 +15,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\EyeSupremo.exe
+SetupIconFile=..\assets\icons\eye-supremo.ico
 InfoBeforeFile=
 
 [Files]

@@ -54,8 +54,11 @@ export function Shell({
     <div className="app-shell">
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="brand">
-          <b>EYE</b> SUPREMO
-          <span>{uploaderOnly ? 'Solo carico file' : area === 'invoices' ? 'Le tue fatture, più valore.' : 'Ascolta, rispondi, migliora.'}</span>
+          <img className="brand-mark" src="/favicon-32.png" alt="" width={28} height={28} />
+          <div>
+            <b>EYE</b> SUPREMO
+            <span>{uploaderOnly ? 'Solo carico file' : area === 'invoices' ? 'Le tue fatture, più valore.' : 'Ascolta, rispondi, migliora.'}</span>
+          </div>
         </div>
         {!uploaderOnly && (
           <div className="area-switch" role="group" aria-label="Cambia area">
