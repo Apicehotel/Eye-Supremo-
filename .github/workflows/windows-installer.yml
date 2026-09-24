@@ -7,8 +7,10 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'ask-fatture/**'
       - 'installer/**'
       - 'scripts/build_windows.ps1'
+      - 'scripts/build_ask_fatture.ps1'
       - 'scarica-modelli-ia.bat'
       - '.github/workflows/windows-installer.yml'
 
@@ -25,13 +27,12 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Build portable executable
+      - name: Build Eye Supremo executable
         shell: powershell
         run: ./scripts/build_windows.ps1
-      - name: Smoke test packaged executable
+      - name: Smoke test EyeSupremo.exe
         shell: powershell
         run: |
-          # Headless: niente finestra WebView2 in CI, solo processo + API
           $env:EYE_SUPREMO_HEADLESS = '1'
           $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo.exe" -PassThru
           $ok = $false
@@ -57,6 +58,38 @@ jobs:
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
+      - name: Build Ask Fatture executable
+        shell: powershell
+        run: ./scripts/build_ask_fatture.ps1
+      - name: Smoke test AskFatture.exe
+        shell: powershell
+        run: |
+          $env:ASK_FATTURE_HEADLESS = '1'
+          $proc = Start-Process -FilePath "$PWD\dist\AskFatture.exe" -PassThru
+          $ok = $false
+          try {
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 500
+              if ($proc.HasExited) {
+                Write-Host "AskFatture.exe uscita anticipata, exit=$($proc.ExitCode)"
+                break
+              }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/health' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { $ok = $true; break }
+              } catch {}
+            }
+            if (-not $ok) {
+              $log = Join-Path $env:LOCALAPPDATA 'AskFatture\logs\launcher.log'
+              if (Test-Path $log) { Get-Content $log }
+              throw 'AskFatture.exe non ha risposto su http://127.0.0.1:8787/api/health'
+            }
+            $home = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
+            if ($home.StatusCode -ne 200) { throw 'UI Ask Fatture non raggiungibile su /' }
+            if ($home.Content -notmatch 'Chili') { throw 'UI non allineata: manca tendina Chili/Litri/Pezzi' }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
       - name: Install Inno Setup if missing
         shell: powershell
         run: |
@@ -64,11 +97,15 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-      - name: Compile setup
+      - name: Compile setups
         shell: powershell
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
       - uses: actions/upload-artifact@v4
         with:
-          name: EyeSupremo-Windows-Setup
-          path: release/EyeSupremo-Setup.exe
+          name: Windows-Setups
+          path: |
+            release/EyeSupremo-Setup.exe
+            release/AskFatture-Setup.exe
           if-no-files-found: error

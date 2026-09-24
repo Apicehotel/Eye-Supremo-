@@ -25,6 +25,25 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
 
+  ask-fatture:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ask-fatture
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ask-fatture/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - run: pip install pytest
+      - run: python -m pytest -q
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

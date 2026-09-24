@@ -1,7 +1,7 @@
 name: Publish Eye Supremo Release
 
-# Pubblica EyeSupremo-Setup.exe su GitHub Releases.
-# I PC lo trovano da Impostazioni → Aggiornamenti.
+# Pubblica EyeSupremo-Setup.exe + AskFatture-Setup.exe su GitHub Releases.
+# I PC Eye Supremo lo trovano da Impostazioni → Aggiornamenti.
 on:
   workflow_dispatch:
     inputs:
@@ -41,22 +41,35 @@ jobs:
             echo "tag=${RAW}" >> "$GITHUB_OUTPUT"
             echo "name=${RAW#v}" >> "$GITHUB_OUTPUT"
           fi
-      - name: Build portable executable
+      - name: Build Eye Supremo
         shell: powershell
         run: ./scripts/build_windows.ps1
+      - name: Build Ask Fatture
+        shell: powershell
+        run: ./scripts/build_ask_fatture.ps1
       - name: Install Inno Setup if missing
         shell: powershell
         run: |
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-      - name: Compile setup
+      - name: Compile setups
         shell: powershell
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Eye Supremo ${{ steps.ver.outputs.name }}
-          files: release/EyeSupremo-Setup.exe
+          files: |
+            release/EyeSupremo-Setup.exe
+            release/AskFatture-Setup.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## Installer
+            - **EyeSupremo-Setup.exe** — gestionale Eye Supremo
+            - **AskFatture-Setup.exe** — Ask Fatture (import XML, catalogo, pack Chili/Litri/Pezzi, Ollama)
+
+            Dati locali: `%LOCALAPPDATA%\EyeSupremo` e `%LOCALAPPDATA%\AskFatture`.

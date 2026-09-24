@@ -16,6 +16,8 @@ Serve a:
 
 Niente cloud, niente RandAI, niente magazzino Eye.
 
+Versione corrente: **0.3.0** (`app/version.py`).
+
 ## Modello locale (default)
 
 | Modello | Peso circa | Perché |
@@ -24,15 +26,36 @@ Niente cloud, niente RandAI, niente magazzino Eye.
 | `qwen3:4b` | ~2,5 GB | Compromesso se la RAM è ~8–12 GB |
 | `qwen3:1.7b` | ~1,4 GB | Massimo snappy / PC più deboli |
 
-Cambia modello in Impostazioni nell’app o con variabile `ASKFATTURE_MODEL`.
+Cambia modello con variabile `ASKFATTURE_MODEL`.
 
 ## Requisiti
 
-- Windows 10/11 (o Linux/macOS)
-- Python 3.11+
-- [Ollama](https://ollama.com) installato e avviato
+- Windows 10/11 (WebView2)
+- [Ollama](https://ollama.com) installato e avviato (per le domande)
 
-## Avvio
+## Installer Windows (`.exe`)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
+```
+
+Produce `dist\AskFatture.exe`. Con Inno Setup 6:
+
+```powershell
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
+```
+
+→ `release\AskFatture-Setup.exe`
+
+- Doppio clic → finestra nativa **Ask Fatture** (niente browser, niente console)
+- Dati in `%LOCALAPPDATA%\AskFatture`
+- Dopo l’install: esegui `scarica-modello.bat` (accanto all’exe) se Ollama non ha già `qwen3:8b`
+
+CI: workflow `windows-installer.yml` costruisce e fa smoke test headless di entrambi gli exe (Eye Supremo + Ask Fatture).
+
+Release: Actions → **Publish Eye Supremo Release** pubblica anche `AskFatture-Setup.exe`.
+
+## Avvio sviluppo (senza installer)
 
 ```bat
 setup.bat
@@ -40,9 +63,9 @@ scarica-modello.bat
 start.bat
 ```
 
-Si apre la finestra **Ask Fatture** (WebView2) su `http://127.0.0.1:8787`.
+`start.bat` usa `AskFatture.exe` se lo trova, altrimenti `desktop.py` nel venv.
 
-Sviluppo senza finestra nativa:
+Sviluppo solo API:
 
 ```bat
 .venv\Scripts\python.exe -m uvicorn app.main:app --app-dir . --host 127.0.0.1 --port 8787
@@ -51,7 +74,7 @@ Sviluppo senza finestra nativa:
 ## Flusso
 
 1. **Importa** un XML FatturaPA  
-2. **Chiedi** (“quanto costa il latte?”, “fornitore più economico per la pasta?”)  
-3. Il motore cerca le righe nell’archivio locale e chiede a Qwen3 di rispondere **solo** su quei dati  
+2. Apri **Prodotti** → imposta pack (**numero + Chili/Litri/Pezzi**) se manca in fattura  
+3. **Chiedi** (“quanto costa il latte?”, “fornitore più economico per la pasta?”)  
 
 I file restano in `%LOCALAPPDATA%\AskFatture` (Windows) o `./data`.
