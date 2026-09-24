@@ -54,9 +54,9 @@ class SupplierUpdate(BaseModel):
 
 
 class ProductPackUpdate(BaseModel):
-    """Contenuto pezzo/confezione noto in cucina (es. bombolone = 200 g)."""
+    """Quantità nota in cucina: numero + Chili / Litri / Pezzi."""
     contenuto: float = Field(gt=0)
-    unita: str = Field(min_length=1, max_length=20)  # g, kg, etti, ml, cl, lt, l
+    unita: str = Field(min_length=1, max_length=20)  # chili, litri, pezzi (o alias kg/l/pz)
     note: str | None = None
     updated_by: str | None = Field(default="cucina", max_length=80)
 
