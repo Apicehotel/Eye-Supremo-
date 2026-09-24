@@ -1,5 +1,6 @@
 .venv/
 data/
+tests/_tmp_data/
 __pycache__/
 *.pyc
 .pytest_cache/
