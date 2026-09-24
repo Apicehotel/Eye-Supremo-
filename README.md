@@ -2,7 +2,8 @@
 
 RandFatture è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi e interrogare lo storico con Ollama. Il gestionale continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
 
-> **Ask Fatture** (cartella `ask-fatture/`) è un **programmino separato**: solo import XML + domande tipo «quanto pago il latte?» con modello locale `qwen3:8b`. Non usa RandAI.
+> **Ask Fatture** (cartella `ask-fatture/`, v0.3.0) è un **programmino separato** con il suo `.exe`:
+> import XML FatturaPA, catalogo fornitori/prodotti (P.IVA, sconti), pack **Chili / Litri / Pezzi**, domande tipo «quanto pago il latte?» con `qwen3:8b` locale. Non usa RandAI.
 
 ## Architettura
 
@@ -38,14 +39,29 @@ Produce `dist\EyeSupremo.exe`. Con Inno Setup 6, `installer\EyeSupremo.iss` crea
 
 `start.bat` resta solo per sviluppo (Vite + browser).
 
+### Ask Fatture (exe separato)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
+```
+
+Produce `dist\AskFatture.exe`. Con Inno Setup 6, `installer\AskFatture.iss` crea `release\AskFatture-Setup.exe`.
+
+- Catalogo fornitori (P.IVA, sconti) e prodotti
+- Pack cucina: **numero + Chili / Litri / Pezzi**
+- Domande locali via Ollama (`qwen3:8b`)
+- Dati in `%LOCALAPPDATA%\AskFatture`
+
+Dettagli in [ask-fatture/README.md](ask-fatture/README.md).
+
 ### Aggiornamenti sui PC (senza girarli a mano)
 
-1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe`  
+1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe` e `AskFatture-Setup.exe`  
    (Actions → **Publish Eye Supremo Release**, oppure tag `v1.3.1`).
-2. Su ogni PC, in **Impostazioni → Aggiornamenti**:
+2. Su ogni PC Eye Supremo, in **Impostazioni → Aggiornamenti**:
    - **Controlla ora** / **Scarica e installa**, oppure
    - attiva **Installa automaticamente** (all’avvio l’app scarica il Setup e lo lancia).
-3. I dati restano in `%LOCALAPPDATA%\EyeSupremo`; l’installer aggiorna solo il programma.
+3. I dati restano in `%LOCALAPPDATA%\EyeSupremo` / `%LOCALAPPDATA%\AskFatture`; l’installer aggiorna solo il programma.
 
 Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` non basta).
 

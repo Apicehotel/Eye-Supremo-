@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import sys
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -12,8 +13,17 @@ from .config import settings
 from .db import db, dump_sconti, init_db
 from .import_xml import parse_fatturapa
 from .normalize import normalize_line
+from .version import APP_VERSION
 
-STATIC = Path(__file__).resolve().parent / "static"
+
+def static_dir() -> Path:
+    """UI statica: PyInstaller (_MEIPASS/app/static) oppure cartella repo."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "app" / "static"
+    return Path(__file__).resolve().parent / "static"
+
+
+STATIC = static_dir()
 
 
 @asynccontextmanager
@@ -22,7 +32,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Ask Fatture", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Ask Fatture", version=APP_VERSION, lifespan=lifespan)
 
 
 class AskIn(BaseModel):
