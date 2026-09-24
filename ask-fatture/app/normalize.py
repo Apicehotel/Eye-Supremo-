@@ -27,12 +27,15 @@ UNIT_TO_BASE: dict[str, tuple[str, Decimal]] = {
     "litri": ("l", Decimal("1")),
     "ml": ("l", Decimal("0.001")),
     "cl": ("l", Decimal("0.01")),
+    "dl": ("l", Decimal("0.1")),
     "pz": ("pz", Decimal("1")),
     "pezzo": ("pz", Decimal("1")),
     "pezzi": ("pz", Decimal("1")),
     "pcs": ("pz", Decimal("1")),
+    "pc": ("pz", Decimal("1")),
     "n": ("pz", Decimal("1")),
     "nr": ("pz", Decimal("1")),
+    "num": ("pz", Decimal("1")),
     "conf": ("confezione", Decimal("1")),
     "confezione": ("confezione", Decimal("1")),
     "ct": ("confezione", Decimal("1")),
@@ -40,9 +43,15 @@ UNIT_TO_BASE: dict[str, tuple[str, Decimal]] = {
     "scat": ("scatola", Decimal("1")),
 }
 
-# Contenuto nella descrizione: "3 kg", "50g", "1,5 L", "2 etti"
+# Contenuto: "3 kg", "50g", "1,5L", "5LT", "750 ml", "2 etti", "75cl"
 CONTENT_RE = re.compile(
-    r"(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>kg|kili|chili|chilo|kilo|gr|grammi|grammo|g|hg|etti|etto|lt|ltr|litri|litro|l|ml|cl)\b",
+    r"(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>"
+    r"kg|kili|chili|chilo|kilo|"
+    r"grammi|grammo|gr|g|"
+    r"hg|etti|etto|"
+    r"litri|litro|ltr|lt|l|"
+    r"ml|cl|dl"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -136,36 +145,48 @@ def normalize_line(
     totale_riga: float | None = None,
 ) -> dict:
     """
-    Calcola prezzo dichiarato e prezzo normalizzato confrontabile.
+    Calcola prezzo dichiarato (unitario in fattura) e prezzo normalizzato confrontabile.
 
-    Regole:
-    - Se UM è g/kg/l/ml: prezzo_normalizzato = € per unità base
-      (es. 0,45 €/g → 450 €/kg).
-    - Se UM è pz/conf e in descrizione c'è il contenuto (50g, 3kg, 1L):
+    Regole (peso e litri allo stesso modo):
+    - UM g/kg → €/kg; UM ml/cl/dl/lt/l → €/l
+      (es. 0,45 €/g → 450 €/kg; 0,002 €/ml → 2 €/l).
+    - UM pz/conf + contenuto in descrizione (50g, 3kg, 1,5L, 75cl):
       prezzo_normalizzato = prezzo_unitario / contenuto_in_base
-      (es. 2 € a conf da 50g → 40 €/kg).
-    - Altrimenti prezzo_normalizzato = prezzo_unitario (stessa UM).
+      (es. 2 € conf 50g → 40 €/kg; 1,5 € bottiglia 1,5L → 1 €/l).
+    - Solo pezzo senza contenuto: normalizzato = prezzo_unitario in €/pz.
     """
     noise = is_noise_line(description)
     qty = _dec(quantita) or Decimal("1")
     price = _dec(prezzo_unitario)
     um_base, um_factor = lookup_unit(unita)
     content_qty, content_base, content_in_base = extract_content(description)
+    piece_units = {"pz", "confezione", "scatola"}
 
     prezzo_norm: Decimal | None = None
     unita_norm: str | None = um_base
     note = ""
 
     if price is not None and um_base in {"kg", "l"} and um_factor != 0:
-        # Prezzo già espresso per g/kg/ml/l → porta a €/kg o €/l
+        # Prezzo unitario già per g/kg/ml/lt → porta a €/kg o €/l
         prezzo_norm = price / um_factor
         unita_norm = um_base
-        note = f"da {unita or um_base}"
-    elif price is not None and content_in_base and content_in_base > 0 and content_base:
-        # Pezzi/confezioni con contenuto in descrizione
+        note = f"unitario {unita or um_base} → €/{um_base}"
+    elif (
+        price is not None
+        and content_in_base
+        and content_in_base > 0
+        and content_base in {"kg", "l"}
+        and (um_base in piece_units or um_base is None or um_base not in {"kg", "l"})
+    ):
+        # Prezzo unitario a pezzo/conf con contenuto (kg o litri) in descrizione
         prezzo_norm = price / content_in_base
         unita_norm = content_base
-        note = f"pack {content_qty} → {content_in_base} {content_base}"
+        note = f"unitario/pz su pack {content_qty} → €/{content_base}"
+    elif price is not None and (um_base in piece_units or um_base is None):
+        # Prezzo unitario a pezzo, senza peso/volume ricavabile
+        prezzo_norm = price
+        unita_norm = "pz"
+        note = "prezzo unitario €/pz"
     elif price is not None:
         prezzo_norm = price
         unita_norm = um_base or (unita.lower() if unita else "pz")

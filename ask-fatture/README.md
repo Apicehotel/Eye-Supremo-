@@ -5,7 +5,10 @@ Programmino **separato** da Eye Supremo / RandAI.
 Serve a:
 1. Importare fatture (XML FatturaPA)
 2. **Scartare il rumore** (carburante, sconti, bollo, CONAI, trasporto…)
-3. Salvare **prezzo dichiarato** e **prezzo normalizzato** (€/kg, €/l… es. conf 50g a 2€ → 40 €/kg; bombolone 3kg a 30€ → 10 €/kg)
+3. Salvare **prezzo unitario** (come in fattura) e **prezzo normalizzato** confrontabile:
+   - peso: conf 50g a 2€ → **40 €/kg**; bombolone 3kg a 30€ → **10 €/kg**
+   - litri: bottiglia 1,5L a 1,50€ → **1 €/l**; 0,002 €/ml → **2 €/l**; UM `LT` resta **€/l**
+   - solo pezzo (senza kg/l in descrizione): normalizzato = **prezzo unitario €/pz**
 4. Chiedere in italiano cose tipo *«quanto pago il latte?»*, *«dove lo pago meno?»*
 5. Rispondere **solo** con i dati utili, via **Ollama locale**
 

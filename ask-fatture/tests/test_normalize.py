@@ -57,3 +57,62 @@ def test_bombolone_3kg():
     )
     assert abs(row["prezzo_normalizzato"] - 10.0) < 1e-6
     assert row["unita_normalizzata"] == "kg"
+
+
+def test_normalized_price_per_ml_to_liter():
+    # 0,002 €/ml → 2 €/l
+    row = normalize_line(
+        description="DETERGENTE",
+        quantita=1000,
+        unita="ml",
+        prezzo_unitario=0.002,
+    )
+    assert row["unita_normalizzata"] == "l"
+    assert abs(row["prezzo_normalizzato"] - 2.0) < 1e-9
+    assert row["prezzo_unitario"] == 0.002
+
+
+def test_bottle_15l_unit_price():
+    # Prezzo unitario 1,50 € bottiglia 1,5L → 1 €/l
+    row = normalize_line(
+        description="ACQUA NATURALE 1,5L",
+        quantita=6,
+        unita="PZ",
+        prezzo_unitario=1.5,
+    )
+    assert row["unita_normalizzata"] == "l"
+    assert abs(row["prezzo_normalizzato"] - 1.0) < 1e-9
+    assert row["prezzo_unitario"] == 1.5
+
+
+def test_lt_unit_measure():
+    row = normalize_line(
+        description="LATTE FRESCO",
+        quantita=10,
+        unita="LT",
+        prezzo_unitario=1.2,
+    )
+    assert row["unita_normalizzata"] == "l"
+    assert abs(row["prezzo_normalizzato"] - 1.2) < 1e-9
+
+
+def test_prezzo_unitario_solo_pezzo():
+    row = normalize_line(
+        description="PIATTO MONOUSO",
+        quantita=100,
+        unita="PZ",
+        prezzo_unitario=0.08,
+    )
+    assert row["unita_normalizzata"] == "pz"
+    assert abs(row["prezzo_normalizzato"] - 0.08) < 1e-9
+
+
+def test_75cl_wine():
+    row = normalize_line(
+        description="VINO ROSSO 75CL",
+        quantita=1,
+        unita="conf",
+        prezzo_unitario=3.0,
+    )
+    assert row["unita_normalizzata"] == "l"
+    assert abs(row["prezzo_normalizzato"] - 4.0) < 1e-9  # 3 / 0.75
