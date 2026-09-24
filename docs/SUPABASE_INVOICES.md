@@ -7,7 +7,9 @@ MultiHotel (ooqlfldcrnkudhgjnied)
 ├── Metadati (già presenti)
 │   ├── eye_central_invoices          ~20.638 intestazioni
 │   ├── eye_central_invoice_rows      righe
-│   └── RPC eye_central_invoice_page  lettura paginata (PIN)
+│   ├── RPC eye_central_invoice_page  lettura paginata (PIN)
+│   ├── eye_central_reviews           ~650 recensioni (Giò/Choco/…)
+│   └── RPC eye_central_review_page   lettura paginata (PIN)
 │
 └── Blob (nuovi — questa migration)
     ├── Storage bucket  eye-invoices   (privato, solo service_role)

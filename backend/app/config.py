@@ -70,6 +70,15 @@ class Settings(BaseSettings):
             return True
         return bool(self.supabase_url and self.supabase_rest_key)
 
+    @property
+    def reviews_configured(self) -> bool:
+        """Recensioni centrali: RPC eye_central_review_page (serve URL+chiave+PIN)."""
+        return bool(
+            self.supabase_central_pin
+            and self.supabase_url
+            and self.supabase_rest_key
+        )
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
