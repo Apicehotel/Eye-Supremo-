@@ -11,6 +11,7 @@ on:
       - 'installer/**'
       - 'scripts/build_windows.ps1'
       - 'scripts/build_ask_fatture.ps1'
+      - 'scripts/build_suite.ps1'
       - 'scarica-modelli-ia.bat'
       - '.github/workflows/windows-installer.yml'
 
@@ -97,15 +98,11 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-      - name: Compile setups
+      - name: Compile unified setup
         shell: powershell
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
       - uses: actions/upload-artifact@v4
         with:
-          name: Windows-Setups
-          path: |
-            release/EyeSupremo-Setup.exe
-            release/AskFatture-Setup.exe
+          name: EyeSupremo-Setup
+          path: release/EyeSupremo-Setup.exe
           if-no-files-found: error

@@ -1,9 +1,13 @@
+; Opzionale: installer SOLO Ask Fatture.
+; La suite ufficiale e' installer/EyeSupremo.iss → EyeSupremo-Setup.exe
+; (include Eye Supremo + Ask Fatture in un unico Setup).
+
 [Setup]
 AppId={{B7E2A901-4D8C-4F1A-9E33-2C8F0A1D6B44}
 AppName=Ask Fatture
 AppVersion=0.3.0
 AppPublisher=Apicehotel
-AppComments=Ask Fatture: import XML, catalogo fornitori/prodotti, pack Chili/Litri/Pezzi, Ollama locale
+AppComments=Ask Fatture standalone (preferire EyeSupremo-Setup.exe unificato)
 DefaultDirName={autopf}\Ask Fatture
 DefaultGroupName=Ask Fatture
 OutputDir=..\release
@@ -45,9 +49,8 @@ begin
   if not WebView2Installed then
   begin
     MsgBox(
-      'Ask Fatture e'' un''app a finestra nativa e richiede Microsoft Edge WebView2.'#13#10#13#10 +
-      'Su Windows 10/11 aggiornato e'' di solito gia'' installato. Se manca, installalo da:'#13#10 +
-      'https://developer.microsoft.com/microsoft-edge/webview2/',
+      'Ask Fatture richiede Microsoft Edge WebView2.'#13#10#13#10 +
+      'Preferisci l''installer unico EyeSupremo-Setup.exe (Eye Supremo + Ask Fatture).',
       mbInformation, MB_OK);
   end;
 end;

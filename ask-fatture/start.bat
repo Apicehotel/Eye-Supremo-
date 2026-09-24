@@ -15,7 +15,7 @@ if exist "%~dp0..\dist\AskFatture.exe" (
 )
 
 if not exist ".venv\Scripts\python.exe" (
-  echo Esegui prima setup.bat  ^(oppure installa AskFatture-Setup.exe^)
+  echo Esegui prima setup.bat  ^(oppure installa EyeSupremo-Setup.exe^)
   pause
   exit /b 1
 )

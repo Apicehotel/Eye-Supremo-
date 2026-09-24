@@ -1,12 +1,12 @@
 name: Publish Eye Supremo Release
 
-# Pubblica EyeSupremo-Setup.exe + AskFatture-Setup.exe su GitHub Releases.
-# I PC Eye Supremo lo trovano da Impostazioni → Aggiornamenti.
+# Pubblica EyeSupremo-Setup.exe unico (Eye Supremo + Ask Fatture) su GitHub Releases.
+# I PC lo trovano da Impostazioni - Aggiornamenti.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Tag versione (es. 1.3.1) senza v'
+        description: 'Tag versione (es. 1.4.0) senza v'
         required: true
         type: string
   push:
@@ -52,24 +52,21 @@ jobs:
         run: |
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-      - name: Compile setups
+      - name: Compile unified setup
         shell: powershell
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Eye Supremo ${{ steps.ver.outputs.name }}
-          files: |
-            release/EyeSupremo-Setup.exe
-            release/AskFatture-Setup.exe
+          files: release/EyeSupremo-Setup.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
-            ## Installer
-            - **EyeSupremo-Setup.exe** — gestionale Eye Supremo
-            - **AskFatture-Setup.exe** — Ask Fatture (import XML, catalogo, pack Chili/Litri/Pezzi, Ollama)
+            ## Installer unico
+            **EyeSupremo-Setup.exe** installa:
+            - Eye Supremo (gestionale)
+            - Ask Fatture (import XML, catalogo, pack Chili/Litri/Pezzi, Ollama)
 
             Dati locali: `%LOCALAPPDATA%\EyeSupremo` e `%LOCALAPPDATA%\AskFatture`.

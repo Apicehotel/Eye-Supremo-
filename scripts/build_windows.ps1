@@ -43,4 +43,4 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name EyeSupremo
   backend/desktop.py
 
 Write-Host 'Executable: dist/EyeSupremo.exe (app nativa WebView2)'
-Write-Host 'Per creare Setup.exe installare Inno Setup 6 e compilare installer/EyeSupremo.iss'
+Write-Host 'Suite unica: scripts/build_suite.ps1 -> release/EyeSupremo-Setup.exe (+ Ask Fatture)'

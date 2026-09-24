@@ -33,27 +33,29 @@ Cambia modello con variabile `ASKFATTURE_MODEL`.
 - Windows 10/11 (WebView2)
 - [Ollama](https://ollama.com) installato e avviato (per le domande)
 
-## Installer Windows (`.exe`)
+## Installer Windows (suite unica)
+
+Preferisci l’installer unico con Eye Supremo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_suite.ps1
+```
+
+→ `release\EyeSupremo-Setup.exe` (include `AskFatture.exe` + `EyeSupremo.exe`).
+
+Solo sviluppo / rebuild dell’exe Ask:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
 ```
 
-Produce `dist\AskFatture.exe`. Con Inno Setup 6:
+Produce `dist\AskFatture.exe`.
 
-```powershell
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AskFatture.iss
-```
-
-→ `release\AskFatture-Setup.exe`
-
-- Doppio clic → finestra nativa **Ask Fatture** (niente browser, niente console)
+- Doppio clic su Ask Fatture dal menu Start dopo il Setup
 - Dati in `%LOCALAPPDATA%\AskFatture`
-- Dopo l’install: esegui `scarica-modello.bat` (accanto all’exe) se Ollama non ha già `qwen3:8b`
+- Dopo l’install: `scarica-modello-ask.bat` (nella cartella installata) se Ollama non ha già `qwen3:8b`
 
-CI: workflow `windows-installer.yml` costruisce e fa smoke test headless di entrambi gli exe (Eye Supremo + Ask Fatture).
-
-Release: Actions → **Publish Eye Supremo Release** pubblica anche `AskFatture-Setup.exe`.
+CI / Release pubblicano solo **EyeSupremo-Setup.exe** (suite).
 
 ## Avvio sviluppo (senza installer)
 
