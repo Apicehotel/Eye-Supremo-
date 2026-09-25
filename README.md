@@ -75,7 +75,19 @@ Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/
 
 Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. Eye AI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
 
-## Backup e test
+
+## Modalità offline-first fatture
+
+Eye Supremo usa il PC come fonte operativa primaria. In **Impostazioni → Modalità offline**:
+
+- **Sincronizza catalogo** scarica tutte le pagine di `eye_central_invoices` e salva una copia locale in `%LOCALAPPDATA%\\EyeSupremo\\offline\\central_invoices.json`.
+- **Prepara offline completo** salva anche i PDF/XML disponibili in Supabase Storage sotto `%LOCALAPPDATA%\\EyeSupremo\\offline\\documents`.
+- La pagina **Fatture** legge prima la cache locale; se Internet cade continua a cercare e filtrare l'intero catalogo già sincronizzato.
+- La cache viene sostituita solo a sincronizzazione completata: una caduta di rete non cancella mai l'ultima copia valida.
+- Senza una cache iniziale, Eye Supremo mantiene il fallback live limitato finché non viene eseguita la prima sincronizzazione completa.
+
+Supabase resta il punto di sincronizzazione/condivisione, non un requisito per usare l'archivio quotidiano.
+\n## Backup e test
 
 Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups` (o `%LOCALAPPDATA%\EyeSupremo\backups`).
 

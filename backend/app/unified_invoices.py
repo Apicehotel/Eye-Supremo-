@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
 from .models import Invoice, Supplier
-from . import storage_service
+from . import offline_cache, storage_service
 
 
 def _local_row(inv: Invoice) -> dict[str, Any]:
@@ -55,6 +55,12 @@ def _central_row(item: dict[str, Any]) -> dict[str, Any]:
         },
         "row_count": None,
         "openable": False,
+        "offline_file_available": bool(
+            item.get("source_hash")
+            and offline_cache.local_document_for(
+                str(item.get("source_hash")), item.get("source_filename")
+            )
+        ),
     }
 
 
@@ -130,41 +136,61 @@ def list_unified_invoices(
     central_total = None
     central_error = None
     central_configured = bool(settings.central_configured)
+    central_source = "none"
 
-    if include_central and central_configured and supplier_id is None:
-        try:
-            # prima pagina ampia del catalogo MultiHotel
-            page = storage_service.central_invoice_page(limit=min(200, max(limit * 3, 50)), offset=0)
-            items = page.get("items") if isinstance(page, dict) else page
-            if not isinstance(items, list):
+    if include_central and supplier_id is None:
+        cache = offline_cache.load_catalog()
+        items = cache.get("items") if isinstance(cache, dict) else []
+        if not isinstance(items, list):
+            items = []
+
+        # Offline-first: se esiste una cache valida, la lista non dipende mai dalla rete.
+        if items:
+            central_source = "offline_cache"
+            central_total = cache.get("total") or len(items)
+        elif central_configured:
+            # Primo avvio prima della sincronizzazione: manteniamo un piccolo fallback live.
+            try:
+                page = storage_service.central_invoice_page(
+                    limit=min(200, max(limit * 3, 50)), offset=0
+                )
+                items = page.get("items") if isinstance(page, dict) else page
+                if not isinstance(items, list):
+                    items = []
+                central_total = page.get("total") if isinstance(page, dict) else None
+                central_source = "live"
+            except Exception as exc:  # pragma: no cover - rete
+                central_error = str(exc)
                 items = []
-            central_total = page.get("total") if isinstance(page, dict) else None
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                keys = _match_key_central(item)
-                if keys & local_keys:
-                    # già sul PC → marca la riga locale come both
-                    for row in local_rows:
-                        row_keys = set()
-                        if row.get("hash_file"):
-                            row_keys.add(f"h:{str(row['hash_file']).lower()}")
-                        if row.get("numero") and row.get("data"):
-                            row_keys.add(f"n:{str(row['numero']).strip().lower()}|{row['data']}")
-                        if row_keys & keys:
-                            row["source"] = "both"
-                            row["stato_importazione"] = row.get("stato_importazione") or "confermata"
-                            row["central_id"] = str(item.get("id") or "")
-                            break
-                    continue
-                crow = _central_row(item)
-                if year and crow.get("data") and not str(crow["data"]).startswith(str(year)):
-                    continue
-                if not _matches_query(crow, q):
-                    continue
-                central_rows.append(crow)
-        except Exception as exc:  # pragma: no cover - rete
-            central_error = str(exc)
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            keys = _match_key_central(item)
+            if keys & local_keys:
+                # già sul PC → marca la riga locale come both
+                for row in local_rows:
+                    row_keys = set()
+                    if row.get("hash_file"):
+                        row_keys.add(f"h:{str(row['hash_file']).lower()}")
+                    if row.get("numero") and row.get("data"):
+                        row_keys.add(
+                            f"n:{str(row['numero']).strip().lower()}|{row['data']}"
+                        )
+                    if row_keys & keys:
+                        row["source"] = "both"
+                        row["stato_importazione"] = (
+                            row.get("stato_importazione") or "confermata"
+                        )
+                        row["central_id"] = str(item.get("id") or "")
+                        break
+                continue
+            crow = _central_row(item)
+            if year and crow.get("data") and not str(crow["data"]).startswith(str(year)):
+                continue
+            if not _matches_query(crow, q):
+                continue
+            central_rows.append(crow)
 
     merged = local_rows + central_rows
 
@@ -180,6 +206,8 @@ def list_unified_invoices(
         "central_count": len(central_rows),
         "central_total": central_total,
         "central_configured": central_configured,
+        "central_source": central_source,
+        "offline_cache": offline_cache.status(),
         "central_error": central_error,
         "skip": skip,
         "limit": limit,

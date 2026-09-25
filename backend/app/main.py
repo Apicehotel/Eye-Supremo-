@@ -11,6 +11,7 @@ from .auth_service import seed_users
 from .routers.api import router
 from .routers.auth import router as auth_router
 from .routers.invoice_builder import router as invoice_builder_router
+from .routers.offline import router as offline_router
 from .routers.storage import router as storage_router
 from .routers.updates import router as updates_router
 from .routers.warehouse import router as warehouse_router
@@ -47,6 +48,7 @@ app.include_router(router)
 app.include_router(auth_router)
 app.include_router(storage_router)
 app.include_router(invoice_builder_router)
+app.include_router(offline_router)
 app.include_router(warehouse_router)
 app.include_router(updates_router)
 
