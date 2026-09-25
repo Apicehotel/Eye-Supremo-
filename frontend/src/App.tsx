@@ -8,7 +8,7 @@ import Reviews from './pages/Reviews';
 import InvoiceEditor from './pages/InvoiceEditor';
 import Warehouse from './pages/Warehouse';
 import {StorageInboxPage, UploaderPage} from './pages/StoragePages';
-import {currentUser, AuthUser} from './lib/api';
+import {api, currentSession, currentUser, AuthUser} from './lib/api';
 import './pages/InvoiceEditor.css';
 
 function AppInner() {
@@ -25,6 +25,7 @@ function AppInner() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storagePreview, setStoragePreview] = useState<any>(null);
+  const [offlineRevision, setOfflineRevision] = useState(0);
 
   useEffect(() => {
     const sync = () => setUser(currentUser());
@@ -40,6 +41,35 @@ function AppInner() {
   useEffect(() => {
     localStorage.setItem('eye-supremo.sidebar', sidebarMode);
   }, [sidebarMode]);
+
+  useEffect(() => {
+    const onOfflineSync = () => setOfflineRevision((value) => value + 1);
+    window.addEventListener('eye-offline-synced', onOfflineSync);
+    return () => window.removeEventListener('eye-offline-synced', onOfflineSync);
+  }, []);
+
+  useEffect(() => {
+    if (!user || uploaderOnly) return;
+    const session = currentSession();
+    if (!session) return;
+    const bootstrapKey = `eye-supremo.offline-bootstrap:${session}`;
+    if (sessionStorage.getItem(bootstrapKey)) return;
+
+    let cancelled = false;
+    sessionStorage.setItem(bootstrapKey, 'running');
+    (async () => {
+      try {
+        const status = await api<{central_configured: boolean; cached_invoices: number; complete: boolean}>('/offline/status');
+        if (!status.central_configured || status.cached_invoices > 0 || status.complete) return;
+        await api('/offline/sync', {method: 'POST'});
+        if (!cancelled) window.dispatchEvent(new Event('eye-offline-synced'));
+      } catch {
+        // The manual sync action remains available in Settings when the network or credentials are unavailable.
+        sessionStorage.removeItem(bootstrapKey);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, uploaderOnly]);
 
   const setArea = (next: 'invoices' | 'reviews') => {
     localStorage.setItem('eye-supremo.area', next);
@@ -118,7 +148,7 @@ function AppInner() {
     }
 
   return (
-    <Shell page={page} setPage={navigate} area={area} setArea={setArea} mode={sidebarMode} setMode={setSidebarMode} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} user={user}>
+    <Shell key={offlineRevision} page={page} setPage={navigate} area={area} setArea={setArea} mode={sidebarMode} setMode={setSidebarMode} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} user={user}>
       {content}
     </Shell>
   );
