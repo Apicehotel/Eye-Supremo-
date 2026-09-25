@@ -80,6 +80,7 @@ Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:
 
 Eye Supremo usa il PC come fonte operativa primaria. In **Impostazioni → Modalità offline**:
 
+- Al primo avvio, se URL, chiave e PIN del catalogo centrale sono configurati, Eye Supremo sincronizza automaticamente il catalogo fatture una volta per sessione.
 - **Sincronizza catalogo** scarica tutte le pagine di `eye_central_invoices` e salva una copia locale in `%LOCALAPPDATA%\\EyeSupremo\\offline\\central_invoices.json`.
 - **Prepara offline completo** salva anche i PDF/XML disponibili in Supabase Storage sotto `%LOCALAPPDATA%\\EyeSupremo\\offline\\documents`.
 - La pagina **Fatture** legge prima la cache locale; se Internet cade continua a cercare e filtrare l'intero catalogo già sincronizzato.
