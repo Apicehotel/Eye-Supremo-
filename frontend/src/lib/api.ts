@@ -1,5 +1,7 @@
-const SESSION_KEY = 'randfatture.session';
-const USER_KEY = 'randfatture.user';
+const SESSION_KEY = 'eye-supremo.session';
+const USER_KEY = 'eye-supremo.user';
+const LEGACY_SESSION_KEY = 'randfatture.session';
+const LEGACY_USER_KEY = 'randfatture.user';
 
 export type AuthUser = {
   id: number;
@@ -13,19 +15,23 @@ export type AuthUser = {
 export function saveAuth(payload: {session: string; user: AuthUser}) {
   localStorage.setItem(SESSION_KEY, payload.session);
   localStorage.setItem(USER_KEY, JSON.stringify(payload.user));
+  localStorage.removeItem(LEGACY_SESSION_KEY);
+  localStorage.removeItem(LEGACY_USER_KEY);
 }
 
 export function clearAuth() {
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(LEGACY_SESSION_KEY);
+  localStorage.removeItem(LEGACY_USER_KEY);
 }
 
 export function currentSession() {
-  return localStorage.getItem(SESSION_KEY);
+  return localStorage.getItem(SESSION_KEY) || localStorage.getItem(LEGACY_SESSION_KEY);
 }
 
 export function currentUser(): AuthUser | null {
-  const raw = localStorage.getItem(USER_KEY);
+  const raw = localStorage.getItem(USER_KEY) || localStorage.getItem(LEGACY_USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw);

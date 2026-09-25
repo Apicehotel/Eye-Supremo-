@@ -63,7 +63,7 @@ export default function Reviews() {
         const msg = String(e?.message || e);
         setError(
           msg.includes('503') || msg.includes('non configurate')
-            ? 'Configura URL + chiave anon e RANDFATTURE_SUPABASE_CENTRAL_PIN nel .env per leggere eye_central_reviews.'
+            ? 'Configura URL, chiave anon e PIN catalogo nel file .env per leggere le recensioni centrali.'
             : msg,
         );
         setReviews([]);

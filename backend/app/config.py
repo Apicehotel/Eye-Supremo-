@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def default_data_dir() -> Path:
     """In exe Windows i dati restano in %LOCALAPPDATA%\\EyeSupremo."""
-    override = os.environ.get("RANDFATTURE_DATA_DIR")
+    # Legacy override kept so existing PC installations keep their data folder.
+    override = os.environ.get("EYE_SUPREMO_DATA_DIR") or os.environ.get("RANDFATTURE_DATA_DIR")
     if override:
         return Path(override)
     if getattr(sys, "frozen", False):
@@ -45,6 +46,7 @@ class Settings(BaseSettings):
     # Azione richiesta dal gateway (es. invoice_page). Vuoto = prova elenco azioni note.
     supabase_central_gateway_action: str = "invoice_page"
     model_config = SettingsConfigDict(
+        # RANDFATTURE_* is the legacy .env prefix used by deployed PCs.
         env_prefix="RANDFATTURE_",
         env_file=_env_files(),
         extra="ignore",
@@ -52,6 +54,7 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # The filename is retained for in-place upgrades of existing databases.
         return f"sqlite:///{(self.data_dir / 'randfatture.db').as_posix()}"
 
     @property
