@@ -54,7 +54,13 @@ def _central_row(item: dict[str, Any]) -> dict[str, Any]:
             "ragione_sociale": item.get("supplier_name") or "—",
         },
         "row_count": None,
-        "openable": False,\n        "offline_file_available": bool(\n            item.get("source_hash")\n            and offline_cache.local_document_for(\n                str(item.get("source_hash")), item.get("source_filename")\n            )\n        ),
+        "openable": False,
+        "offline_file_available": bool(
+            item.get("source_hash")
+            and offline_cache.local_document_for(
+                str(item.get("source_hash")), item.get("source_filename")
+            )
+        ),
     }
 
 
@@ -199,7 +205,9 @@ def list_unified_invoices(
         "local_count": len(local_rows),
         "central_count": len(central_rows),
         "central_total": central_total,
-        "central_configured": central_configured,\n        "central_source": central_source,\n        "offline_cache": offline_cache.status(),
+        "central_configured": central_configured,
+        "central_source": central_source,
+        "offline_cache": offline_cache.status(),
         "central_error": central_error,
         "skip": skip,
         "limit": limit,
