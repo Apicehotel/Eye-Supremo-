@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {CloudUpload, FileCheck2, RefreshCw, Library} from 'lucide-react';
-import {api} from '../lib/api';
+import {api,currentSession} from '../lib/api';
 import {Empty, PageHeader, Status} from '../components/UI';
 
 type StorageStatus = {
@@ -90,7 +90,7 @@ export function UploaderPage() {
     const body = new FormData();
     body.append('file', file);
     try {
-      const session = localStorage.getItem('randfatture.session') || '';
+      const session = currentSession() || '';
       const res = await fetch('/api/storage/upload', {
         method: 'POST',
         headers: {'X-Eye-Session': session},
@@ -347,7 +347,7 @@ export function CentralCatalogPage() {
         <div className={status.central_configured ? 'success' : 'warning'} style={{margin: '0 0 12px'}}>
           {status.central_configured
             ? `Connesso · ${status.location_example || status.bucket}`
-            : 'Configura URL + chiave Supabase e RANDFATTURE_SUPABASE_CENTRAL_PIN nel .env'}
+            : 'Configura URL, chiave Supabase e PIN catalogo nel file .env'}
         </div>
       )}
       {error && <div className="error" style={{marginBottom: 12}}>{error}</div>}

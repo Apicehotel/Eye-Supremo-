@@ -61,7 +61,7 @@ Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` n
 
 ## Variabili ambiente
 
-Le variabili restano con prefisso `RANDFATTURE_` per compatibilità con i `.env` già in produzione (es. `RANDFATTURE_SUPABASE_URL`). Il nome prodotto mostrato in UI è **Eye Supremo**.
+Le variabili del catalogo centrale mantengono il prefisso legacy `RANDFATTURE_` per compatibilità con i `.env` già in produzione (per esempio `RANDFATTURE_SUPABASE_URL`); non è un nome mostrato agli utenti. Il database locale mantiene inoltre il filename legacy `randfatture.db` per consentire l’aggiornamento in-place. Il nome prodotto e la UI sono **Eye Supremo**.
 
 ## Importazione
 

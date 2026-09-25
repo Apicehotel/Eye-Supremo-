@@ -200,6 +200,7 @@ def _bundled_icon() -> Path | None:
 def main() -> None:
     # Prima di qualsiasi logging uvicorn: ripristina stdout/stderr se --windowed.
     ensure_stdio()
+    # Legacy variable consumed by Settings; keep it for existing installations.
     os.environ.setdefault("RANDFATTURE_DATA_DIR", str(data_dir()))
     write_log("Avvio Eye Supremo desktop nativo.")
 

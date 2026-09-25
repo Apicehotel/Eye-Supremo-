@@ -2,9 +2,9 @@ import {ReactNode} from 'react';
 import {
   LayoutDashboard, FileText, FilePenLine, Package, Boxes, Users, Upload, Sparkles,
   ChartNoAxesCombined, History, TriangleAlert, Tags, Settings, MonitorCog, Menu, X,
-  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut,
+  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut, PanelLeftClose, PanelLeftOpen, Pin,
 } from 'lucide-react';
-import {clearAuth, AuthUser} from '../lib/api';
+import {clearAuth, AuthUser, currentSession} from '../lib/api';
 
 export type Page =
   | 'dashboard' | 'invoices' | 'editor' | 'products' | 'warehouse' | 'suppliers'
@@ -30,20 +30,22 @@ const nav: [Page, string, any][] = [
 ];
 
 export function Shell({
-  page, setPage, area, setArea, children, open, setOpen, user,
+  page, setPage, area, setArea, children, mode, setMode, mobileOpen, setMobileOpen, user,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   area: 'invoices' | 'reviews';
   setArea: (a: 'invoices' | 'reviews') => void;
   children: ReactNode;
-  open: boolean;
-  setOpen: (v: boolean) => void;
+  mode: 'open' | 'collapsed' | 'pinned';
+  setMode: (v: 'open' | 'collapsed' | 'pinned') => void;
+  mobileOpen: boolean;
+  setMobileOpen: (v: boolean) => void;
   user: AuthUser | null;
 }) {
   const uploaderOnly = user?.role_name === 'uploader';
   function logout() {
-    const session = localStorage.getItem('randfatture.session');
+    const session = currentSession();
     fetch('/api/auth/logout', {method: 'POST', headers: {'X-Eye-Session': session || ''}}).finally(() => {
       clearAuth();
       window.dispatchEvent(new Event('eye-auth-expired'));
@@ -51,10 +53,10 @@ export function Shell({
   }
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${open ? 'open' : ''}`}>
+    <div className={`app-shell sidebar-${mode}`}>
+      <aside className={`sidebar ${mode} ${mobileOpen ? 'mobile-open' : ''}`}>
         <div className="brand">
-          <img className="brand-mark" src="/favicon-32.png" alt="" width={28} height={28} />
+          <img className="brand-mark" src="/favicon-32.png" alt="Eye Supremo" width={28} height={28} />
           <div>
             <b>EYE</b> SUPREMO
             <span>{uploaderOnly ? 'Solo carico file' : area === 'invoices' ? 'Le tue fatture, più valore.' : 'Ascolta, rispondi, migliora.'}</span>
@@ -72,14 +74,14 @@ export function Shell({
         )}
         {uploaderOnly ? (
           <nav>
-            <button className={page === 'uploader' ? 'active' : ''} onClick={() => { setPage('uploader'); setOpen(false); }}>
+            <button className={page === 'uploader' ? 'active' : ''} onClick={() => { setPage('uploader'); setMobileOpen(false); }}>
               <CloudUpload size={19} /><span>Carica fatture</span>
             </button>
           </nav>
         ) : area === 'invoices' ? (
           <nav>
             {nav.map(([id, label, Icon]) => (
-              <button key={id} className={page === id ? 'active' : ''} onClick={() => { setPage(id); setOpen(false); }}>
+              <button key={id} className={page === id ? 'active' : ''} onClick={() => { setPage(id); if (mode !== 'pinned') setMobileOpen(false); }}>
                 <Icon size={19} /><span>{label}</span>
               </button>
             ))}
@@ -98,10 +100,19 @@ export function Shell({
           <small>{user?.role_name} · PC locale</small>
           <button className="logout-btn" onClick={logout}><LogOut size={14} /> Esci</button>
         </div>
+        <div className="sidebar-controls">
+          <button title={mode === 'collapsed' ? 'Apri barra laterale' : 'Chiudi barra laterale'} aria-label={mode === 'collapsed' ? 'Apri barra laterale' : 'Chiudi barra laterale'} onClick={() => setMode(mode === 'collapsed' ? 'open' : 'collapsed')}>
+            {mode === 'collapsed' ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            <span>{mode === 'collapsed' ? 'Apri' : 'Riduci'}</span>
+          </button>
+          <button className={mode === 'pinned' ? 'active' : ''} title={mode === 'pinned' ? 'Sblocca barra laterale' : 'Fissa barra laterale'} aria-label={mode === 'pinned' ? 'Sblocca barra laterale' : 'Fissa barra laterale'} onClick={() => setMode(mode === 'pinned' ? 'open' : 'pinned')}>
+            <Pin size={16} /><span>{mode === 'pinned' ? 'Fissata' : 'Fissa'}</span>
+          </button>
+        </div>
       </aside>
-      {open && <button className="scrim" aria-label="Chiudi menu" onClick={() => setOpen(false)} />}
+      {mobileOpen && <button className="scrim" aria-label="Chiudi menu" onClick={() => setMobileOpen(false)} />}
       <main>
-        <button className="mobile-menu" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
+        <button className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
         {children}
       </main>
     </div>

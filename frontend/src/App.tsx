@@ -17,9 +17,13 @@ function AppInner() {
   const [page, setPage] = useState<Page>(uploaderOnly ? 'uploader' : 'dashboard');
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
   const [area, setAreaState] = useState<'invoices' | 'reviews'>(() =>
-    localStorage.getItem('randfatture.area') === 'reviews' ? 'reviews' : 'invoices',
+    localStorage.getItem('eye-supremo.area') === 'reviews' ? 'reviews' : 'invoices',
   );
-  const [open, setOpen] = useState(false);
+  const [sidebarMode, setSidebarMode] = useState<'open' | 'collapsed' | 'pinned'>(() => {
+    const stored = localStorage.getItem('eye-supremo.sidebar');
+    return stored === 'collapsed' || stored === 'pinned' ? stored : 'open';
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [storagePreview, setStoragePreview] = useState<any>(null);
 
   useEffect(() => {
@@ -33,8 +37,12 @@ function AppInner() {
     if (uploaderOnly && page !== 'uploader') setPage('uploader');
   }, [uploaderOnly, page]);
 
+  useEffect(() => {
+    localStorage.setItem('eye-supremo.sidebar', sidebarMode);
+  }, [sidebarMode]);
+
   const setArea = (next: 'invoices' | 'reviews') => {
-    localStorage.setItem('randfatture.area', next);
+    localStorage.setItem('eye-supremo.area', next);
     setAreaState(next);
   };
   const navigate = (next: Page) => {
@@ -110,7 +118,7 @@ function AppInner() {
     }
 
   return (
-    <Shell page={page} setPage={navigate} area={area} setArea={setArea} open={open} setOpen={setOpen} user={user}>
+    <Shell page={page} setPage={navigate} area={area} setArea={setArea} mode={sidebarMode} setMode={setSidebarMode} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} user={user}>
       {content}
     </Shell>
   );

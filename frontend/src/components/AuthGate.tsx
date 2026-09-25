@@ -31,7 +31,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
             if (!r.ok) throw new Error('expired');
             return r.json();
           });
-          localStorage.setItem('randfatture.user', JSON.stringify(me));
+          saveAuth({session: currentSession() || '', user: me});
           setAuthenticated(true);
         } catch {
           clearAuth();
