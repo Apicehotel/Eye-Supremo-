@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..auth_models import UserProfile
 from ..database import get_db
 from ..services import audit
+from .auth import current_user
 from ..update_service import (
     SETTING_AUTO_CHECK,
     SETTING_AUTO_INSTALL,
@@ -44,7 +46,13 @@ def updates_status(check: bool = True, db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-def updates_settings(payload: dict, db: Session = Depends(get_db)):
+def updates_settings(
+    payload: dict,
+    user: UserProfile = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if user.role_name != "developer":
+        raise HTTPException(403, "Solo lo Sviluppatore può modificare gli aggiornamenti")
     if "auto_check" in payload:
         set_flag(db, SETTING_AUTO_CHECK, bool(payload["auto_check"]))
     if "auto_install" in payload:
@@ -58,7 +66,13 @@ def updates_settings(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/download")
-def updates_download(payload: dict | None = None, db: Session = Depends(get_db)):
+def updates_download(
+    payload: dict | None = None,
+    user: UserProfile = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if user.role_name != "developer":
+        raise HTTPException(403, "Solo lo Sviluppatore può scaricare o installare aggiornamenti")
     payload = payload or {}
     install = bool(payload.get("install", True))
     try:
@@ -70,7 +84,11 @@ def updates_download(payload: dict | None = None, db: Session = Depends(get_db))
     if not remote.get("available"):
         raise HTTPException(409, remote.get("reason") or "Sei già aggiornato all'ultima versione")
     try:
-        saved = download_setup(remote["asset_url"], remote.get("asset_name"))
+        saved = download_setup(
+            remote["asset_url"],
+            remote.get("asset_name"),
+            remote.get("asset_sha256"),
+        )
     except Exception as exc:
         raise HTTPException(502, f"Download fallito: {exc}") from exc
     audit(
