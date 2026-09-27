@@ -41,6 +41,20 @@ jobs:
             echo "tag=${RAW}" >> "$GITHUB_OUTPUT"
             echo "name=${RAW#v}" >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify release version matches source
+        shell: powershell
+        run: |
+          $appVersion = python -c "import sys; sys.path.insert(0, 'backend'); from app.version import APP_VERSION; print(APP_VERSION)"
+          $installerLine = Select-String -Path 'installer\EyeSupremo.iss' -Pattern '^AppVersion=' | Select-Object -First 1
+          if (-not $installerLine) { throw 'AppVersion non trovato in installer/EyeSupremo.iss' }
+          $installerVersion = ($installerLine.Line -split '=', 2)[1].Trim()
+          $releaseVersion = '${{ steps.ver.outputs.name }}'
+          if ($releaseVersion -ne $appVersion) {
+            throw "Versione Release $releaseVersion diversa da backend APP_VERSION $appVersion"
+          }
+          if ($installerVersion -ne $appVersion) {
+            throw "Installer AppVersion $installerVersion diversa da backend APP_VERSION $appVersion"
+          }
       - name: Build Eye Supremo
         shell: powershell
         run: ./scripts/build_windows.ps1
