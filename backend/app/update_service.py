@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
 import subprocess
@@ -57,6 +58,15 @@ def updates_dir() -> Path:
     return folder
 
 
+def _asset_sha256(asset: dict | None) -> str | None:
+    if not asset:
+        return None
+    raw = str(asset.get("digest") or "").strip().lower()
+    if raw.startswith("sha256:"):
+        raw = raw.split(":", 1)[1]
+    return raw if re.fullmatch(r"[0-9a-f]{64}", raw) else None
+
+
 def fetch_latest_release(timeout: float = 20.0) -> dict:
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     headers = {
@@ -86,12 +96,15 @@ def fetch_latest_release(timeout: float = 20.0) -> dict:
 
     newer = is_newer(tag) if tag else False
     has_asset = bool(setup)
-    available = newer and has_asset
+    asset_sha256 = _asset_sha256(setup)
+    available = newer and has_asset and bool(asset_sha256)
     reason = None
     if not tag:
         reason = "Nessuna release pubblicata su GitHub."
     elif not has_asset:
         reason = "Release trovata ma manca l'asset EyeSupremo-Setup.exe."
+    elif not asset_sha256:
+        reason = "Installer trovato ma GitHub non espone un digest SHA-256 verificabile."
     elif not newer:
         reason = f"Sei già aggiornato (v{APP_VERSION})."
     return {
@@ -107,11 +120,16 @@ def fetch_latest_release(timeout: float = 20.0) -> dict:
         "asset_name": setup.get("name") if setup else None,
         "asset_url": setup.get("browser_download_url") if setup else None,
         "asset_size": setup.get("size") if setup else None,
+        "asset_sha256": asset_sha256,
         "reason": reason,
     }
 
 
-def download_setup(asset_url: str, asset_name: str | None = None) -> dict:
+def download_setup(
+    asset_url: str,
+    asset_name: str | None = None,
+    expected_sha256: str | None = None,
+) -> dict:
     name = asset_name or RELEASE_ASSET_NAME
     target = updates_dir() / name
     partial = target.with_suffix(target.suffix + ".part")
@@ -124,11 +142,19 @@ def download_setup(asset_url: str, asset_name: str | None = None) -> dict:
                 for chunk in response.iter_bytes():
                     handle.write(chunk)
                     digest.update(chunk)
+    actual_sha256 = digest.hexdigest()
+    if expected_sha256:
+        expected = expected_sha256.strip().lower()
+        if not hmac.compare_digest(actual_sha256, expected):
+            partial.unlink(missing_ok=True)
+            raise RuntimeError(
+                "Verifica integrità fallita: SHA-256 dell'installer diverso dalla GitHub Release."
+            )
     partial.replace(target)
     return {
         "path": str(target),
         "filename": name,
-        "sha256": digest.hexdigest(),
+        "sha256": actual_sha256,
         "size": target.stat().st_size,
     }
 
