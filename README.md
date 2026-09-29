@@ -73,7 +73,7 @@ Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/
 
 ## Ollama
 
-Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:8b` come modello principale, `llama3.2:3b` come alternativa leggera e `nomic-embed-text` per gli embedding. URL e modello attivo si modificano in Impostazioni. Eye AI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
+Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:4b` come modello principale e `nomic-embed-text` per gli embedding; `qwen3:8b` resta opzionale sui PC con RAM sufficiente. URL e modello attivo si modificano in Impostazioni. Eye AI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
 
 
 ## Modalità offline-first fatture
@@ -88,7 +88,8 @@ Eye Supremo usa il PC come fonte operativa primaria. In **Impostazioni → Modal
 - Senza una cache iniziale, Eye Supremo mantiene il fallback live limitato finché non viene eseguita la prima sincronizzazione completa.
 
 Supabase resta il punto di sincronizzazione/condivisione, non un requisito per usare l'archivio quotidiano.
-\n## Backup e test
+
+## Backup e test
 
 Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups` (o `%LOCALAPPDATA%\EyeSupremo\backups`).
 

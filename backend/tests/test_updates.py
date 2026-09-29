@@ -1,5 +1,7 @@
+import hashlib
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.update_service import download_setup, is_newer
 from app.version import APP_VERSION
@@ -32,7 +34,15 @@ def test_updates_status_without_release(client, monkeypatch):
 
 def test_updates_settings_and_download(client, monkeypatch, tmp_path):
     monkeypatch.setenv("RANDFATTURE_DATA_DIR", str(tmp_path))
-    saved = client.put("/api/updates/settings", json={"auto_check": True, "auto_install": True})
+    bootstrap = client.post("/api/auth/bootstrap", json={"pin": "123456"})
+    assert bootstrap.status_code == 200
+    headers = {"X-Eye-Session": bootstrap.json()["session"]}
+
+    saved = client.put(
+        "/api/updates/settings",
+        json={"auto_check": True, "auto_install": True},
+        headers=headers,
+    )
     assert saved.status_code == 200
     assert saved.json()["auto_install"] is True
 
@@ -44,10 +54,12 @@ def test_updates_settings_and_download(client, monkeypatch, tmp_path):
             "latest_version": "9.9.9",
             "asset_url": "https://example.test/EyeSupremo-Setup.exe",
             "asset_name": "EyeSupremo-Setup.exe",
+            "asset_sha256": "a" * 64,
         },
     )
 
-    def fake_download(url, name=None):
+    def fake_download(url, name=None, expected_sha256=None):
+        assert expected_sha256 == "a" * 64
         target = tmp_path / "updates" / (name or "EyeSupremo-Setup.exe")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"fake-setup")
@@ -58,7 +70,11 @@ def test_updates_settings_and_download(client, monkeypatch, tmp_path):
         "app.routers.updates.launch_installer",
         lambda path: {"launched": True, "path": str(path), "args": []},
     )
-    response = client.post("/api/updates/download", json={"install": True})
+    response = client.post(
+        "/api/updates/download",
+        json={"install": True},
+        headers=headers,
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["downloaded"] is True
@@ -97,6 +113,23 @@ def test_download_setup_streams_file(tmp_path, monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr("app.update_service.httpx.Client", FakeClient)
-    result = download_setup("https://example.test/EyeSupremo-Setup.exe")
+    expected = hashlib.sha256(b"abcdef").hexdigest()
+    result = download_setup(
+        "https://example.test/EyeSupremo-Setup.exe",
+        expected_sha256=expected,
+    )
     assert Path(result["path"]).read_bytes() == b"abcdef"
     assert result["size"] == 6
+    assert result["sha256"] == expected
+
+    with pytest.raises(RuntimeError, match="Verifica integrità fallita"):
+        download_setup(
+            "https://example.test/EyeSupremo-Setup.exe",
+            expected_sha256="0" * 64,
+        )
+    assert not (tmp_path / "updates" / "EyeSupremo-Setup.exe.part").exists()
+
+
+def test_updater_write_endpoints_require_login(client):
+    assert client.put("/api/updates/settings", json={"auto_check": False}).status_code == 401
+    assert client.post("/api/updates/download", json={"install": False}).status_code == 401
