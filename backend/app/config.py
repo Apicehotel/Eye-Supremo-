@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_service_key: str | None = None
     supabase_anon_key: str | None = None
+    # Logical namespace inside the temporary shared Supabase project.
+    # Existing RPC compatibility remains in public until the staged cutover.
+    supabase_schema: str = "eye_supremo"
     supabase_bucket: str = "eye-invoices"
     # Radice path content-addressable: invoices/{kind}/{hh}/{hash}{ext}
     supabase_storage_root: str = "invoices"
