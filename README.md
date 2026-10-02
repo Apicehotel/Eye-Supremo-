@@ -11,10 +11,10 @@ Eye Supremo è un gestionale locale-first per archiviare fatture aziendali, norm
 - SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
 - File e backup nella cartella locale `data` (ignorata da Git) o `%LOCALAPPDATA%\EyeSupremo` con l’exe.
 - Login locale con PIN; ruolo **Caricatore** solo per upload file.
-- Supabase opzionale **solo come Storage file** + catalogo centrale MultiHotel (non database fatture PC).
+- Supabase opzionale **solo come Storage file** + catalogo centrale Eye isolato nello schema `eye_supremo` del progetto temporaneo condiviso (non database fatture PC).
 - Ollama opzionale (profilo light: `qwen3:4b` + `nomic-embed-text` per PC ~16 GB).
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PC_STORAGE.md](docs/PC_STORAGE.md), [docs/SUPABASE_INVOICES.md](docs/SUPABASE_INVOICES.md) (bucket `eye-invoices` su MultiHotel) e [docs/SUPABASE_REVIEWS.md](docs/SUPABASE_REVIEWS.md) (`eye_central_reviews`). Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
+Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PC_STORAGE.md](docs/PC_STORAGE.md), [docs/SUPABASE_INVOICES.md](docs/SUPABASE_INVOICES.md), [docs/SUPABASE_REVIEWS.md](docs/SUPABASE_REVIEWS.md) e [docs/EYE_SUPREMO_SUPABASE_SPACE.md](docs/EYE_SUPREMO_SUPABASE_SPACE.md) per la separazione dallo spazio MultiHotel. Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
 
 ## Requisiti e avvio
 
