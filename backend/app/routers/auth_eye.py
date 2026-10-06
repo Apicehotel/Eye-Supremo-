@@ -20,7 +20,7 @@ def status(db: Session = Depends(get_db)):
 @router.get("/login-options")
 def login_options(db: Session = Depends(get_db)):
     users = db.scalars(select(UserProfile).where(UserProfile.active.is_(True)).order_by(UserProfile.display_name)).all()
-    return [{"username": u.username, "display_name": u.display_name} for u in users]
+    return [{"username": u.username, "display_name": u.display_name, "role_name": u.role_name} for u in users]
 
 
 @router.post("/bootstrap")
@@ -28,15 +28,18 @@ def bootstrap(payload: dict, db: Session = Depends(get_db)):
     if auth_configured(db):
         raise HTTPException(409, "Configurazione iniziale già completata")
     pin = str(payload.get("pin", ""))
-    developer = db.scalar(select(UserProfile).where(UserProfile.role_name == "developer"))
-    if not developer:
-        raise HTTPException(500, "Profilo Sviluppatore mancante")
+    username = str(payload.get("username", "")).strip().lower()
+    user = db.scalar(select(UserProfile).where(UserProfile.username == username, UserProfile.active.is_(True))) if username else None
+    if not user:
+        user = db.scalar(select(UserProfile).where(UserProfile.role_name == "developer", UserProfile.active.is_(True)))
+    if not user:
+        raise HTTPException(500, "Nessun profilo utente disponibile")
     try:
-        set_pin(db, developer, pin)
+        set_pin(db, user, pin)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    token = create_session(db, developer)
-    return {"session": token, "user": {"id": developer.id, "username": developer.username, "display_name": developer.display_name, "role_name": developer.role_name}}
+    token = create_session(db, user)
+    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
 
 
 @router.post("/login")
