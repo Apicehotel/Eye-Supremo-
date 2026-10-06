@@ -145,7 +145,7 @@ export function ImportPage() {
             Puoi selezionare più XML/TXT/PDF insieme oppure uno ZIP. Eye Supremo
             estrae e analizza fino a 100 fatture per lotto.
           </p>
-          <p>XML FatturaPA, TXT, PDF · massimo 30 MB per file</p>
+          <p>XML FatturaPA, TXT, PDF · massimo 100 MB per file</p>
           <p>
             ZIP · massimo 120 MB · massimo 200 MB estratti · fino a 100 fatture
           </p>

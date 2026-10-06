@@ -14,7 +14,7 @@ def default_data_dir() -> Path:
 class Settings(BaseSettings):
     app_name: str = "Eye Supremo"
     data_dir: Path = default_data_dir()
-    max_upload_mb: int = 30
+    max_upload_mb: int = 100
     ollama_url: str = "http://127.0.0.1:11434"
     chat_model: str = "qwen3:8b"
     embedding_model: str = "qwen3-embedding:0.6b"
