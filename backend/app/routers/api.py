@@ -148,6 +148,8 @@ def update_product_config(payload: dict, db: Session = Depends(get_db)):
     source_name = str(payload.get("source_name") or "").strip()
     configured_name = str(payload.get("configured_name") or "").strip()
     manufacturer = str(payload.get("manufacturer") or "").strip()
+    category = str(payload.get("category") or "").strip()
+    subcategory = str(payload.get("subcategory") or "").strip()
     if len(source_name) < 2 or len(configured_name) < 2:
         raise HTTPException(400, "Nome prodotto e nome configurato sono obbligatori")
     setting = db.get(AppSetting, "product_configs")
@@ -156,7 +158,12 @@ def update_product_config(payload: dict, db: Session = Depends(get_db)):
     except (TypeError, ValueError):
         configs = {}
     if not isinstance(configs, dict): configs = {}
-    configs[source_name] = {"configured_name": configured_name, "manufacturer": manufacturer or None}
+    config = {"configured_name": configured_name, "manufacturer": manufacturer or None}
+    if "category" in payload:
+        config["category"] = category or None
+    if "subcategory" in payload:
+        config["subcategory"] = subcategory or None
+    configs[source_name] = config
     db.merge(AppSetting(key="product_configs", value=json.dumps(configs, ensure_ascii=False)))
     audit(db, "product.configured", f"Configurato prodotto {source_name} come {configured_name}")
     db.commit()

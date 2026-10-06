@@ -823,6 +823,122 @@ export function AlertsPage() {
   );
 }
 
+const PRODUCT_CATEGORY_OPTIONS: Record<string, string[]> = {
+  "Food & Beverage": ["Colazioni", "Bevande", "Cucina", "Dispensa"],
+  "Pulizia e igiene": ["Detergenti", "Carta", "Amenities"],
+  "Camere e housekeeping": ["Biancheria", "Asciugamani", "Accessori camera"],
+  Manutenzione: ["Elettrico", "Idraulica", "Climatizzazione", "Ferramenta"],
+  "Arredi e attrezzature": ["Arredi", "Attrezzature cucina", "Attrezzature hotel"],
+  "Ufficio e informatica": ["Cancelleria", "Hardware", "Software"],
+  Altro: ["Generico"],
+  "Da classificare": [],
+};
+
+const EXPENSE_CATEGORIES = [
+  ["Utenze", "Acqua, luce, gas e telecomunicazioni"],
+  ["Trasporti e consegne", "Consegne, corrieri e trasporto merci"],
+  ["Carburante", "Benzina, gasolio e rifornimenti"],
+  ["Manodopera", "Interventi e prestazioni operative"],
+  ["Consulenze", "Servizi professionali e consulenze"],
+  ["Canoni e abbonamenti", "Canoni ricorrenti e licenze"],
+  ["Commissioni e spese bancarie", "Commissioni, bolli e spese finanziarie"],
+  ["Tasse e diritti", "Imposte, diritti e altri oneri"],
+] as const;
+
+function suggestedProductCategory(name: string) {
+  const value = name.toLowerCase();
+  if (/acqua|bevanda|vino|birra|caffe|caff[eè]|pasta|farina|olio|zuccher|colazion/.test(value)) return "Food & Beverage";
+  if (/deterg|igien|carta|sapone|shampoo|amenit|disinfett/.test(value)) return "Pulizia e igiene";
+  if (/lenzuol|asciugaman|copriletto|cuscino|camera|appendiabiti/.test(value)) return "Camere e housekeeping";
+  if (/lampad|elettric|presa|rubinett|tubo|filtro|climat|vernice|vite|bullon/.test(value)) return "Manutenzione";
+  if (/sedia|tavol|frigor|forno|attrezz|carrello/.test(value)) return "Arredi e attrezzature";
+  if (/carta a4|penna|toner|stampant|computer|mouse|tastier|software/.test(value)) return "Ufficio e informatica";
+  return "Da classificare";
+}
+
+export function CategoriesPage() {
+  const [products, setProducts] = useState<any[]>();
+  const [configs, setConfigs] = useState<Record<string, any>>({});
+  const [drafts, setDrafts] = useState<Record<string, {category: string; subcategory: string}>>({});
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api<any[]>("/products?q=&limit=200"),
+      api<Record<string, any>>("/product-config"),
+    ]).then(([items, stored]) => {
+      setProducts(items);
+      setConfigs(stored);
+      const initial: Record<string, {category: string; subcategory: string}> = {};
+      items.forEach((item) => {
+        const name = item.nome_canonico || item.canonical_name;
+        const config = stored[name] || {};
+        initial[name] = {
+          category: config.category || item.categoria || suggestedProductCategory(name),
+          subcategory: config.subcategory || item.sottocategoria || "",
+        };
+      });
+      setDrafts(initial);
+    }).catch(() => setProducts([]));
+  }, []);
+
+  const visible = (products || []).filter((item) => {
+    const name = item.nome_canonico || item.canonical_name || "";
+    const category = drafts[name]?.category || "Da classificare";
+    return name.toLowerCase().includes(q.toLowerCase()) && (filter === "all" || category === filter);
+  });
+
+  async function saveCategory(name: string) {
+    const draft = drafts[name] || {category: "Da classificare", subcategory: ""};
+    const config = configs[name] || {};
+    setSaving(name);
+    try {
+      const result = await api<any>("/product-config", {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          source_name: name,
+          configured_name: config.configured_name || name,
+          manufacturer: config.manufacturer || "",
+          category: draft.category,
+          subcategory: draft.subcategory,
+        }),
+      });
+      setConfigs((current) => ({...current, [name]: result}));
+      setSaved(name);
+      window.setTimeout(() => setSaved((current) => current === name ? null : current), 1800);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return <>
+    <PageHeader title="Categorie" subtitle="Classifica prodotti e spese senza confondere beni, servizi e logistica">
+      <div className="list-header-main category-toolbar">
+        <SearchBox value={q} onChange={setQ} placeholder="Cerca prodotto…" />
+        <select className="review-control" value={filter} onChange={(event) => setFilter(event.target.value)}>
+          <option value="all">Tutte le categorie</option>
+          {Object.keys(PRODUCT_CATEGORY_OPTIONS).map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+      </div>
+    </PageHeader>
+    <section className="panel list-panel">
+      <div className="panel-title category-panel-title"><div><h2>Prodotti</h2><span>La categoria suggerita può essere corretta e salvata</span></div><Status tone="ok">{visible.length} prodotti</Status></div>
+      {!products ? <Loading /> : visible.length ? <div className="table-wrap"><table><thead><tr><th>Prodotto</th><th>Categoria</th><th>Sottocategoria</th><th></th></tr></thead><tbody>
+        {visible.map((item) => {
+          const name = item.nome_canonico || item.canonical_name;
+          const draft = drafts[name] || {category: "Da classificare", subcategory: ""};
+          return <tr key={name}><td><b>{configs[name]?.configured_name || name}</b>{draft.category === "Da classificare" && <small className="category-hint">Da verificare</small>}</td><td><select className="category-select" value={draft.category} onChange={(event) => setDrafts((current) => ({...current, [name]: {category: event.target.value, subcategory: ""}}))}>{Object.keys(PRODUCT_CATEGORY_OPTIONS).map((category) => <option key={category}>{category}</option>)}</select></td><td><select className="category-select" value={draft.subcategory} disabled={!PRODUCT_CATEGORY_OPTIONS[draft.category]?.length} onChange={(event) => setDrafts((current) => ({...current, [name]: {...draft, subcategory: event.target.value}}))}><option value="">Nessuna</option>{(PRODUCT_CATEGORY_OPTIONS[draft.category] || []).map((subcategory) => <option key={subcategory}>{subcategory}</option>)}</select></td><td><button className="secondary-btn category-save" disabled={saving === name} onClick={() => saveCategory(name)}>{saving === name ? "Salvo…" : saved === name ? "Salvato" : "Salva"}</button></td></tr>;
+        })}
+      </tbody></table></div> : <Empty title="Nessun prodotto" text="Importa una fattura XML o cambia il filtro per vedere i prodotti." />}
+    </section>
+    <section className="panel expense-category-panel"><div className="panel-title"><div><h2>Spese e servizi</h2><span>Restano fuori dal catalogo prodotti ma sono ricercabili nelle fatture e nei fornitori</span></div></div><div className="expense-category-grid">{EXPENSE_CATEGORIES.map(([name, description]) => <article key={name}><b>{name}</b><span>{description}</span></article>)}</div></section>
+  </>;
+}
+
 export function SimplePage({
   title,
   subtitle,
