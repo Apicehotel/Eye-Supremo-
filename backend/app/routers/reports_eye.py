@@ -60,7 +60,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # the product catalogue: equivalent descriptions with the same content
     # must appear as one product, while the source names remain available for
     # the detail/history lookup.
-    page = {"items": merge_product_catalog(list(merged.values()))}
+    page = {"items": merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None)}
     product = next((x for x in page["items"] if x.get("nome_canonico")), None)
     if not product:
         return result
@@ -70,7 +70,8 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # product variant so older purchases cannot hide newer ones.
     if len(matches) > 1 and len(q.split()) == 1:
         return {**result, "matches": matches}
-    detail = await central_product_detail(product["nome_canonico"])
+    detail_name = (product.get("canonical_names") or [product["nome_canonico"]])[0]
+    detail = await central_product_detail(detail_name)
     history = detail.get("history", [])
     if not history:
         return result

@@ -206,12 +206,25 @@ def normalize_product_display_name(name: str) -> str:
     return value[:1].upper() + value[1:] if value else value
 
 
-def merge_product_catalog(items: list[dict]) -> list[dict]:
-    """Merge same-product variants by content while preserving source names."""
+def merge_product_catalog(items: list[dict], collapse_family: str | None = None) -> list[dict]:
+    """Merge same-product variants by content while preserving source names.
+
+    ``collapse_family`` is used only for explicit family searches such as
+    ``acqua``: the picker shows one family row, while canonical source names
+    remain attached for the detail/history lookup.
+    """
     groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     passthrough: list[dict] = []
     for item in items:
         key = product_content_group(item)
+        if collapse_family == "acqua":
+            item_tokens = set(normalize_text(str(item.get("nome_canonico") or "")).split())
+            # Family search also has rows without a parseable volume, such as
+            # "6 pz acqua ...". They still belong to the single Acqua row.
+            if "acqua" in item_tokens and "acquaragia" not in item_tokens and "acquaossigenata" not in item_tokens:
+                key = (collapse_family, "family")
+        elif key and collapse_family and key[0] == collapse_family:
+            key = (collapse_family, "family")
         (groups[key] if key else passthrough).append(item)
 
     # A supplier/brand is often embedded in the free-text name. Merge two
@@ -293,7 +306,9 @@ def merge_product_catalog(items: list[dict]) -> list[dict]:
             total_weight = sum(weight for _, weight in weighted_prices)
             result["avg_price"] = round(sum(price * weight for price, weight in weighted_prices) / total_weight, 4) if total_weight else round(sum(price for price, _ in weighted_prices) / len(weighted_prices), 4)
         result["nome_canonico"] = (
-            f"Acqua {key[1].replace('.', ',')} l"
+            "Acqua"
+            if key[0] == "acqua" and key[1] == "family"
+            else f"Acqua {key[1].replace('.', ',')} l"
             if key[0] == "acqua"
             else f"Acquaragia {key[1].replace('.', ',')} l"
             if key[0] == "acquaragia"

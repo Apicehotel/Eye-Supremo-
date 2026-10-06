@@ -176,6 +176,18 @@ def test_product_catalog_merges_half_litre_water_variants():
     assert any(row["nome_canonico"] == "Acqua naturale 0,75 l" for row in rows)
 
 
+def test_product_catalog_can_collapse_explicit_water_family_search():
+    rows = merge_product_catalog([
+        {"id": 1, "nome_canonico": "acqua naturale 0 5 l", "purchases": 2, "avg_price": 2},
+        {"id": 2, "nome_canonico": "acqua frizzante 0 75 l", "purchases": 3, "avg_price": 4},
+        {"id": 3, "nome_canonico": "6 pz acqua s benedetto gas", "purchases": 4, "avg_price": 5},
+    ], collapse_family="acqua")
+    assert len(rows) == 1
+    assert rows[0]["nome_canonico"] == "Acqua"
+    assert rows[0]["purchases"] == 9
+    assert set(rows[0]["canonical_names"]) == {"acqua naturale 0 5 l", "acqua frizzante 0 75 l", "6 pz acqua s benedetto gas"}
+
+
 def test_product_catalog_merges_same_content_for_non_water_products():
     rows = merge_product_catalog([
         {"id": 1, "nome_canonico": "Bombolone crema 50g", "purchases": 2, "min_price": 1, "avg_price": 2, "max_price": 3},
