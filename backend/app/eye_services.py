@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 from rapidfuzz import fuzz
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .auth_models import LocalCredential
 from .auth_service import DEFAULT_PIN, set_pin
@@ -14,6 +14,7 @@ from .models import (
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
 )
 from .normalization import normalize_text
+from .product_taxonomy import search_terms
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -137,8 +138,11 @@ def invoice_search(db: Session, query: str, role_name: str = "developer", limit:
         stmt = stmt.where(func.strftime("%Y", Invoice.data) == year.group(0))
         needle = needle.replace(year.group(0), " ").strip()
     if needle:
-        pattern = f"%{needle}%"
-        stmt = stmt.where(or_(InvoiceRow.descrizione_originale.ilike(pattern), InvoiceRow.descrizione_normalizzata.ilike(pattern), Supplier.ragione_sociale.ilike(pattern)))
+        fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata, Supplier.ragione_sociale, Invoice.numero)
+        clauses = []
+        for term in tuple(dict.fromkeys(search_terms(needle) + (needle,))):
+            clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in fields]) for token in normalize_text(term).split()]))
+        stmt = stmt.where(or_(*clauses))
     rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 4, 100))).all()
     if needle and not rows:
         candidates = db.execute((select(InvoiceRow, Invoice, Supplier)

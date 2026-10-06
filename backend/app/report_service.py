@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from .models import Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import normalize_text
+from .product_taxonomy import search_terms
 
 
 def _money(value) -> float:
@@ -18,6 +19,17 @@ def historical_product_report(db: Session, query: str, limit: int = 1200) -> dic
     if not q:
         return {"query": query, "summary": None, "suppliers": [], "dates": [], "units": []}
 
+    semantic_terms = tuple(dict.fromkeys(search_terms(q) + (q,)))
+    text_fields = (InvoiceRow.descrizione_normalizzata, InvoiceRow.descrizione_originale, Product.nome_canonico, Product.marca)
+    semantic_clauses = []
+    for term in semantic_terms:
+        tokens = normalize_text(term).split()
+        if not tokens:
+            continue
+        # Match every meaningful word independently. This handles supplier
+        # abbreviations such as "c igienica" and descriptions with extra
+        # package/brand text between the words.
+        semantic_clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in text_fields]) for token in tokens]))
     stmt = (
         select(InvoiceRow, Invoice, Supplier, Product, InvoiceRowPolicy)
         .join(Invoice, Invoice.id == InvoiceRow.invoice_id)
@@ -25,12 +37,7 @@ def historical_product_report(db: Session, query: str, limit: int = 1200) -> dic
         .outerjoin(Product, Product.id == InvoiceRow.product_id)
         .outerjoin(InvoiceRowPolicy, InvoiceRowPolicy.row_id == InvoiceRow.id)
         .where(
-            or_(
-                InvoiceRow.descrizione_normalizzata.ilike(f"%{q}%"),
-                InvoiceRow.descrizione_originale.ilike(f"%{query.strip()}%"),
-                Product.nome_canonico.ilike(f"%{query.strip()}%"),
-                Product.marca.ilike(f"%{query.strip()}%"),
-            )
+            or_(*semantic_clauses)
         )
         .where(or_(InvoiceRowPolicy.analysis_status.is_(None), InvoiceRowPolicy.analysis_status == "product"))
         .order_by(Invoice.data.asc(), InvoiceRow.id.asc())

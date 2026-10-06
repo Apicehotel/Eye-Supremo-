@@ -19,6 +19,11 @@ PRODUCT_FAMILY_ALIASES = {
     "carta a4": ("carta a4", "carta fotoc a4", "risma a4"),
     "a4": ("carta a4", "carta fotoc a4", "risma a4"),
     "acqua": ("acqua", "acque"),
+    # Common invoice shorthand: suppliers often omit the final letters of
+    # "carta" while keeping the discriminating word "igienica".
+    "c igienica": ("carta igienica", "c igienica"),
+    "carta igienica": ("carta igienica", "c igienica"),
+    "c ig": ("carta igienica", "c ig"),
     "bomboloni": ("bomboloni", "bombolino", "bombolini", "bombolone"),
     "bombolone": ("bomboloni", "bombolino", "bombolini", "bombolone"),
 }
@@ -103,6 +108,8 @@ def is_product_search_match(description: str, query: str) -> bool:
     if is_non_product_query(query_text):
         return False
     if query_text in PRODUCT_FAMILY_ALIASES:
+        if query_text in {"c igienica", "carta igienica", "c ig"}:
+            return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
         return is_family_match(description, query_text)
     terms = search_terms(query_text)
     tokens = set(text.split())

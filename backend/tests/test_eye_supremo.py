@@ -275,6 +275,19 @@ def test_historical_report_tracks_price_direction_and_best_supplier(db):
     assert marr["points"][-1]["delta"] == -0.05
 
 
+def test_historical_report_understands_invoice_abbreviation(db):
+    supplier = Supplier(ragione_sociale="Fornitore carta"); db.add(supplier); db.flush()
+    inv = Invoice(supplier_id=supplier.id, numero="C1", data=date(2026, 2, 1), imponibile=4, iva=0, totale=4)
+    db.add(inv); db.flush()
+    row = InvoiceRow(invoice_id=inv.id, descrizione_originale="Carta igienica  maxi", descrizione_normalizzata="carta igienica maxi", quantita=1, unita_normalizzata="pz", prezzo_unitario=4, totale_riga=4, confidence=1)
+    db.add(row); db.flush(); db.add(InvoiceRowPolicy(row_id=row.id, analysis_status="product")); db.commit()
+
+    report = historical_product_report(db, "c igienica")
+
+    assert report["summary"]["product"] == "c igienica"
+    assert report["suppliers"][0]["supplier"] == "Fornitore carta"
+
+
 def test_review_digest_splits_multiple_rooms():
     text = """Booking.com recensioni\nCAM: 217\nData recensione: 17/02/2026\nVoto: 9\nPositivo: staff gentile\nNegativo: camera piccola\nCAM: 305\nData recensione: 18/02/2026\nVoto: 7\nPositivo: colazione buona\nNegativo: letto scomodo"""
     items = split_review_blocks(text, "2026-02-19", "Outlook MSG", None, "sample.msg")

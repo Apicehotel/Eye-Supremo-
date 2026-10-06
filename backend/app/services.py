@@ -4,11 +4,12 @@ from decimal import Decimal
 from pathlib import Path
 import httpx
 from rapidfuzz import fuzz
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .config import settings
 from .models import AuditLog, Invoice, InvoiceRow, Product, Supplier
 from .normalization import normalize_text, normalized_price_with_content
+from .product_taxonomy import search_terms
 
 
 def audit(db: Session, event: str, message: str, severity="info", entity_type=None, entity_id=None):
@@ -60,8 +61,11 @@ def search_records(db: Session, query: str, limit=20):
             .join(Invoice, InvoiceRow.invoice_id == Invoice.id)
             .join(Supplier, Invoice.supplier_id == Supplier.id))
     if text:
-        pattern = f"%{text}%"
-        stmt = stmt.where(or_(InvoiceRow.descrizione_originale.ilike(pattern), InvoiceRow.descrizione_normalizzata.ilike(pattern), Supplier.ragione_sociale.ilike(pattern), Invoice.numero.ilike(pattern)))
+        fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata, Supplier.ragione_sociale, Invoice.numero)
+        clauses = []
+        for term in tuple(dict.fromkeys(search_terms(text) + (text,))):
+            clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in fields]) for token in normalize_text(term).split()]))
+        stmt = stmt.where(or_(*clauses))
     if "fornitore" in filters: stmt = stmt.where(Supplier.ragione_sociale.ilike(f"%{filters['fornitore']}%"))
     if "anno" in filters: stmt = stmt.where(func.strftime("%Y", Invoice.data) == filters["anno"])
     if "prodotto" in filters: stmt = stmt.where(InvoiceRow.descrizione_normalizzata.ilike(f"%{filters['prodotto']}%"))
