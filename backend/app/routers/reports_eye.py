@@ -21,12 +21,8 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     normalized_query = q.strip().lower()
     if result.get("summary") and normalized_query not in {"lampadine", "a4", "carta a4", "acqua"}:
         return result
-    if q.strip().lower() in {"a4", "carta a4", "acqua"}:
+    if q.strip().lower() in {"a4", "carta a4"}:
         search_queries = [q]
-        if q.strip().lower() == "acqua":
-            # Some suppliers print only the water brand (for example
-            # ``TULLIA L'UNICA``) and never write the word "acqua".
-            search_queries = ["acqua", "tullia", "lilia", "levissima", "san benedetto"]
         responses = await asyncio.gather(*(central_invoice_search(term, 500) for term in search_queries))
         merged_matches = {}
         for response in responses:

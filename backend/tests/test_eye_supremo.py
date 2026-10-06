@@ -77,8 +77,10 @@ def test_product_catalog_normalizes_ocr_split_litre_decimal():
         {"id": 1, "nome_canonico": "acqua frizzante 75cl", "purchases": 2, "avg_price": 2},
         {"id": 2, "nome_canonico": "acqua naturale 0 75 cl", "purchases": 1, "avg_price": 3},
     ])
-    group = next(row for row in rows if row["nome_canonico"] == "Acqua 0,75 l")
-    assert group["purchases"] == 3
+    natural_group = next(row for row in rows if row["nome_canonico"] == "Acqua Naturale 0,75 l")
+    sparkling_group = next(row for row in rows if row["nome_canonico"] == "Acqua Frizzante 0,75 l")
+    assert natural_group["purchases"] == 1
+    assert sparkling_group["purchases"] == 2
 
 
 def test_product_display_name_normalizes_spacing_without_losing_alias():
@@ -175,10 +177,10 @@ def test_product_catalog_merges_half_litre_water_variants():
         {"id": 2, "nome_canonico": "acqua frizzante 500 ml", "purchases": 3, "min_price": 2, "avg_price": 4, "max_price": 5},
         {"id": 3, "nome_canonico": "acqua naturale 0 75 l", "purchases": 1, "min_price": 3, "avg_price": 3, "max_price": 3},
     ])
-    half_litre = next(row for row in rows if row["nome_canonico"] == "Acqua 0,5 l")
-    assert half_litre["purchases"] == 5
-    assert set(half_litre["canonical_names"]) == {"acqua naturale 0 5 l", "acqua frizzante 500 ml"}
-    assert any(row["nome_canonico"] == "Acqua naturale 0,75 l" for row in rows)
+    natural_half_litre = next(row for row in rows if row["nome_canonico"] == "Acqua Naturale 0,5 l")
+    assert natural_half_litre["purchases"] == 2
+    assert any(row["nome_canonico"] == "Acqua Frizzante 0,5 l" for row in rows)
+    assert any(row["nome_canonico"] == "Acqua Naturale 0,75 l" for row in rows)
 
 
 def test_product_catalog_can_collapse_explicit_water_family_search():
@@ -187,10 +189,8 @@ def test_product_catalog_can_collapse_explicit_water_family_search():
         {"id": 2, "nome_canonico": "acqua frizzante 0 75 l", "purchases": 3, "avg_price": 4},
         {"id": 3, "nome_canonico": "6 pz acqua s benedetto gas", "purchases": 4, "avg_price": 5},
     ], collapse_family="acqua")
-    assert len(rows) == 1
-    assert rows[0]["nome_canonico"] == "Acqua"
-    assert rows[0]["purchases"] == 9
-    assert set(rows[0]["canonical_names"]) == {"acqua naturale 0 5 l", "acqua frizzante 0 75 l", "6 pz acqua s benedetto gas"}
+    assert len(rows) == 3
+    assert {row["nome_canonico"] for row in rows} == {"Acqua Naturale 0,5 l", "Acqua Frizzante 0,75 l", "Acqua Frizzante"}
 
 
 def test_product_catalog_merges_same_content_for_non_water_products():

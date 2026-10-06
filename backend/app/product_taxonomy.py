@@ -18,7 +18,7 @@ PRODUCT_FAMILY_ALIASES = {
     "lampadine": ("lampadina", "lampadine"),
     "carta a4": ("carta a4", "carta fotoc a4", "risma a4"),
     "a4": ("carta a4", "carta fotoc a4", "risma a4"),
-    "acqua": ("acqua", "acque"),
+    "acqua": ("acqua", "acque", "tullia", "lilia", "levissima", "san benedetto", "sant'anna"),
     # Common invoice shorthand: suppliers often omit the final letters of
     # "carta" while keeping the discriminating word "igienica".
     "c igienica": ("carta igienica", "c igienica"),
@@ -135,6 +135,18 @@ def product_content_group(item: dict) -> tuple[str, str] | None:
     name = str(item.get("nome_canonico") or "")
     normalized = normalize_text(name)
     content = extract_content(name)
+    # Water suppliers often encode the format as ``75x12`` or ``100 x 12``
+    # without an explicit litre unit. Keep that package format in the key so
+    # equal water types with different case sizes never get merged.
+    split_litre_package = re.search(r"\b(?:lt|l)\s+(\d+)\s+(\d+)\s*x\s*(\d+)\b", normalized)
+    package_match = re.search(r"\b(\d+(?:\s+\d+)?(?:[.,]\d+)?)\s*(?:cl|ml|lt|l)?\s*x\s*(\d+)\b", normalized)
+    package_format = None
+    if split_litre_package:
+        package_format = f"{split_litre_package.group(1)},{split_litre_package.group(2)}x{split_litre_package.group(3)}"
+    elif package_match:
+        package_format = re.sub(r"\s+", "", package_match.group(0))
+    water_tokens = {"acqua", "acque", "tullia", "lilia", "levissima", "leviss", "benedetto", "sanbenedetto", "santanna"}
+    water_hint = bool(set(normalized.split()) & water_tokens)
     # OCR sometimes splits a decimal and mislabels litres as centilitres:
     # ``0 75 cl`` is the same catalogue content as ``0,75 l``.
     decimal_cl = re.search(r"\b0\s+(\d{1,2})\s*cl\b", normalized)
@@ -148,7 +160,11 @@ def product_content_group(item: dict) -> tuple[str, str] | None:
     # Package counts (``6 pz``, ``24 pezzi``) are not product content.
     if content[1] not in {"kg", "l"} or not content[2] or content[2] <= 0:
         # The central catalogue contains compact half-litre water variants.
-        if "acqua" in normalized and "0 5" in normalized:
+        if package_format and water_hint:
+            # The package count is the comparable format; the dummy content
+            # only lets the family/type normalization continue below.
+            content = (Decimal("1"), "l", Decimal("1"))
+        elif "acqua" in normalized and "0 5" in normalized:
             content = (Decimal("0.5"), "l", Decimal("0.5"))
         elif "acqua" in normalized and ("0 500" in normalized or "05" in normalized.split()):
             content = (Decimal("0.5"), "l", Decimal("0.5"))
@@ -175,8 +191,11 @@ def product_content_group(item: dict) -> tuple[str, str] | None:
         return None
     # Water is commonly entered with natural/frizzante/package wording; keep
     # the established family merge for it, while other products use identity.
-    if "acqua" in family.split() and not any(token in family.split() for token in ("acquaragia", "acquaossigenata")):
-        family = "acqua"
+    if (set(family.split()) & water_tokens) and not any(token in family.split() for token in ("acquaragia", "acquaossigenata")):
+        water_type = "naturale" if any(token in family.split() for token in ("naturale", "nat")) else "frizzante" if any(token in family.split() for token in ("frizzante", "gassata", "gas", "friz")) else "tonica" if "tonica" in family.split() else "acqua"
+        family = f"acqua {water_type}"
+        if package_format:
+            return (family, package_format)
     # For solvents the brand/line is not a distinct product in the catalogue:
     # ``acquaragia 603``, ``acquaragia silver`` and ``acquaragia inodore``
     # must share the same content group when the user compares prices.
@@ -223,8 +242,13 @@ def merge_product_catalog(items: list[dict], collapse_family: str | None = None)
             item_tokens = set(normalize_text(str(item.get("nome_canonico") or "")).split())
             # Family search also has rows without a parseable volume, such as
             # "6 pz acqua ...". They still belong to the single Acqua row.
-            if "acqua" in item_tokens and "acquaragia" not in item_tokens and "acquaossigenata" not in item_tokens:
-                key = (collapse_family, "family")
+            water_tokens = {"acqua", "acque", "tullia", "lilia", "levissima", "leviss", "benedetto", "sanbenedetto", "santanna"}
+            if item_tokens & water_tokens and "acquaragia" not in item_tokens and "acquaossigenata" not in item_tokens:
+                if key and key[0].startswith("acqua "):
+                    pass
+                else:
+                    water_type = "naturale" if item_tokens & {"naturale", "nat"} else "frizzante" if item_tokens & {"frizzante", "gassata", "gas", "friz"} else "tonica" if "tonica" in item_tokens else "acqua"
+                    key = (f"acqua {water_type}", "family")
         elif key and collapse_family and key[0] == collapse_family:
             key = (collapse_family, "family")
         (groups[key] if key else passthrough).append(item)
@@ -287,10 +311,21 @@ def merge_product_catalog(items: list[dict], collapse_family: str | None = None)
             result["canonical_names"] = [raw_name]
         return result
 
+    def water_display_name(key: tuple[str, str]) -> str:
+        water_type = key[0].removeprefix("acqua ").title()
+        if key[1] == "family":
+            return f"Acqua {water_type}"
+        if re.fullmatch(r"\d+(?:[.,]\d+)?x\d+", key[1]):
+            return f"Acqua {water_type} {key[1]}"
+        return f"Acqua {water_type} {key[1].replace('.', ',')} l"
+
     merged = [display_item(item) for item in passthrough]
     for key, rows in groups.items():
         if len(rows) == 1:
-            merged.append(display_item(rows[0]))
+            single = display_item(rows[0])
+            if key[0].startswith("acqua "):
+                single["nome_canonico"] = water_display_name(key)
+            merged.append(single)
             continue
         representative = min(rows, key=lambda row: len(str(row.get("nome_canonico") or "")))
         names = [str(row.get("nome_canonico") or "") for row in rows]
@@ -308,10 +343,8 @@ def merge_product_catalog(items: list[dict], collapse_family: str | None = None)
             total_weight = sum(weight for _, weight in weighted_prices)
             result["avg_price"] = round(sum(price * weight for price, weight in weighted_prices) / total_weight, 4) if total_weight else round(sum(price for price, _ in weighted_prices) / len(weighted_prices), 4)
         result["nome_canonico"] = (
-            "Acqua"
-            if key[0] == "acqua" and key[1] == "family"
-            else f"Acqua {key[1].replace('.', ',')} l"
-            if key[0] == "acqua"
+            water_display_name(key)
+            if key[0].startswith("acqua ")
             else f"Acquaragia {key[1].replace('.', ',')} l"
             if key[0] == "acquaragia"
             else normalize_product_display_name(str(representative.get("nome_canonico") or "").strip())
