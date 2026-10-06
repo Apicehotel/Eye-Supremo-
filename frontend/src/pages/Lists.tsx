@@ -824,7 +824,7 @@ export function AlertsPage() {
 }
 
 const PRODUCT_CATEGORY_OPTIONS: Record<string, string[]> = {
-  "Food & Beverage": ["Colazioni", "Bevande", "Cucina", "Dispensa"],
+  "Food & Beverage": ["Colazioni", "Bevande", "Vino", "Cucina", "Dispensa"],
   "Pulizia e igiene": ["Detergenti", "Carta", "Amenities"],
   "Camere e housekeeping": ["Biancheria", "Asciugamani", "Accessori camera"],
   Manutenzione: ["Elettrico", "Idraulica", "Climatizzazione", "Ferramenta"],
@@ -847,13 +847,19 @@ const EXPENSE_CATEGORIES = [
 
 function suggestedProductCategory(name: string) {
   const value = name.toLowerCase();
-  if (/acqua|bevanda|vino|birra|caffe|caff[eè]|pasta|farina|olio|zuccher|colazion/.test(value)) return "Food & Beverage";
+  if (/acqua|bevanda|vino|vin[oò]|birra|caffe|caff[eè]|pasta|farina|olio|zuccher|colazion|cadetto/.test(value)) return "Food & Beverage";
   if (/deterg|igien|carta|sapone|shampoo|amenit|disinfett/.test(value)) return "Pulizia e igiene";
   if (/lenzuol|asciugaman|copriletto|cuscino|camera|appendiabiti/.test(value)) return "Camere e housekeeping";
   if (/lampad|elettric|presa|rubinett|tubo|filtro|climat|vernice|vite|bullon/.test(value)) return "Manutenzione";
   if (/sedia|tavol|frigor|forno|attrezz|carrello/.test(value)) return "Arredi e attrezzature";
   if (/carta a4|penna|toner|stampant|computer|mouse|tastier|software/.test(value)) return "Ufficio e informatica";
   return "Da classificare";
+}
+
+function suggestedProductSubcategory(name: string, category: string) {
+  const value = name.toLowerCase();
+  if (category === "Food & Beverage" && /vino|vin[oò]|cadetto|rosso|bianco|rosato/.test(value)) return "Vino";
+  return "";
 }
 
 export function CategoriesPage() {
@@ -877,8 +883,8 @@ export function CategoriesPage() {
         const name = item.nome_canonico || item.canonical_name;
         const config = stored[name] || {};
         initial[name] = {
-          category: config.category || item.categoria || suggestedProductCategory(name),
-          subcategory: config.subcategory || item.sottocategoria || "",
+          category: config.category && config.category !== "Da classificare" ? config.category : item.categoria || suggestedProductCategory(name),
+          subcategory: config.subcategory || item.sottocategoria || suggestedProductSubcategory(name, config.category || item.categoria || suggestedProductCategory(name)),
         };
       });
       setDrafts(initial);
