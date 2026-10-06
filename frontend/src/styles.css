@@ -73,6 +73,26 @@
 :root{--sort-control-gap:9px}
 .table-sort-button{border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:700;cursor:pointer;text-align:left}
 
+/* Desktop navigation: keep the menu readable without requiring hover. */
+@media(min-width:761px){
+  .sidebar{width:244px;padding-left:14px;padding-right:14px;overflow-x:hidden;overflow-y:auto}
+  .app-shell main{margin-left:244px}
+  .sidebar .brand{justify-content:flex-start;padding-left:12px;padding-right:12px;gap:10px}
+  .sidebar .brand-logo{display:block}
+  .sidebar .brand-copy{display:block}
+  .sidebar .brand-name,.sidebar .brand-subtitle{display:inline}
+  .sidebar .brand-subtitle{display:block}
+  .sidebar .area-switch{margin-left:4px;margin-right:4px}
+  .sidebar .area-switch button{font-size:10px;padding-left:4px;padding-right:4px}
+  .sidebar nav button{justify-content:flex-start;padding-left:14px;padding-right:14px}
+  .sidebar nav button span{display:block}
+  .sidebar .role-box{margin-left:4px;margin-right:4px}
+  .sidebar .role-box label,.sidebar .role-box button{font-size:12px;justify-content:flex-start}
+  .sidebar .role-box small,.sidebar .local-status,.sidebar .local-status small{display:block}
+  .sidebar .sidebar-pin{font-size:11px;justify-content:flex-start;padding-left:10px;padding-right:10px}
+  .sidebar .sidebar-pin span{display:inline}
+}
+
 /* Zenify-inspired desktop skin: navy structure, warm orange actions, airy
    finance-SaaS surfaces. The existing data and interaction components stay
    unchanged; this layer only modernizes their visual language. */
