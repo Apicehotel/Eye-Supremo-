@@ -151,3 +151,15 @@ body{background:#f7f8fa;color:var(--ink)}
 .auth-card>svg{color:var(--accent);background:#fff0ea}
 .auth-card input:focus,.auth-card select:focus{border-color:#ff9b78;box-shadow:0 0 0 3px #ff5a241c}
 @media(max-width:760px){.app-shell main{margin-left:0;padding:20px 17px 34px}}
+
+/* Keep the desktop rail genuinely compact when it is not active.  The
+   visual theme above sets a wide base width, so these final rules deliberately
+   restore the collapsed interaction state without affecting mobile. */
+@media(min-width:761px){
+  .sidebar{width:72px!important;padding-left:8px!important;padding-right:8px!important;overflow-x:hidden;overflow-y:hidden}
+  .sidebar:hover,.sidebar:focus-within,.sidebar.pinned{width:230px!important;overflow-y:auto}
+  .app-shell main{margin-left:72px!important}
+  .sidebar:hover~main,.sidebar:focus-within~main,.sidebar.pinned~main{margin-left:230px!important}
+  .sidebar:not(:hover):not(:focus-within):not(.pinned) .role-box,
+  .sidebar:not(:hover):not(:focus-within):not(.pinned) .local-status{display:none}
+}
