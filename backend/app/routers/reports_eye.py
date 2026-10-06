@@ -21,7 +21,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     normalized_query = q.strip().lower()
     if result.get("summary") and normalized_query not in {"lampadine", "a4", "carta a4", "acqua"}:
         return result
-    if q.strip().lower() in {"a4", "carta a4"}:
+    if q.strip().lower() in {"a4", "carta a4", "acqua"}:
         matches = await central_invoice_search(q, 500)
         grouped = {}
         for row in matches.get("items", []):
@@ -44,7 +44,8 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             blocks.append({"supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": None, "initial_price": prices[0], "initial_date": points[0]["date"], "average_price": round(sum(prices) / len(prices), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": prices[-1], "latest_date": points[-1]["date"], "observations": len(points), "points": points})
         if blocks:
             all_points = [p for b in blocks for p in b["points"]]; best = min(all_points, key=lambda p: p["price"]); cheapest = min(blocks, key=lambda b: b["average_price"])
-            return {"query": q, "summary": {"product": q.strip().upper(), "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda p: p["date"])["price"], "initial_date": min(p["date"] for p in all_points), "average_price": round(sum(p["price"] for p in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda p: p["date"])["price"], "latest_date": max(p["date"] for p in all_points), "best_supplier": cheapest["supplier"], "best_supplier_average": cheapest["average_price"], "best_supplier_observations": cheapest["observations"]}, "suppliers": blocks, "dates": sorted({p["date"] for p in all_points}), "units": sorted({p["unit"] for p in all_points}), "comparison_note": "Confronto famiglia A4: sono incluse le righe prodotto A4 di tutti i fornitori."}
+            note = "Confronto famiglia Acqua: sono incluse le righe acqua compatibili di tutti i fornitori." if q.strip().lower() == "acqua" else "Confronto famiglia A4: sono incluse le righe prodotto A4 di tutti i fornitori."
+            return {"query": q, "summary": {"product": q.strip().upper(), "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda p: p["date"])["price"], "initial_date": min(p["date"] for p in all_points), "average_price": round(sum(p["price"] for p in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda p: p["date"])["price"], "latest_date": max(p["date"] for p in all_points), "best_supplier": cheapest["supplier"], "best_supplier_average": cheapest["average_price"], "best_supplier_observations": cheapest["observations"]}, "suppliers": blocks, "dates": sorted({p["date"] for p in all_points}), "units": sorted({p["unit"] for p in all_points}), "comparison_note": note}
     # Local-first installations may have no Invoice rows while the shared
     # catalogue is already populated. Adapt the central product detail to the
     # same report contract used by the Excel-inspired UI.
