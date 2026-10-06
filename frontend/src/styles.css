@@ -73,6 +73,13 @@
 :root{--sort-control-gap:9px}
 .table-sort-button{border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:700;cursor:pointer;text-align:left}
 
+@media(min-width:761px){
+  /* The area switch is useful only while the rail is open; hiding it in the
+     compact state prevents the two-button control from stretching outside it. */
+  .sidebar:not(:hover):not(:focus-within):not(.pinned) .area-switch{display:none}
+  .sidebar:hover .area-switch,.sidebar:focus-within .area-switch,.sidebar.pinned .area-switch{display:grid}
+}
+
 
 /* Zenify-inspired desktop skin: navy structure, warm orange actions, airy
    finance-SaaS surfaces. The existing data and interaction components stay
