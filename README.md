@@ -10,7 +10,42 @@ Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per anal
 - **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
 - **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
 
-La sezione **Feedback** consente di descrivere un problema, allegare uno screenshot, salvare la segnalazione localmente ed esportarla in JSON per inviarla allo sviluppatore. GitHub conserva codice e versioni: modificare il repository da solo non aggiorna automaticamente un'installazione già presente; occorrono una nuova build/release e un meccanismo di aggiornamento configurato.
+La sezione **Feedback** consente di descrivere un problema, allegare uno screenshot, salvare la segnalazione localmente ed esportarla in JSON per inviarla allo sviluppatore.
+
+## Stato del progetto
+
+**Versione applicativa:** `2.0.0`
+**Branch di lavoro:** `feat/eye-supremo-foundations`
+**Ultimo aggiornamento:** 6 ottobre 2026
+
+### Completato
+
+- archivio locale fatture con import XML FatturaPA, anteprima, duplicati, imponibile, IVA e totale;
+- ricerca fatture, prodotti e fornitori con filtri e ordinamento per data, prezzo, fornitore, imponibile e totale;
+- catalogo prodotti, classificazione conservativa e storico prezzi per fornitore;
+- report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
+- recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
+- dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
+- login locale per profilo utente con PIN, ruoli e permessi; il login sviluppatore non è più obbligatorio;
+- gestione utenti e PIN riservata al ruolo Sviluppatore;
+- Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
+- GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
+
+### Verificato
+
+- backend: `50 passed`;
+- build frontend Vite: riuscita;
+- installer Windows: workflow e smoke test configurati;
+- branch locale e remoto allineati dopo il commit `3865ee0`.
+
+### Da completare
+
+- pubblicare una GitHub Release `v2.0.0` coerente con la versione dell'installer;
+- verificare il percorso completo su un PC pulito: installazione, primo login, import XML e aggiornamento;
+- eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
+
+GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla le release da GitHub e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
 
 ## Hotel preconfigurati
 
