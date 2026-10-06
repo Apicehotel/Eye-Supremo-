@@ -164,8 +164,8 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
               <AreaChart data={data.monthly}>
                 <defs>
                   <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#0f8b8d" stopOpacity={0.28} />
-                    <stop offset="1" stopColor="#0f8b8d" stopOpacity={0.02} />
+                    <stop offset="0" stopColor="#ff5a24" stopOpacity={0.28} />
+                    <stop offset="1" stopColor="#ff5a24" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="#e5eaf0" vertical={false} />
@@ -175,7 +175,7 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
                 <Area
                   type="monotone"
                   dataKey="total"
-                  stroke="#0f8b8d"
+                  stroke="#ff5a24"
                   fill="url(#fill)"
                   strokeWidth={2.5}
                 />

@@ -72,3 +72,74 @@
 .product-track-toggle{display:flex!important;align-items:center;gap:8px;margin-top:14px;color:var(--ink)!important;font-size:12px!important}.product-track-toggle input{width:auto!important;margin:0!important}.tracked-products{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--border)}.tracked-products h3{margin:0 0 4px}.tracked-products p{margin:0;color:var(--muted);font-size:12px}.tracked-products>b{font-size:20px;color:var(--accent)}.tracked-product-list{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0}.tracked-product-list span{background:#e5f7f3;border:1px solid #b7e7df;border-radius:999px;padding:6px 10px;font-size:12px}
 :root{--sort-control-gap:9px}
 .table-sort-button{border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:700;cursor:pointer;text-align:left}
+
+/* Zenify-inspired desktop skin: navy structure, warm orange actions, airy
+   finance-SaaS surfaces. The existing data and interaction components stay
+   unchanged; this layer only modernizes their visual language. */
+:root{
+  --navy:#111d34;
+  --teal:#ff5a24;
+  --accent:#ff5a24;
+  --border:#e7e9ee;
+  --muted:#7a8497;
+  --ink:#18243a;
+}
+body{background:#f7f8fa;color:var(--ink)}
+.sidebar{width:244px;background:#fff;color:#4d5870;border-right:1px solid #eceef2;box-shadow:8px 0 24px #12203308;padding:24px 14px 18px}
+.brand{color:var(--navy);padding:0 12px 24px}
+.brand b{color:var(--accent)}
+.brand span{color:#8a93a3}
+.sidebar nav button{color:#707a8d;border-radius:10px;padding:12px 14px}
+.sidebar nav button:hover{background:#fff3ee;color:#e94f1e}
+.sidebar nav button.active{background:#fff0ea;color:#ed531f;box-shadow:inset 3px 0 var(--accent)}
+.area-switch{background:#f5f6f8;border-color:#e4e7ed}
+.area-switch button{color:#788398}
+.area-switch button.active{background:#fff;color:var(--accent);box-shadow:0 2px 7px #1f29370d}
+.sidebar-top-tools .sidebar-pin{color:#7b8496}
+.sidebar-pin.active{color:var(--accent)!important}
+.local-status{border-color:#eceef2}
+.local-status small{color:#929aaa}
+.role-box{border-color:#eceef2;color:var(--navy)}
+.role-box small{color:#8b94a4}
+.role-box button{color:#7b8496}
+.role-box button:hover{color:var(--accent)}
+.app-shell main{margin-left:244px;padding:30px 34px 46px}
+.page-header{margin-bottom:24px}
+.page-header h1{color:var(--navy);letter-spacing:-.6px}
+.page-header p{color:#8992a2}
+.global-search,.search-box{border-color:#e3e6eb;border-radius:11px;box-shadow:0 2px 9px #19243d05}
+.global-search:focus-within,.search-box:focus-within{border-color:#ffb49a;box-shadow:0 0 0 3px #ff5a2414}
+.kpi,.panel{border-color:#e8eaf0;border-radius:14px;box-shadow:0 5px 18px #19243d06}
+.kpi{min-height:132px;padding:23px}
+.kpi>svg{color:var(--accent);background:#fff0ea}
+.kpi strong{color:var(--navy);letter-spacing:-.3px}
+.panel{padding:20px}
+.panel h2{color:var(--navy);letter-spacing:-.25px}
+.panel-title button{color:var(--accent)}
+.quick>button{border-color:#eceef2;border-radius:11px}
+.quick>button:hover{border-color:#ffb49a;background:#fffaf8}
+.quick>button>svg{background:var(--accent)}
+.primary-btn{background:var(--accent);border-radius:9px;box-shadow:0 5px 12px #ff5a2426}
+.primary-btn:hover{background:#e84b18}
+.secondary-btn{border-radius:9px}
+.table-wrap th{background:#fafbfc;color:#687389}
+.table-wrap tbody tr:hover{background:#fffaf8}
+.status{border-radius:7px}
+.alert-item>svg{color:#e65a23;background:#fff0ea}
+.settings-nav button.active{background:#fff0ea;color:#e94f1e}
+.dropzone{border-color:#ffb49a;background:#fffaf8}
+.dropzone>svg,.ai-hero>svg{color:var(--accent);background:#fff0ea}
+.review-filters button.active{color:var(--accent)!important}
+.review-avatar{background:#fff0ea;color:#e94f1e}
+.review-source,.source-card strong,.tracked-products>b{color:var(--accent)!important}
+.review-summary strong{color:var(--accent)}
+.rating-bars i b{background:var(--accent)}
+.hotel-selector button.active{border-color:var(--accent);background:#fff5f1;box-shadow:inset 0 0 0 1px var(--accent)}
+.review-hotel{color:#e94f1e;background:#fff0ea}
+.pagination button:hover:not(:disabled){background:#fff0ea;border-color:#ffb49a;color:#e94f1e}
+.product-config{background:#fffaf8;border-color:#ffe0d4}
+.auth-screen{background:radial-gradient(circle at 15% 10%,#344b70 0,#172743 42%,#101a2e 100%)}
+.auth-card{border-radius:20px}
+.auth-card>svg{color:var(--accent);background:#fff0ea}
+.auth-card input:focus,.auth-card select:focus{border-color:#ff9b78;box-shadow:0 0 0 3px #ff5a241c}
+@media(max-width:760px){.app-shell main{margin-left:0;padding:20px 17px 34px}}
