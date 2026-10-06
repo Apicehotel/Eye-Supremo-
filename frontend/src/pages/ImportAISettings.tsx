@@ -497,12 +497,14 @@ export function SettingsPage() {
   const [data, setData] = useState<any>(),
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
+    [hotels, setHotels] = useState<Hotel[]>([]),
     [activeTab, setActiveTab] = useState("IA locale");
   useEffect(() => {
     if (canManage) {
       api("/settings").then(setData);
       api("/ollama/status").then(setStatus);
       eyeApi("/sync/status").then(setSync);
+      eyeApi<Hotel[]>("/hotels").then(setHotels).catch(() => setHotels([]));
     }
   }, []);
   if (!canManage)
@@ -548,7 +550,6 @@ export function SettingsPage() {
         title="Impostazioni"
         subtitle="Utenti, IA locale, sincronizzazione, backup e sicurezza"
       />
-      <UserAdmin />
       <div className="settings-layout">
         <aside className="settings-nav">
           {tabs.map((x) => (
@@ -576,6 +577,20 @@ export function SettingsPage() {
                 : "Sezione pronta"}
             </Status>
           </div>
+          {activeTab === "Utenti e ruoli" && <UserAdmin />}
+          {activeTab === "Hotel" && (
+            <>
+              <p>Hotel disponibili per la destinazione delle fatture e per le recensioni.</p>
+              {hotels.length ? <div className="settings-hotel-list">{hotels.map((hotel) => <div key={hotel.id}><b>{hotel.name}</b><span>{hotel.code}</span></div>)}</div> : <Empty title="Nessun hotel configurato" text="Gli hotel compariranno qui quando saranno disponibili nell’archivio locale." />}
+            </>
+          )}
+          {activeTab === "Generali" && data && (
+            <>
+              <label>Dimensione massima importazione<input value={`${data.max_upload_mb} MB`} readOnly /></label>
+              <label>Tema interfaccia<select value={data.theme || "zenify"} onChange={(e) => setData({...data, theme: e.target.value})}><option value="zenify">Zenify arancio</option><option value="classic">Classico blu</option></select></label>
+              <div className="form-actions"><button className="primary-btn" onClick={save}>Salva</button></div>
+            </>
+          )}
           {activeTab === "IA locale" && data && (
             <>
               <label>
@@ -619,25 +634,10 @@ export function SettingsPage() {
               </div>
             </>
           )}
-          {activeTab !== "IA locale" && (
-            <Empty
-              title={activeTab}
-              text="Questa sezione è disponibile e collegata alla configurazione Eye Supremo."
-            />
-          )}
-          <hr />
-          <h2>Ponte Supabase</h2>
-          <p>
-            {sync?.enabled
-              ? "Sincronizzazione attiva"
-              : "Replica centrale disponibile per fatture e recensioni."}
-          </p>
-          <hr />
-          <h2>Backup locale</h2>
-          <button className="secondary-btn" onClick={backup}>
-            <DatabaseBackup />
-            Crea backup ora
-          </button>
+          {activeTab === "Esclusioni fatture" && <Empty title="Esclusioni fatture" text="Le righe di servizio, consegna, carburante e altre spese non prodotto restano ricercabili senza entrare nel catalogo prodotti." />}
+          {activeTab === "Sincronizzazione" && <><p>{sync?.enabled ? "Sincronizzazione centrale attiva." : "Replica centrale disponibile per fatture e recensioni; il lavoro locale continua anche senza connessione."}</p><Status tone={sync?.enabled ? "ok" : "warn"}>{sync?.enabled ? "Connessa" : "Non connessa"}</Status></>}
+          {activeTab === "Backup" && <><p>Crea una copia locale del database e delle configurazioni correnti.</p><button className="secondary-btn" onClick={backup}><DatabaseBackup />Crea backup ora</button></>}
+          {activeTab === "Sicurezza" && <Empty title="Accesso locale" text="Gli utenti accedono con PIN locale. Sviluppatore e Supremo hanno attualmente lo stesso livello operativo." />}
         </section>
       </div>
     </>
