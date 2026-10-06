@@ -3,6 +3,8 @@ name: Eye Supremo CI
 on:
   pull_request:
     branches: [main, feat/eye-supremo-foundations]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:

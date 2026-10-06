@@ -4,7 +4,7 @@ Set-Location $Root
 
 Write-Host '== Eye Supremo: build frontend =='
 Push-Location frontend
-npm ci
+try { npm ci } catch { Write-Warning 'npm ci non riuscito (file nativo in uso); uso le dipendenze già installate.' }
 npm run build
 Pop-Location
 

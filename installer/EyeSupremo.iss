@@ -7,6 +7,7 @@ DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
 OutputBaseFilename=EyeSupremo-Setup
+SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -27,4 +28,5 @@ Name: "{autodesktop}\Eye Supremo"; Filename: "{app}\EyeSupremo.exe"; Tasks: desk
 Name: "desktopicon"; Description: "Crea un'icona sul desktop"; GroupDescription: "Collegamenti:"
 
 [Run]
+Filename: "{cmd}"; Parameters: "/c ""{app}\scarica-modelli-ia.bat"" /silent"; Description: "Installa Ollama e i modelli IA locali (Qwen + Llama)"; StatusMsg: "Installazione modelli IA in corso..."; Flags: waituntilterminated
 Filename: "{app}\EyeSupremo.exe"; Description: "Avvia Eye Supremo"; Flags: nowait postinstall skipifsilent

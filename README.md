@@ -10,6 +10,8 @@ Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per anal
 - **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
 - **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
 
+La sezione **Feedback** consente di descrivere un problema, allegare uno screenshot, salvare la segnalazione localmente ed esportarla in JSON per inviarla allo sviluppatore. GitHub conserva codice e versioni: modificare il repository da solo non aggiorna automaticamente un'installazione già presente; occorrono una nuova build/release e un meccanismo di aggiornamento configurato.
+
 ## Hotel preconfigurati
 
 - `gio` — Hotel Giò
@@ -18,7 +20,7 @@ Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per anal
 
 ## Accesso e ruoli
 
-Eye Supremo usa autenticazione locale con PIN e sessione. Al primo avvio lo Sviluppatore imposta il PIN; successivamente gli utenti accedono con il proprio profilo.
+Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con PIN iniziale `000000`: lo Sviluppatore deve sostituirlo dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
 
 - **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
 - **Supremo**: visibilità globale operativa sui tre hotel.
@@ -37,6 +39,7 @@ Pipeline:
 1. hash SHA-256 e controllo duplicati;
 2. parsing e anteprima;
 3. conferma esplicita;
+   nella schermata lotto è possibile confermare una singola fattura oppure tutte le fatture pronte;
 4. classificazione righe;
 5. voci contabili non utili all'analisi restano nella fattura ma vengono escluse dalla ricerca prodotto;
 6. indicizzazione FTS5;
@@ -112,7 +115,9 @@ Gli specialisti che leggono il database possono lavorare in parallelo, ma **ognu
 
 La chiamata Ollama usa **structured output JSON Schema** (`answer`, `facts`, `confidence`). Se Ollama non è disponibile, l'orchestratore ricade sul motore deterministico locale. L'endpoint `/api/eye/agents/registry` espone il registro degli agenti e dei tool consentiti.
 
-Modelli consigliati:
+Durante l'installazione Windows lo script incluso installa Ollama se necessario e scarica automaticamente i modelli. Sono necessari Internet e spazio disco locale; i modelli non vengono committati nel repository né incorporati nell'EXE per le loro dimensioni.
+
+Modelli inclusi nel completamento automatico:
 
 ```text
 qwen3:8b
@@ -120,7 +125,7 @@ llama3.2:3b
 qwen3-embedding:0.6b
 ```
 
-Eseguire `scarica-modelli-ia.bat` dopo aver installato Ollama.
+Il file `scarica-modelli-ia.bat` resta disponibile nella cartella dell'app per ripetere o completare il download dei modelli.
 
 ## Alert
 
@@ -133,6 +138,13 @@ Sul progetto **Apice MultiHotel** sono presenti:
 - `eye_sync_memberships`
 - `eye_sync_objects`
 - Edge Function `eye-supremo-sync`
+- tabelle centrali `eye_central_invoices`, `eye_central_invoice_rows`, `eye_central_suppliers`;
+- funzione SQL `eye_central_invoice_page` per lettura autenticata paginata;
+- cache SQLite locale `central_invoice_cache`, usata per elenco fatture veloce;
+- la prima apertura su un PC vuoto avvia automaticamente la replica in background;
+- la ricerca di prodotto/famiglia usa ancora l'indice centrale quando la cache non contiene le righe.
+- recensioni: `eye_central_reviews`, upsert autenticato all'importazione e pull nella cache `central_review_cache`;
+- endpoint diagnostici: `/api/eye/central/sync/status` e `/api/eye/reviews/sync/status`.
 
 L'Edge Function richiede JWT valido. `developer` e `supremo` possono essere configurati per lettura globale; gli altri utenti ricevono solo gli hotel autorizzati dalla membership server-side.
 
@@ -145,7 +157,7 @@ EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
 EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 ```
 
-La sync è **disattivata per default** e l'app continua a funzionare offline.
+La replica centrale è disponibile con le credenziali Eye (`supremo`/`000000` iniziali). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
 
 ## Avvio sviluppo
 
@@ -195,11 +207,11 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 - upload con limiti e nomi generati;
 - hash duplicati;
 - audit log;
-- sync remota con JWT obbligatorio;
+- sync remota centrale autenticata con PIN e paginazione;
 - nessun token reale committato.
 
 ## Limitazioni note
 
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
-- il login Supabase desktop e refresh automatico della sessione restano necessari per rendere la sync remota completamente trasparente agli utenti;
+- il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;
 - `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.

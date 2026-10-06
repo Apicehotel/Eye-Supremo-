@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .config import settings
 from .models import AuditLog, Invoice, InvoiceRow, Product, Supplier
-from .normalization import normalize_text, normalized_price
+from .normalization import normalize_text, normalized_price_with_content
 
 
 def audit(db: Session, event: str, message: str, severity="info", entity_type=None, entity_id=None):
@@ -31,7 +31,12 @@ def create_invoice(db: Session, payload):
     for row in payload.rows:
         r = row.model_dump()
         r["descrizione_normalizzata"] = r["descrizione_normalizzata"] or normalize_text(r["descrizione_originale"])
-        unit, price = normalized_price(Decimal(r["prezzo_unitario"]), Decimal(r["quantita"]), r["unita_originale"])
+        unit, price = normalized_price_with_content(
+            Decimal(r["prezzo_unitario"]),
+            Decimal(r["quantita"]),
+            r["unita_originale"],
+            r["descrizione_originale"],
+        )
         db.add(InvoiceRow(invoice_id=inv.id, unita_normalizzata=unit, prezzo_normalizzato=price, **r))
     audit(db, "invoice.created", f"Fattura {inv.numero} registrata", entity_type="invoice", entity_id=inv.id)
     db.commit(); db.refresh(inv); return inv

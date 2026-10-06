@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..config import settings
 from ..database import get_db
+from ..central_service import central_invoice_upsert
 from ..eye_services import apply_row_policies, create_price_alerts, ensure_invoice_metadata
 from ..importers import parse_document
 from ..models import ImportJob, Invoice, InvoiceRow, Supplier
@@ -20,6 +21,7 @@ from ..services import audit, create_invoice, duplicate_candidates
 router = APIRouter(prefix="/api/eye/invoices", tags=["Eye Supremo invoices"])
 ALLOWED = {".xml", ".txt", ".pdf"}
 MAX_BATCH_FILES = 100
+MAX_BATCH_ZIP_BYTES = 120 * 1024 * 1024
 MAX_BATCH_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 
 
@@ -59,10 +61,11 @@ async def _collect_uploads(files: list[UploadFile]) -> tuple[list[tuple[str, byt
     for upload in files:
         source_name = Path(upload.filename or "documento").name
         suffix = Path(source_name).suffix.lower()
-        max_input = max(settings.max_upload_mb * 1024 * 1024, 120 * 1024 * 1024 if suffix == ".zip" else 0)
+        max_input = max(settings.max_upload_mb * 1024 * 1024, MAX_BATCH_ZIP_BYTES if suffix == ".zip" else 0)
         raw = await upload.read(max_input + 1)
         if len(raw) > max_input:
-            rejected.append({"filename": source_name, "error": "File/ZIP troppo grande"})
+            limit = f"{MAX_BATCH_ZIP_BYTES // (1024 * 1024)} MB" if suffix == ".zip" else f"{settings.max_upload_mb} MB"
+            rejected.append({"filename": source_name, "error": f"File/ZIP troppo grande: massimo {limit}"})
             continue
         if suffix == ".zip":
             try:
@@ -137,7 +140,7 @@ async def import_preview_batch(files: list[UploadFile] = File(...), db: Session 
 
 
 @router.post("/import/{job_id}/confirm")
-def import_confirm(job_id: int, payload: dict | None = None, force: bool = False, db: Session = Depends(get_db)):
+async def import_confirm(job_id: int, payload: dict | None = None, force: bool = False, db: Session = Depends(get_db)):
     job = db.get(ImportJob, job_id)
     if not job or not job.payload_json:
         raise HTTPException(404, "Anteprima non trovata")
@@ -172,4 +175,8 @@ def import_confirm(job_id: int, payload: dict | None = None, force: bool = False
     alerts = create_price_alerts(db, invoice)
     audit(db, "import.completed", f"Importata fattura {invoice.numero} nell'archivio centrale Apice", entity_type="invoice", entity_id=invoice.id)
     db.commit()
-    return {"ok": True, "invoice_id": invoice.id, "alerts_created": len(alerts)}
+    central = await central_invoice_upsert(source_hash=job.file_hash, source_filename=job.filename,
+        supplier={"ragione_sociale": supplier.ragione_sociale, "partita_iva": supplier.partita_iva, "codice_fiscale": supplier.codice_fiscale},
+        invoice={"numero": invoice.numero, "data": invoice.data.isoformat(), "imponibile": str(invoice.imponibile), "iva": str(invoice.iva), "totale": str(invoice.totale), "valuta": invoice.valuta},
+        rows=[{"descrizione_originale": r.descrizione_originale, "descrizione_normalizzata": r.descrizione_normalizzata, "quantita": str(r.quantita), "unita_originale": r.unita_originale, "unita_normalizzata": r.unita_normalizzata, "prezzo_unitario": str(r.prezzo_unitario), "totale_riga": str(r.totale_riga), "aliquota_iva": str(r.aliquota_iva) if r.aliquota_iva is not None else None, "prezzo_normalizzato": str(r.prezzo_normalizzato) if r.prezzo_normalizzato is not None else None, "confidence": float(r.confidence)} for r in invoice.rows])
+    return {"ok": True, "invoice_id": invoice.id, "alerts_created": len(alerts), "central_sync": central}

@@ -10,6 +10,8 @@ from app.database import Base, SessionLocal, engine
 from app.eye_services import seed_eye_supremo
 from app.search_index import ensure_fts5
 from app.main import app
+from app.auth_service import create_session
+from app.models import UserProfile
 
 @pytest.fixture(autouse=True)
 def clean_db():
@@ -33,4 +35,11 @@ def db():
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    test_client = TestClient(app)
+    session = SessionLocal()
+    try:
+        developer = session.query(UserProfile).filter(UserProfile.role_name == "developer").first()
+        test_client.headers.update({"X-Eye-Session": create_session(session, developer)})
+    finally:
+        session.close()
+    return test_client

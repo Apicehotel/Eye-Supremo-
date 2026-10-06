@@ -261,3 +261,29 @@ class SyncState(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     __table_args__ = (UniqueConstraint("entity_type", "entity_uuid"),)
+
+
+class CentralInvoiceCache(Base):
+    __tablename__ = "central_invoice_cache"
+    source_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    invoice_number: Mapped[str] = mapped_column(String(80), index=True)
+    invoice_date: Mapped[date_type] = mapped_column(Date, index=True)
+    supplier_name: Mapped[str] = mapped_column(String(180), index=True)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, index=True)
+    search_text: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[str] = mapped_column(Text)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+
+class CentralReviewCache(Base):
+    __tablename__ = "central_review_cache"
+    sync_uuid: Mapped[str] = mapped_column(String(36), primary_key=True)
+    hotel_code: Mapped[str] = mapped_column(String(40), index=True)
+    review_date: Mapped[date_type] = mapped_column(Date, index=True)
+    source: Mapped[str | None] = mapped_column(String(80))
+    author: Mapped[str | None] = mapped_column(String(160))
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), index=True)
+    room_code: Mapped[str | None] = mapped_column(String(40), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[str] = mapped_column(Text)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)

@@ -3,33 +3,66 @@ from datetime import date
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from ..config import settings
 from ..database import get_db
 from ..importers import parse_document
-from ..models import AppSetting, AuditLog, ImportJob, Invoice, InvoiceRow, Product, Supplier
+from ..models import AppSetting, AuditLog, CentralInvoiceCache, ImportJob, Invoice, InvoiceRow, Product, Supplier
 from ..schemas import InvoiceIn, ProductIn, ProductOut, SupplierIn, SupplierOut
 from ..services import answer_with_ollama, audit, create_backup, create_invoice, duplicate_candidates, ollama_status, search_records
+from ..central_service import central_product_page, central_product_summary
+from ..product_taxonomy import is_catalog_product, is_product_search_match, merge_product_catalog, search_terms
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/health")
-def health(): return {"status": "ok", "app": "RandFatture"}
+def health(): return {"status": "ok", "app": "Eye Supremo"}
 
 
 @router.get("/dashboard")
-def dashboard(db: Session = Depends(get_db)):
+async def dashboard(db: Session = Depends(get_db)):
+    central = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
+    if central:
+        now = date.today()
+        monthly: dict[str, float] = {}
+        annual: dict[str, dict[str, float]] = {}
+        suppliers = set()
+        for record in central:
+            if float(record.total or 0) < 0:
+                continue
+            key = record.invoice_date.strftime("%Y-%m")
+            monthly[key] = monthly.get(key, 0) + float(record.total or 0)
+            year = record.invoice_date.strftime("%Y")
+            annual.setdefault(year, {"total": 0, "invoices": 0})
+            annual[year]["total"] += float(record.total or 0)
+            annual[year]["invoices"] += 1
+            suppliers.add(record.supplier_name)
+        total_spent = sum(float(x.total or 0) for x in central if float(x.total or 0) >= 0)
+        credit_documents = sum(1 for x in central if float(x.total or 0) < 0)
+        credit_total = sum(float(x.total or 0) for x in central if float(x.total or 0) < 0)
+        def central_recent(record):
+            payload = json.loads(record.payload_json or "{}")
+            return {"id": record.source_hash, "numero": record.invoice_number, "data": record.invoice_date.isoformat(), "imponibile": float(payload.get("taxable") or 0), "iva": float(payload.get("vat") or 0), "totale": float(record.total or 0), "valuta": payload.get("currency") or "EUR", "stato_importazione": "Supabase", "file_originale": payload.get("source_filename") or "", "supplier": {"id": record.source_hash, "ragione_sociale": record.supplier_name}, "row_count": len(payload.get("rows") or [])}
+        latest_month = max(monthly) if monthly else None
+        try:
+            product_summary = await central_product_summary()
+            product_count = int(product_summary.get("distinct_products") or 0)
+        except Exception:
+            product_count = 0
+        spendable = [x for x in central if float(x.total or 0) >= 0]
+        return {"kpis": {"invoices": len(spendable), "total_spent": total_spent, "month_spent": monthly.get(now.strftime("%Y-%m"), 0), "suppliers": len(suppliers), "products": product_count}, "period": {"from": spendable[-1].invoice_date.isoformat(), "to": spendable[0].invoice_date.isoformat(), "latest_month": latest_month, "latest_month_spent": monthly.get(latest_month, 0) if latest_month else 0, "credit_documents": credit_documents, "credit_total": credit_total}, "annual": [{"year": k, **v} for k, v in sorted(annual.items())], "monthly": [{"month": k, "total": v} for k, v in sorted(monthly.items())[-24:]], "recent": [central_recent(x) for x in spendable[:6]], "anomalies": []}
     invoices = db.scalar(select(func.count(Invoice.id))) or 0
-    spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0))) or 0)
+    spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0)).where(Invoice.totale >= 0)) or 0)
     now = date.today()
-    month_spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0)).where(func.strftime("%Y-%m", Invoice.data) == now.strftime("%Y-%m"))) or 0)
+    month_spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0)).where(Invoice.totale >= 0, func.strftime("%Y-%m", Invoice.data) == now.strftime("%Y-%m"))) or 0)
     supplier_count = db.scalar(select(func.count(Supplier.id))) or 0
     product_count = db.scalar(select(func.count(Product.id))) or 0
-    monthly = db.execute(select(func.strftime("%Y-%m", Invoice.data), func.sum(Invoice.totale)).group_by(func.strftime("%Y-%m", Invoice.data)).order_by(func.strftime("%Y-%m", Invoice.data)).limit(24)).all()
-    recent = db.scalars(select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).order_by(Invoice.created_at.desc()).limit(6)).all()
-    return {"kpis": {"invoices": invoices, "total_spent": spent, "month_spent": month_spent, "suppliers": supplier_count, "products": product_count}, "monthly": [{"month": m, "total": float(v)} for m, v in monthly], "recent": [serialize_invoice(x) for x in recent], "anomalies": detect_anomalies(db)[:5]}
+    monthly = db.execute(select(func.strftime("%Y-%m", Invoice.data), func.sum(Invoice.totale)).where(Invoice.totale >= 0).group_by(func.strftime("%Y-%m", Invoice.data)).order_by(func.strftime("%Y-%m", Invoice.data)).limit(24)).all()
+    annual = db.execute(select(func.strftime("%Y", Invoice.data), func.sum(Invoice.totale), func.count(Invoice.id)).where(Invoice.totale >= 0).group_by(func.strftime("%Y", Invoice.data)).order_by(func.strftime("%Y", Invoice.data))).all()
+    recent = db.scalars(select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).where(Invoice.totale >= 0).order_by(Invoice.created_at.desc()).limit(6)).all()
+    return {"kpis": {"invoices": invoices, "total_spent": spent, "month_spent": month_spent, "suppliers": supplier_count, "products": product_count}, "annual": [{"year": y, "total": float(total), "invoices": count} for y, total, count in annual], "monthly": [{"month": m, "total": float(v)} for m, v in monthly], "recent": [serialize_invoice(x) for x in recent], "anomalies": detect_anomalies(db)[:5]}
 
 
 def serialize_invoice(i):
@@ -39,7 +72,16 @@ def serialize_invoice(i):
 @router.get("/suppliers")
 def suppliers(q: str = "", skip: int = 0, limit: int = Query(50, le=200), db: Session = Depends(get_db)):
     stmt = select(Supplier)
-    if q: stmt = stmt.where(Supplier.ragione_sociale.ilike(f"%{q}%"))
+    if q:
+        term = f"%{q}%"
+        matching_supplier_ids = select(Invoice.supplier_id).join(InvoiceRow, InvoiceRow.invoice_id == Invoice.id).where(
+            or_(InvoiceRow.descrizione_originale.ilike(term), InvoiceRow.descrizione_normalizzata.ilike(term))
+        )
+        stmt = stmt.where(or_(
+            Supplier.ragione_sociale.ilike(term),
+            Supplier.partita_iva.ilike(term),
+            Supplier.id.in_(matching_supplier_ids),
+        ))
     return db.scalars(stmt.order_by(Supplier.ragione_sociale).offset(skip).limit(limit)).all()
 
 
@@ -49,20 +91,106 @@ def add_supplier(payload: SupplierIn, db: Session = Depends(get_db)):
 
 
 @router.get("/products")
-def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), db: Session = Depends(get_db)):
+async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), db: Session = Depends(get_db)):
+    # The central catalogue is the source of truth when Supabase is enabled.
+    # Do not let an older/local product mirror reintroduce zero-price rows.
+    try:
+        terms = list(search_terms(q) if q.strip() else (q,))
+        if len(q.split()) > 1:
+            terms.append(q.split()[0])
+        terms = tuple(dict.fromkeys(terms))
+        pages = [await central_product_page(term, limit) for term in terms]
+        central = pages[0] if pages else {"enabled": False, "items": []}
+        if central.get("enabled") and (any(page.get("items") for page in pages) or q.strip()):
+            merged = {}
+            for page in pages:
+                for item in page.get("items", []):
+                    if item.get("nome_canonico") and is_catalog_product(item["nome_canonico"]) and is_product_search_match(item["nome_canonico"], q):
+                        merged[item["nome_canonico"]] = item
+            return merge_product_catalog(list(merged.values()))
+    except Exception:
+        pass
     stmt = select(Product)
     if q: stmt = stmt.where(Product.nome_canonico.ilike(f"%{q}%"))
     items = db.scalars(stmt.order_by(Product.nome_canonico).offset(skip).limit(limit)).all()
     result = []
     for p in items:
+        if not is_catalog_product(p.nome_canonico):
+            continue
         stats = db.execute(select(func.min(InvoiceRow.prezzo_normalizzato), func.max(InvoiceRow.prezzo_normalizzato), func.avg(InvoiceRow.prezzo_normalizzato), func.count(InvoiceRow.id)).where(InvoiceRow.product_id == p.id)).one()
         result.append({**ProductOut.model_validate(p).model_dump(), "min_price": float(stats[0]) if stats[0] else None, "max_price": float(stats[1]) if stats[1] else None, "avg_price": float(stats[2]) if stats[2] else None, "purchases": stats[3]})
-    return result
+    if result:
+        return result
+    try:
+        central = await central_product_page(q, limit)
+        return [item for item in central.get("items", []) if is_catalog_product(item.get("nome_canonico", ""))]
+    except Exception:
+        return result
 
 
 @router.post("/products", response_model=ProductOut)
 def add_product(payload: ProductIn, db: Session = Depends(get_db)):
     item = Product(**payload.model_dump()); db.add(item); audit(db, "product.created", f"Prodotto {item.nome_canonico} creato"); db.commit(); db.refresh(item); return item
+
+
+@router.get("/product-config")
+def product_configs(db: Session = Depends(get_db)):
+    setting = db.get(AppSetting, "product_configs")
+    try:
+        value = json.loads(setting.value) if setting and setting.value else {}
+    except (TypeError, ValueError):
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+@router.put("/product-config")
+def update_product_config(payload: dict, db: Session = Depends(get_db)):
+    source_name = str(payload.get("source_name") or "").strip()
+    configured_name = str(payload.get("configured_name") or "").strip()
+    manufacturer = str(payload.get("manufacturer") or "").strip()
+    if len(source_name) < 2 or len(configured_name) < 2:
+        raise HTTPException(400, "Nome prodotto e nome configurato sono obbligatori")
+    setting = db.get(AppSetting, "product_configs")
+    try:
+        configs = json.loads(setting.value) if setting and setting.value else {}
+    except (TypeError, ValueError):
+        configs = {}
+    if not isinstance(configs, dict): configs = {}
+    configs[source_name] = {"configured_name": configured_name, "manufacturer": manufacturer or None}
+    db.merge(AppSetting(key="product_configs", value=json.dumps(configs, ensure_ascii=False)))
+    audit(db, "product.configured", f"Configurato prodotto {source_name} come {configured_name}")
+    db.commit()
+    return configs[source_name]
+
+
+@router.get("/product-tracking")
+def product_tracking(db: Session = Depends(get_db)):
+    setting = db.get(AppSetting, "product_tracking")
+    try:
+        value = json.loads(setting.value) if setting and setting.value else {}
+    except (TypeError, ValueError):
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+@router.put("/product-tracking")
+def update_product_tracking(payload: dict, db: Session = Depends(get_db)):
+    source_name = str(payload.get("source_name") or "").strip()
+    if len(source_name) < 2:
+        raise HTTPException(400, "Nome prodotto obbligatorio")
+    setting = db.get(AppSetting, "product_tracking")
+    try:
+        tracking = json.loads(setting.value) if setting and setting.value else {}
+    except (TypeError, ValueError):
+        tracking = {}
+    if not isinstance(tracking, dict): tracking = {}
+    enabled = bool(payload.get("enabled"))
+    if enabled: tracking[source_name] = True
+    else: tracking.pop(source_name, None)
+    db.merge(AppSetting(key="product_tracking", value=json.dumps(tracking, ensure_ascii=False)))
+    audit(db, "product.tracking_updated", f"Monitoraggio prezzo {'attivato' if enabled else 'disattivato'} per {source_name}")
+    db.commit()
+    return {"source_name": source_name, "enabled": enabled}
 
 
 @router.get("/products/{product_id}")
@@ -174,8 +302,23 @@ def anomalies(db: Session = Depends(get_db)): return detect_anomalies(db)
 
 
 @router.get("/history")
-def history(db: Session = Depends(get_db)):
-    rows = db.execute(select(func.strftime("%Y", Invoice.data), func.count(Invoice.id), func.sum(Invoice.totale), func.count(func.distinct(Invoice.supplier_id))).group_by(func.strftime("%Y", Invoice.data)).order_by(func.strftime("%Y", Invoice.data).desc())).all()
+async def history(db: Session = Depends(get_db)):
+    # The central cache is the shared source of truth used by Dashboard and
+    # the invoice archive. Keep Storico consistent with it as well.
+    central = list(db.scalars(select(CentralInvoiceCache)).all())
+    if central:
+        grouped: dict[str, dict] = {}
+        for record in central:
+            total = float(record.total or 0)
+            if total < 0:  # credit notes are not spend
+                continue
+            year = record.invoice_date.strftime("%Y")
+            item = grouped.setdefault(year, {"year": year, "invoices": 0, "total": 0.0, "suppliers": set()})
+            item["invoices"] += 1
+            item["total"] += total
+            item["suppliers"].add(record.supplier_name)
+        return [{**item, "total": round(item["total"], 2), "suppliers": len(item["suppliers"])} for item in sorted(grouped.values(), key=lambda x: x["year"], reverse=True)]
+    rows = db.execute(select(func.strftime("%Y", Invoice.data), func.count(Invoice.id), func.sum(Invoice.totale), func.count(func.distinct(Invoice.supplier_id))).where(Invoice.totale >= 0).group_by(func.strftime("%Y", Invoice.data)).order_by(func.strftime("%Y", Invoice.data).desc())).all()
     return [{"year": y, "invoices": c, "total": float(t or 0), "suppliers": s} for y, c, t, s in rows]
 
 

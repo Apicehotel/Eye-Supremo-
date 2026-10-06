@@ -13,16 +13,26 @@ const securedHeaders = (initial?:HeadersInit) => {
 };
 
 export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
-  const response = await fetch(`/api${path}`, {...options, headers:securedHeaders(options?.headers)});
-  if(!response.ok) throw new Error(await response.text());
-  return response.json();
+  try {
+    const response = await fetch(`/api${path}`, {...options, headers:securedHeaders(options?.headers)});
+    if(!response.ok) throw new Error(await response.text());
+    return response.json();
+  } catch(error) {
+    if(error instanceof TypeError) throw new Error('Backend locale non raggiungibile. Avvia Eye Supremo e riprova.');
+    throw error;
+  }
 };
 
 export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
-  const response = await fetch(`/api/eye${path}`, {...options, headers:securedHeaders(options?.headers)});
-  if(response.status===401){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
-  if(!response.ok) throw new Error(await response.text());
-  return response.json();
+  try {
+    const response = await fetch(`/api/eye${path}`, {...options, headers:securedHeaders(options?.headers)});
+    if(response.status===401){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
+    if(!response.ok) throw new Error(await response.text());
+    return response.json();
+  } catch(error) {
+    if(error instanceof TypeError) throw new Error('Backend locale non raggiungibile. Avvia Eye Supremo e riprova.');
+    throw error;
+  }
 };
 
 export const saveAuth=(payload:any)=>{localStorage.setItem('eye-supremo.session',payload.session);localStorage.setItem('eye-supremo.user',JSON.stringify(payload.user))};

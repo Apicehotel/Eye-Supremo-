@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..auth_models import LocalCredential
 from ..auth_service import auth_configured, create_session, revoke_session, session_user, set_pin, verify_pin
@@ -7,12 +8,19 @@ from ..database import get_db
 from ..models import UserProfile
 
 router = APIRouter(prefix="/api/eye/auth", tags=["Eye Supremo auth"])
+ALLOWED_ROLES = {"developer", "supremo", "level1", "level2", "level3"}
 
 
 @router.get("/status")
 def status(db: Session = Depends(get_db)):
     configured = auth_configured(db)
     return {"configured": configured, "bootstrap_required": not configured}
+
+
+@router.get("/login-options")
+def login_options(db: Session = Depends(get_db)):
+    users = db.scalars(select(UserProfile).where(UserProfile.active.is_(True)).order_by(UserProfile.display_name)).all()
+    return [{"username": u.username, "display_name": u.display_name} for u in users]
 
 
 @router.post("/bootstrap")
@@ -77,3 +85,30 @@ def auth_users(x_eye_session: str | None = Header(default=None, alias="X-Eye-Ses
     credentials = set(db.scalars(select(LocalCredential.user_id)).all())
     users = db.scalars(select(UserProfile).order_by(UserProfile.id)).all()
     return [{"id": u.id, "username": u.username, "display_name": u.display_name, "role_name": u.role_name, "pin_configured": u.id in credentials, "active": u.active} for u in users]
+
+
+@router.post("/users")
+def create_user(payload: dict, x_eye_session: str | None = Header(default=None, alias="X-Eye-Session"), db: Session = Depends(get_db)):
+    actor = session_user(db, x_eye_session)
+    if not actor or actor.role_name != "developer":
+        raise HTTPException(403, "Solo lo Sviluppatore gestisce gli utenti")
+    username = str(payload.get("username", "")).strip().lower()
+    display_name = str(payload.get("display_name", "")).strip()
+    role_name = str(payload.get("role_name", "")).strip()
+    pin = str(payload.get("pin", ""))
+    if not username or not username.replace("_", "").replace("-", "").isalnum() or len(username) > 80:
+        raise HTTPException(422, "Username non valido")
+    if not display_name or len(display_name) > 160:
+        raise HTTPException(422, "Nome visualizzato non valido")
+    if role_name not in ALLOWED_ROLES:
+        raise HTTPException(422, "Permesso non valido")
+    try:
+        from ..auth_service import validate_pin_format
+        validate_pin_format(pin)
+        user = UserProfile(username=username, display_name=display_name, role_name=role_name, can_manage_config=role_name == "developer")
+        db.add(user); db.flush(); set_pin(db, user, pin)
+    except ValueError as exc:
+        db.rollback(); raise HTTPException(422, str(exc))
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409, "Username già esistente")
+    return {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name, "pin_configured": True, "active": True}

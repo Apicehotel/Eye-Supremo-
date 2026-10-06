@@ -9,6 +9,7 @@ from .models import UserProfile
 
 PBKDF2_ITERATIONS = 310_000
 SESSION_HOURS = 12
+DEFAULT_PIN = "000000"
 
 
 def auth_configured(db: Session) -> bool:

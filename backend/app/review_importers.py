@@ -35,7 +35,15 @@ def _rating(text: str):
 
 def _author(text: str, fallback: str | None = None):
     match = re.search(r"(?:ospite|cliente|autore|guest|reviewer|nome)\s*[:\-]\s*([^\r\n]{2,100})", text, re.I)
-    return (match.group(1).strip()[:160] if match else (fallback[:160] if fallback else None))
+    if match:
+        value = match.group(1).strip()
+        return None if "@" in value else value[:160]
+    google_name = re.search(r"(?:google|tripadvisor)[^\n]{0,100}?\b(?:nessuna recensione|nessun voto)\s+([A-Za-zÀ-ÿ']{3,})\b", text, re.I)
+    if google_name and "@" not in google_name.group(1):
+        candidate = google_name.group(1).strip()
+        if candidate.lower() not in {"hotel gio", "hotel", "nessuna recensione"}:
+            return candidate[:160]
+    return fallback[:160] if fallback and "@" not in fallback else None
 
 
 def _source(text: str, fallback: str = "email") -> str:
@@ -56,7 +64,20 @@ def _review_date(text: str, fallback: str) -> str:
 
 def _room(text: str):
     match = re.search(r"(?:\bCAM\b|camera|room)\s*[:#\-]?\s*([A-Z0-9-]{1,12})", text, re.I)
-    return match.group(1) if match else None
+    value = match.group(1) if match else None
+    return value if value and re.fullmatch(r"\d{1,4}[A-Z]?", value, re.I) else None
+
+
+def _markitdown_text(path: Path) -> str | None:
+    """Use MarkItDown when installed, retaining the native parser as fallback."""
+    try:
+        from markitdown import MarkItDown
+        converter = MarkItDown(enable_plugins=False)
+        result = converter.convert_local(str(path)) if hasattr(converter, "convert_local") else converter.convert(str(path))
+        text = getattr(result, "text_content", None) or getattr(result, "markdown", None)
+        return text.strip() if isinstance(text, str) and text.strip() else None
+    except Exception:
+        return None
 
 
 def _looks_like_review(text: str) -> bool:
@@ -167,4 +188,5 @@ def parse_review_document(path: Path) -> list[dict]:
         default_date, sender, hint = date.today().isoformat(), None, "TXT"
     else:
         raise ValueError("Formato recensione supportato: MSG, EML o TXT")
-    return split_review_blocks(text, default_date, hint, sender, path.name)
+    normalized = _markitdown_text(path)
+    return split_review_blocks(normalized or text, default_date, hint, sender, path.name)

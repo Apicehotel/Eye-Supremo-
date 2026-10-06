@@ -7,6 +7,8 @@ from decimal import Decimal
 from rapidfuzz import fuzz
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
+from .auth_models import LocalCredential
+from .auth_service import DEFAULT_PIN, set_pin
 from .models import (
     Alert, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, InvoiceRowPolicy,
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
@@ -21,9 +23,6 @@ HOTEL_SEEDS = [
 ROLE_SEEDS = [
     ("sviluppatore", "Sviluppatore", "developer", True),
     ("supremo", "Supremo", "supremo", False),
-    ("livello1", "Utente Livello 1", "level1", False),
-    ("livello2", "Utente Livello 2", "level2", False),
-    ("livello3", "Utente Livello 3", "level3", False),
 ]
 REVIEW_CATEGORY_SEEDS = [
     "Camere / Arredi", "Ristorante", "Colazione", "Staff", "Letti", "Pulizia",
@@ -37,7 +36,7 @@ ACCOUNTING_EXCLUSION_KEYWORDS = {
 CATEGORY_KEYWORDS = {
     "Camere / Arredi": ["camera", "arredo", "mobili", "mobilio", "armadio", "comodino"],
     "Ristorante": ["ristorante", "cena", "pranzo", "menu", "menù", "cucina"],
-    "Colazione": ["colazione", "breakfast", "buffet", "cornetto", "cappuccino"],
+    "Colazione": ["colazione", "breakfast", "buffet", "cornetto", "croissant", "caffè", "caffe", "cappuccino", "salato", "frutta"],
     "Staff": ["staff", "personale", "reception", "receptionist", "gentile", "cortese"],
     "Letti": ["letto", "letti", "materasso", "materassi"],
     "Pulizia": ["pulizia", "pulito", "pulita", "sporco", "sporca", "igiene"],
@@ -45,8 +44,8 @@ CATEGORY_KEYWORDS = {
     "Posizione": ["posizione", "zona", "centro", "vicino", "distanza"],
     "Cuscini": ["cuscino", "cuscini"],
 }
-POSITIVE_WORDS = {"ottimo", "ottima", "eccellente", "pulito", "pulita", "gentile", "comodo", "comoda", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica"}
-NEGATIVE_WORDS = {"pessimo", "pessima", "sporco", "sporca", "rumore", "rumoroso", "rotto", "rotta", "scomodo", "scomoda", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta"}
+POSITIVE_WORDS = {"ottimo", "ottima", "eccellente", "pulito", "pulita", "gentile", "comodo", "comoda", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica", "super", "ricca", "ricco", "abbondante", "abbondanti", "accettabile", "ok"}
+NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rotto", "rotta", "scomodo", "scomoda", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi"}
 
 
 def seed_eye_supremo(db: Session) -> None:
@@ -57,6 +56,11 @@ def seed_eye_supremo(db: Session) -> None:
     for username, display, role, can_manage in ROLE_SEEDS:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
+    db.flush()
+    for username, *_ in ROLE_SEEDS:
+        user = db.scalar(select(UserProfile).where(UserProfile.username == username))
+        if user and not db.get(LocalCredential, user.id):
+            set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):
             db.add(ReviewCategory(name=name, auto_learned=False))
@@ -169,16 +173,29 @@ def invoice_search_summary(records: list[dict]) -> dict:
 
 
 def classify_review_text(db: Session, text: str, hotel_id: int | None = None) -> list[dict]:
-    norm = normalize_text(text)
-    tokens = set(norm.split())
-    polarity = "negative" if len(tokens & NEGATIVE_WORDS) > len(tokens & POSITIVE_WORDS) else "positive"
     matches = []
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        hits = [k for k in keywords if normalize_text(k) in norm]
-        if hits:
-            cat = db.scalar(select(ReviewCategory).where(ReviewCategory.name == category))
-            if cat:
-                matches.append({"category_id": cat.id, "category": cat.name, "polarity": polarity, "confidence": min(1.0, .65 + .08 * len(hits))})
+    raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()] or [text]
+    for raw_sentence in raw_sentences:
+        # A single review sentence can contain independent judgements joined by
+        # commas (e.g. "colazione ottima, croissant da migliorare"). Analyse
+        # those clauses independently so one positive aspect cannot mask a
+        # negative aspect in the same sentence.
+        clauses = [s.strip() for s in re.split(r"\s*[,;]\s*", raw_sentence) if s.strip()] or [raw_sentence]
+        for clause in clauses:
+            sentence = normalize_text(clause)
+            tokens = set(re.findall(r"[a-zà-ÿ]+", sentence))
+            positive = len(tokens & POSITIVE_WORDS)
+            negative = len(tokens & NEGATIVE_WORDS)
+            if re.search(r"\bnon\s+(?:è\s+)?(?:buon|ottim|comodo|perfett|super)", sentence): negative += 1
+            polarity = "negative" if negative > positive else "positive" if positive > negative else "neutral"
+            if polarity == "neutral":
+                continue
+            for category, keywords in CATEGORY_KEYWORDS.items():
+                hits = [k for k in keywords if normalize_text(k) in sentence]
+                if hits:
+                    cat = db.scalar(select(ReviewCategory).where(ReviewCategory.name == category))
+                    if cat:
+                        matches.append({"category_id": cat.id, "category": cat.name, "polarity": polarity, "confidence": min(1.0, .65 + .08 * len(hits)), "excerpt": clause[:240]})
     return matches
 
 
@@ -207,10 +224,14 @@ def add_review(db: Session, *, hotel_id: int, text: str, review_date: date, rati
     db.add(review); db.flush()
     tags = classify_review_text(db, text, hotel_id)
     for tag in tags:
-        db.add(ReviewTag(review_id=review.id, category_id=tag["category_id"], polarity=tag["polarity"], confidence=tag["confidence"]))
+        db.add(ReviewTag(review_id=review.id, category_id=tag["category_id"], polarity=tag["polarity"], confidence=tag["confidence"], excerpt=tag.get("excerpt")))
     # Unknown noun-like tokens become candidates only after recurrence; avoids category explosion.
     known = {normalize_text(x) for values in CATEGORY_KEYWORDS.values() for x in values}
-    for token in [t for t in normalize_text(text).split() if len(t) >= 6 and t not in known][:8]:
+    emerging_tokens = list(dict.fromkeys(
+        t for t in normalize_text(text).split()
+        if len(t) >= 6 and t not in known
+    ))
+    for token in emerging_tokens[:8]:
         if token not in POSITIVE_WORDS and token not in NEGATIVE_WORDS:
             register_emerging_theme(db, hotel_id, token)
     db.commit(); db.refresh(review)

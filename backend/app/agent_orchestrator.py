@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from typing import Any, Awaitable
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
+from .central_service import central_invoice_search
 from .eye_services import invoice_search_summary, review_rankings
-from .models import Hotel, Review, Room
+from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .search_index import invoice_search
 
@@ -41,6 +42,71 @@ AGENTS: dict[str, AgentSpec] = {
 PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "meglio", "storic", "medi", "minim", "massim")
 REVIEW_HINTS = ("recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking")
 CLASSIFY_HINTS = ("categor", "classific", "food", "beverage", "non food", "tipologi")
+
+
+def _asks_for_max_invoice(question: str) -> bool:
+    q = question.lower()
+    return "fattur" in q and any(
+        phrase in q
+        for phrase in (
+            "totale più alto",
+            "totale piu alto",
+            "fattura più alta",
+            "fattura piu alta",
+            "importo massimo",
+            "importo più alto",
+            "importo piu alto",
+            "più costosa",
+            "piu costosa",
+        )
+    )
+
+
+def _max_invoice_context(db: Session) -> dict[str, Any] | None:
+    """Return the highest positive invoice across local and central archives."""
+    candidates: list[dict[str, Any]] = []
+    local = db.execute(
+        select(Invoice, Supplier)
+        .join(Supplier, Invoice.supplier_id == Supplier.id)
+        .where(Invoice.totale >= 0)
+        .order_by(desc(Invoice.totale))
+        .limit(1)
+    ).first()
+    if local:
+        invoice, supplier = local
+        candidates.append({
+            "invoice_number": invoice.numero,
+            "invoice_date": invoice.data.isoformat() if invoice.data else None,
+            "supplier_name": supplier.ragione_sociale,
+            "total": float(invoice.totale or 0),
+            "taxable": float(invoice.imponibile or 0),
+            "vat": float(invoice.iva or 0),
+            "source": "local",
+        })
+
+    central = db.scalar(
+        select(CentralInvoiceCache)
+        .where(CentralInvoiceCache.total >= 0)
+        .order_by(desc(CentralInvoiceCache.total))
+        .limit(1)
+    )
+    if central:
+        try:
+            payload = json.loads(central.payload_json or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        candidates.append({
+            "invoice_number": central.invoice_number,
+            "invoice_date": central.invoice_date.isoformat() if central.invoice_date else None,
+            "supplier_name": central.supplier_name,
+            "total": float(central.total or 0),
+            "taxable": float(payload.get("taxable") or 0),
+            "vat": float(payload.get("vat") or 0),
+            "source": "central-cache",
+            "source_filename": payload.get("source_filename"),
+            "source_hash": central.source_hash,
+        })
+    return max(candidates, key=lambda item: item["total"]) if candidates else None
 
 
 def classify_intent(question: str) -> list[str]:
@@ -88,10 +154,49 @@ def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any
         db.close()
 
 
-def _product_context(question: str, role_name: str) -> dict[str, Any]:
+async def _product_context(question: str, role_name: str) -> dict[str, Any]:
     db = SessionLocal()
     try:
+        max_invoice = _max_invoice_context(db) if _asks_for_max_invoice(question) else None
         rows = invoice_search(db, question, role_name=role_name, limit=40)
+        # Keep the bakery product family separate from similarly spelled
+        # technical items such as bombole/bombole per pulizia.
+        lowered_question = question.lower()
+        if "bombolon" in lowered_question or "bobolon" in lowered_question:
+            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        # Le fatture centrali possono essere sincronizzate localmente per testata
+        # senza caricare subito tutte le righe. In quel caso l'agente usa la
+        # ricerca deterministica centrale, mantenendo Qwen fuori dal database.
+        if not rows:
+            words = [x for x in re.findall(r"[a-zàèéìòù0-9]+", question.lower())
+                     if len(x) >= 5 and x not in {"quanto", "quale", "quali", "vende", "meglio", "fammi", "mostra", "classifica"}]
+            candidates = []
+            if words:
+                term = words[-1]
+                candidates.append(term)
+                if term.endswith(("i", "e")) and len(term) > 5:
+                    candidates.append(term[:-1])
+            central = {"items": [], "count": 0}
+            for term in candidates or [question]:
+                central = await central_invoice_search(term, limit=40)
+                if central.get("items"):
+                    break
+            rows = [{
+                "row_id": item.get("id"),
+                "invoice_id": item.get("source_hash") or item.get("id"),
+                "invoice": item.get("invoice_number"),
+                "date": item.get("invoice_date"),
+                "supplier": item.get("supplier_name"),
+                "description": item.get("original_description") or item.get("normalized_description"),
+                "quantity": float(item.get("quantity") or 0),
+                "unit_price": float(item.get("unit_price") or 0),
+                "row_total": float(item.get("line_total") or 0),
+                "normalized_price": None,
+                "unit": None,
+                "analysis_status": item.get("analysis_status") or "product",
+            } for item in central.get("items", [])]
+        if "bombolon" in lowered_question or "bobolon" in lowered_question:
+            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
         try:
             report = historical_product_report(db, question)
         except Exception:
@@ -100,6 +205,7 @@ def _product_context(question: str, role_name: str) -> dict[str, Any]:
             "invoice_rows": rows,
             "invoice_summary": invoice_search_summary(rows),
             "historical_product": report,
+            **({"max_invoice": max_invoice} if max_invoice else {}),
         }
     finally:
         db.close()
@@ -161,7 +267,7 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
     workers: list[Awaitable[tuple[str, dict[str, Any]]]] = []
 
     async def product_worker():
-        return "product", await asyncio.to_thread(_product_context, question, role_name)
+        return "product", await _product_context(question, role_name)
 
     async def review_worker():
         return "review", await asyncio.to_thread(_review_context, question, hotel_id)
@@ -187,6 +293,26 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
         confidence = structured.get("confidence", "medium")
         facts = structured.get("facts", [])
     except Exception:
+        max_invoice = context.get("max_invoice")
+        if max_invoice:
+            answer = (
+                f"La fattura con il totale più alto è la n. {max_invoice['invoice_number']} "
+                f"di {max_invoice['supplier_name']}, del {max_invoice['invoice_date']}, "
+                f"per € {max_invoice['total']:.2f}."
+            )
+            mode = "orchestrated-deterministic"
+            confidence = "high"
+            facts = []
+            return {
+                "mode": mode,
+                "plan": plan,
+                "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
+                "answer": answer,
+                "facts": facts,
+                "confidence": confidence,
+                "verification": verification,
+                "context": context,
+            }
         summary = context.get("invoice_summary") or {"rows": 0, "invoices": 0, "row_total": 0}
         if summary.get("rows"):
             answer = f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, per € {summary['row_total']:.2f}."

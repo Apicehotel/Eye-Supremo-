@@ -1,12 +1,17 @@
+import json
 import secrets
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from ..ai_service import eye_ai_answer
 from ..config import settings
+from ..central_service import central_invoice_detail, central_invoice_search, central_product_detail, central_supplier_detail, central_supplier_page, configured as central_configured
+from ..central_cache import cache_status, cached_search, refresh_central_cache
+from ..central_service import central_review_upsert
+from ..review_cache import refresh_review_cache, review_cache_status
 from ..database import get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
@@ -14,7 +19,7 @@ from ..eye_services import (
 )
 from ..models import (
     Alert, EmergingTheme, Hotel, Invoice, Review, ReviewCategory, ReviewTag,
-    RoleExclusion, UserProfile,
+    CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
 from ..review_importers import parse_review_document
@@ -157,13 +162,17 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                                     rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
                                     room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
                 imported.append(review.id); file_count += 1
+                try:
+                    await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
+                except Exception as sync_exc:
+                    errors.append({"file": file.filename, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
     return {"hotel": hotel.name, "imported": len(imported), "review_ids": imported, "errors": errors}
 
 
 @router.get("/reviews")
-def reviews(hotel_code: str | None = None, q: str = "", limit: int = Query(100, le=500), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Query(None, ge=1), background_tasks: BackgroundTasks = None, role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     stmt = select(Review).options(selectinload(Review.hotel), selectinload(Review.room), selectinload(Review.tags).selectinload(ReviewTag.category))
     if hotel_code:
         hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); stmt = stmt.where(Review.hotel_id == hotel.id)
@@ -174,13 +183,34 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int = Query(100, 
             stmt = stmt.where(Review.hotel_id.in_(allowed))
     if q:
         stmt = stmt.where(Review.text.ilike(f"%{q}%"))
-    items = db.scalars(stmt.order_by(Review.date.desc()).limit(limit)).unique().all()
-    return [{
+    ordered = stmt.order_by(Review.date.desc())
+    items = db.scalars(ordered.limit(limit) if limit is not None else ordered).unique().all()
+    result = [{
         "id": r.id, "hotel": r.hotel.name, "hotel_code": r.hotel.code, "room": r.room.code if r.room else None,
         "author": r.author, "source": r.source, "rating": float(r.rating) if r.rating is not None else None,
         "date": r.date.isoformat(), "text": r.text,
         "tags": [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in r.tags],
     } for r in items]
+    cached = db.scalars(select(CentralReviewCache)).all()
+    if not cached and background_tasks is not None and central_configured():
+        background_tasks.add_task(refresh_review_cache)
+    local_ids = {r.sync_uuid for r in items}
+    for c in cached:
+        p = json.loads(c.payload_json)
+        if c.sync_uuid not in local_ids and (not hotel_code or c.hotel_code == hotel_code) and (not q or q.lower() in c.text.lower()): result.append({"id": f"remote:{c.sync_uuid}", "hotel": c.hotel_code, "hotel_code": c.hotel_code, "room": c.room_code, "author": c.author, "source": c.source, "rating": float(c.rating) if c.rating is not None else None, "date": c.review_date.isoformat(), "text": c.text, "tags": []})
+    return result[:limit] if limit is not None else result
+
+
+@router.post("/reviews/sync")
+async def reviews_sync(role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    return await refresh_review_cache()
+
+
+@router.get("/reviews/sync/status")
+def reviews_sync_status(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    return {"configured": central_configured(), **review_cache_status(db)}
 
 
 @router.get("/rankings")
@@ -232,7 +262,17 @@ def alerts(unread_only: bool = False, limit: int = Query(100, le=500), db: Sessi
     stmt = select(Alert)
     if unread_only:
         stmt = stmt.where(Alert.is_read.is_(False), Alert.resolved.is_(False))
-    return db.scalars(stmt.order_by(Alert.created_at.desc()).limit(limit)).all()
+    items = db.scalars(stmt.order_by(Alert.created_at.desc()).limit(limit)).all()
+    if items:
+        return items
+    # Central imports do not create local Alert rows. Expose a factual,
+    # non-actionable notice so the tab reflects the shared archive too.
+    central = list(db.scalars(select(CentralInvoiceCache)).all())
+    credits = [x for x in central if float(x.total or 0) < 0]
+    if credits and not unread_only:
+        amount = sum(float(x.total or 0) for x in credits)
+        return [{"id": "central-credit-notes", "hotel_id": None, "kind": "accounting", "severity": "info", "title": "Note di accredito escluse dai totali", "description": f"{len(credits)} documenti per {abs(amount):.2f} € sono esclusi dalla spesa.", "is_read": True, "resolved": True, "created_at": max(x.invoice_date for x in credits).isoformat()}]
+    return []
 
 
 @router.post("/alerts/{alert_id}/read")
@@ -246,6 +286,142 @@ def mark_alert_read(alert_id: int, db: Session = Depends(get_db)):
 @router.get("/sync/status")
 def sync_status():
     return sync_configuration()
+
+
+@router.get("/central/status")
+def central_status():
+    return {"configured": central_configured(), "remote": "Supabase", "dataset": "eye_central_invoice_search"}
+
+
+@router.get("/central/invoices")
+async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), background_tasks: BackgroundTasks = None, role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        status = cache_status(db)
+        if status["count"]:
+            cached = cached_search(db, q, limit, offset)
+            # The central indexed view contains the invoice rows needed for
+            # product/family searches. Query it first so a cache hit on the
+            # invoice header cannot hide the matching purchased item.
+            if not q.strip() and cached["items"]:
+                return cached | {"source": "sqlite-cache", "sync": status}
+    finally: db.close()
+    if background_tasks is not None:
+        background_tasks.add_task(refresh_central_cache)
+    central = await central_invoice_search(q, limit)
+    return central
+
+
+@router.get("/central/invoices/{source_hash}")
+async def central_invoice_detail_route(source_hash: str, role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    try:
+        remote = await central_invoice_detail(source_hash)
+        if remote and remote.get("invoice_number"):
+            return remote
+    except Exception:
+        pass
+    item = db.get(CentralInvoiceCache, source_hash)
+    if not item:
+        raise HTTPException(404, "Fattura centrale non trovata")
+    return json.loads(item.payload_json or "{}")
+
+
+@router.get("/central/products/{canonical_name:path}")
+async def central_product_detail_route(canonical_name: str, role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    detail = await central_product_detail(canonical_name)
+    if not detail.get("product"):
+        raise HTTPException(404, "Prodotto centrale non trovato")
+    return detail
+
+
+@router.get("/central/suppliers")
+async def central_suppliers(q: str = "", limit: int = Query(2000, ge=1, le=2000), role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    page = await central_supplier_page(q, limit)
+    if not q.strip() or not page.get("enabled"):
+        return page
+
+    # Supplier search also covers invoice-line descriptions. This keeps
+    # delivery, gifts and other non-product charges out of Products while
+    # still making their suppliers discoverable here.
+    try:
+        invoice_matches = await central_invoice_search(q, min(limit, 500))
+        supplier_names = {
+            normalize_text(str(item.get("supplier_name") or "")).strip()
+            for item in invoice_matches.get("items", [])
+            if item.get("supplier_name")
+        }
+        if supplier_names:
+            all_suppliers = page.get("items", [])
+            if not all_suppliers or len(all_suppliers) < min(limit, 2000):
+                full_page = await central_supplier_page("", min(limit, 2000))
+                all_suppliers = full_page.get("items", all_suppliers)
+            items = [
+                item for item in all_suppliers
+                if normalize_text(str(item.get("ragione_sociale") or "")).strip() in supplier_names
+            ]
+            return {**page, "items": items, "total": len(items)}
+    except Exception:
+        pass
+    return page
+
+
+@router.get("/central/suppliers/{supplier_id}")
+async def central_supplier_detail_route(supplier_id: str, role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    detail = await central_supplier_detail(supplier_id)
+    if not detail.get("supplier"):
+        raise HTTPException(404, "Fornitore centrale non trovato")
+    return detail
+
+
+@router.get("/central/sync/status")
+def central_sync_status(role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try: return {"configured": central_configured(), **cache_status(db)}
+    finally: db.close()
+
+
+@router.get("/central/summary")
+def central_summary(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Dashboard KPIs backed by the complete central invoice cache."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
+    now = date.today()
+    monthly: dict[str, Decimal] = {}
+    suppliers = set()
+    recent = []
+    credits = Decimal("0")
+    credit_documents = 0
+    for record in records:
+        key = record.invoice_date.strftime("%Y-%m")
+        monthly[key] = monthly.get(key, Decimal("0")) + (record.total or Decimal("0"))
+        if (record.total or Decimal("0")) < 0:
+            credits += record.total or Decimal("0")
+            credit_documents += 1
+        suppliers.add(record.supplier_name)
+        if len(recent) < 6:
+            recent.append({"id": record.source_hash, "numero": record.invoice_number, "data": record.invoice_date.isoformat(), "imponibile": None, "iva": None, "totale": float(record.total or 0), "valuta": "EUR", "stato_importazione": "Supabase", "file_originale": record.payload_json, "supplier": {"id": record.source_hash, "ragione_sociale": record.supplier_name}, "row_count": 0})
+    totals = sum((r.total or Decimal("0")) for r in records)
+    return {"kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": records[-1].invoice_date.isoformat() if records else None, "to": records[0].invoice_date.isoformat() if records else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
+
+
+@router.post("/central/sync")
+async def central_sync(role: str = Depends(current_role)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    return await refresh_central_cache()
 
 
 @router.post("/sync/push")
