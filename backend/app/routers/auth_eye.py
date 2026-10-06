@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from ..auth_models import LocalCredential
+from ..auth_models import LocalCredential, LocalSession
 from ..auth_service import auth_configured, create_session, revoke_session, session_user, set_pin, verify_pin
 from ..database import get_db
 from ..models import UserProfile
@@ -79,6 +79,26 @@ def change_pin(user_id: int, payload: dict, x_eye_session: str | None = Header(d
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     return {"ok": True, "user_id": user_id}
+
+
+@router.patch("/users/{user_id}")
+def set_user_status(user_id: int, payload: dict, x_eye_session: str | None = Header(default=None, alias="X-Eye-Session"), db: Session = Depends(get_db)):
+    actor = session_user(db, x_eye_session)
+    if not actor or actor.role_name not in FULL_ACCESS_ROLES:
+        raise HTTPException(403, "Profilo non autorizzato")
+    target = db.get(UserProfile, user_id)
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    active = bool(payload.get("active"))
+    if not active and target.id == actor.id:
+        raise HTTPException(400, "Non puoi disattivare l'utente attualmente collegato")
+    if not active and (db.scalar(select(UserProfile.id).where(UserProfile.active.is_(True), UserProfile.id != target.id)) is None):
+        raise HTTPException(400, "Deve rimanere almeno un utente attivo")
+    target.active = active
+    if not active:
+        db.query(LocalSession).filter(LocalSession.user_id == target.id).delete(synchronize_session=False)
+    db.commit()
+    return {"id": target.id, "active": target.active}
 
 
 @router.get("/users")
