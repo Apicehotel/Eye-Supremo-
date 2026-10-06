@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -70,9 +71,17 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # product variant so older purchases cannot hide newer ones.
     if len(matches) > 1 and len(q.split()) == 1:
         return {**result, "matches": matches}
-    detail_name = (product.get("canonical_names") or [product["nome_canonico"]])[0]
-    detail = await central_product_detail(detail_name)
-    history = detail.get("history", [])
+    detail_names = product.get("canonical_names") or [product["nome_canonico"]]
+    details = await asyncio.gather(*(central_product_detail(name) for name in detail_names))
+    history = []
+    seen_history = set()
+    for detail in details:
+        for row in detail.get("history", []):
+            identity = (row.get("invoice_id"), row.get("invoice_number"), row.get("invoice_date"), row.get("supplier_name"), row.get("unit_price"), row.get("normalized_price"))
+            if identity in seen_history:
+                continue
+            seen_history.add(identity)
+            history.append(row)
     if not history:
         return result
     grouped = {}
