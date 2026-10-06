@@ -18,7 +18,7 @@ from ..eye_services import (
     review_rankings, seed_eye_supremo,
 )
 from ..models import (
-    Alert, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
+    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
@@ -425,7 +425,9 @@ def central_sync_status(role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
     from ..database import SessionLocal
     db = SessionLocal()
-    try: return {"configured": central_configured(), **cache_status(db)}
+    try:
+        checkpoint = db.get(AppSetting, "central_sync_at")
+        return {"configured": central_configured(), "last_sync_at": checkpoint.value if checkpoint else None, **cache_status(db)}
     finally: db.close()
 
 

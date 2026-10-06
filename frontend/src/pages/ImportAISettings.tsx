@@ -497,13 +497,16 @@ export function SettingsPage() {
   const [data, setData] = useState<any>(),
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
+    [centralSync, setCentralSync] = useState<any>(),
+    [syncBusy, setSyncBusy] = useState(false),
+    [syncError, setSyncError] = useState(""),
     [hotels, setHotels] = useState<Hotel[]>([]),
     [activeTab, setActiveTab] = useState("IA locale");
   useEffect(() => {
     if (canManage) {
       api("/settings").then(setData);
       api("/ollama/status").then(setStatus);
-      eyeApi("/sync/status").then(setSync);
+      loadSyncStatus();
       eyeApi<Hotel[]>("/hotels").then(setHotels).catch(() => setHotels([]));
     }
   }, []);
@@ -533,6 +536,21 @@ export function SettingsPage() {
   async function backup() {
     const r: any = await api("/backups", { method: "POST" });
     alert(`Backup creato: ${r.filename}`);
+  }
+  async function loadSyncStatus() {
+    try {
+      const [bridge, central] = await Promise.all([
+        eyeApi<any>("/sync/status"),
+        eyeApi<any>("/central/sync/status"),
+      ]);
+      setSync(bridge); setCentralSync(central); setSyncError("");
+    } catch (error: any) { setSyncError(error.message || "Stato sincronizzazione non disponibile"); }
+  }
+  async function refreshCentralCache() {
+    setSyncBusy(true); setSyncError("");
+    try { await eyeApi("/central/sync", { method: "POST" }); await loadSyncStatus(); }
+    catch (error: any) { setSyncError(error.message || "Aggiornamento cache non riuscito"); }
+    finally { setSyncBusy(false); }
   }
   const tabs = [
     "Generali",
@@ -635,7 +653,7 @@ export function SettingsPage() {
             </>
           )}
           {activeTab === "Esclusioni fatture" && <Empty title="Esclusioni fatture" text="Le righe di servizio, consegna, carburante e altre spese non prodotto restano ricercabili senza entrare nel catalogo prodotti." />}
-          {activeTab === "Sincronizzazione" && <><p>{sync?.enabled ? "Sincronizzazione centrale attiva." : "Replica centrale disponibile per fatture e recensioni; il lavoro locale continua anche senza connessione."}</p><Status tone={sync?.enabled ? "ok" : "warn"}>{sync?.enabled ? "Connessa" : "Non connessa"}</Status></>}
+          {activeTab === "Sincronizzazione" && <div className="sync-settings"><div className="sync-status-grid"><article><span>Ponte push-pull</span><b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b><small>{sync?.mode || "local-first"}</small></article><article><span>Cache fatture locale</span><b>{centralSync?.count ?? "—"}</b><small>{centralSync?.state || "mai aggiornata"}</small></article><article><span>Ultimo aggiornamento</span><b>{centralSync?.last_sync_at ? new Date(centralSync.last_sync_at).toLocaleString("it-IT") : "Mai"}</b><small>Supabase → locale</small></article></div><p>{centralSync?.configured ? "La cache locale può essere aggiornata manualmente. Le fatture importate vengono inviate al centrale quando il collegamento è disponibile." : "Supabase centrale non configurato: l'app continua a lavorare offline in locale."}</p>{syncError&&<div className="error">{syncError}</div>}<div className="form-actions"><button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}><RefreshCw size={15}/>Aggiorna stato</button><button className="primary-btn" onClick={refreshCentralCache} disabled={syncBusy || !centralSync?.configured}><RefreshCw size={15}/>{syncBusy ? "Sincronizzo…" : "Aggiorna cache locale"}</button></div></div>}
           {activeTab === "Backup" && <><p>Crea una copia locale del database e delle configurazioni correnti.</p><button className="secondary-btn" onClick={backup}><DatabaseBackup />Crea backup ora</button></>}
           {activeTab === "Sicurezza" && <Empty title="Accesso locale" text="Gli utenti accedono con PIN locale. Sviluppatore e Supremo hanno attualmente lo stesso livello operativo." />}
         </section>
