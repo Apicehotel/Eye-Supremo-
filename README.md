@@ -31,6 +31,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
 - controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
+- modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 
 ### Verificato
 

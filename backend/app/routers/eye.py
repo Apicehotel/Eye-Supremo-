@@ -12,13 +12,13 @@ from ..central_service import central_invoice_detail, central_invoice_search, ce
 from ..central_cache import cache_status, cached_search, refresh_central_cache
 from ..central_service import central_review_upsert
 from ..review_cache import refresh_review_cache, review_cache_status
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
     review_rankings, seed_eye_supremo,
 )
 from ..models import (
-    Alert, EmergingTheme, Hotel, Invoice, Review, ReviewCategory, ReviewTag,
+    Alert, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
@@ -312,7 +312,15 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), of
     if background_tasks is not None:
         background_tasks.add_task(refresh_central_cache)
     central = await central_invoice_search(q, limit)
-    return central
+    if central.get("items") or not central.get("message"):
+        return central
+    # Supabase can be unavailable while the local SQLite cache is still valid.
+    db = SessionLocal()
+    try:
+        cached = cached_search(db, q, limit, offset)
+        return cached | {"source": "sqlite-cache-offline", "offline": True, "remote_message": central.get("message")}
+    finally:
+        db.close()
 
 
 @router.get("/central/invoices/{source_hash}")
@@ -335,17 +343,45 @@ async def central_invoice_detail_route(source_hash: str, role: str = Depends(cur
 async def central_product_detail_route(canonical_name: str, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    detail = await central_product_detail(canonical_name)
-    if not detail.get("product"):
-        raise HTTPException(404, "Prodotto centrale non trovato")
-    return detail
+    try:
+        detail = await central_product_detail(canonical_name)
+        if detail.get("product"):
+            return detail
+    except Exception:
+        pass
+    db = SessionLocal()
+    try:
+        product = db.scalar(select(Product).where(Product.nome_canonico.ilike(canonical_name)))
+        if not product:
+            raise HTTPException(404, "Prodotto non trovato nella cache locale")
+        history = db.execute(select(InvoiceRow, Invoice, Supplier).select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id).join(Supplier, Invoice.supplier_id == Supplier.id).where(InvoiceRow.product_id == product.id).order_by(Invoice.data)).all()
+        return {"offline": True, "product": {"nome_canonico": product.nome_canonico, "categoria": product.categoria, "marca": product.marca, "unita_base": product.unita_base}, "history": [{"date": i.data.isoformat(), "supplier": s.ragione_sociale, "quantity": float(r.quantita), "price": float(r.prezzo_unitario), "normalized_price": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unit": r.unita_normalizzata, "invoice": i.numero, "invoice_id": i.id} for r, i, s in history]}
+    finally:
+        db.close()
 
 
 @router.get("/central/suppliers")
 async def central_suppliers(q: str = "", limit: int = Query(2000, ge=1, le=2000), role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    page = await central_supplier_page(q, limit)
+    try:
+        page = await central_supplier_page(q, limit)
+    except Exception as exc:
+        page = {"enabled": False, "items": [], "total": 0, "message": str(exc)}
+    if not page.get("items") and (not page.get("enabled") or page.get("message")):
+        db = SessionLocal()
+        try:
+            term = f"%{q.strip()}%" if q.strip() else None
+            stmt = select(Supplier).order_by(Supplier.ragione_sociale).limit(limit)
+            if term:
+                stmt = select(Supplier).where(Supplier.ragione_sociale.ilike(term) | Supplier.partita_iva.ilike(term)).order_by(Supplier.ragione_sociale).limit(limit)
+            local_items = []
+            for supplier in db.scalars(stmt).all():
+                invoices = db.scalars(select(Invoice).where(Invoice.supplier_id == supplier.id).order_by(Invoice.data.desc())).all()
+                local_items.append({"id": str(supplier.id), "ragione_sociale": supplier.ragione_sociale, "partita_iva": supplier.partita_iva, "codice_fiscale": supplier.codice_fiscale, "invoice_count": len(invoices), "total_spent": float(sum((i.totale or 0) for i in invoices)), "last_invoice_date": invoices[0].data.isoformat() if invoices else None})
+            return {"enabled": False, "local": True, "offline": True, "items": local_items, "total": len(local_items), "message": page.get("message") or "Supabase non disponibile"}
+        finally:
+            db.close()
     if not q.strip() or not page.get("enabled"):
         return page
 
@@ -399,6 +435,10 @@ def central_summary(role: str = Depends(current_role), db: Session = Depends(get
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
+    offline = False
+    if not records:
+        records = list(db.scalars(select(Invoice).order_by(Invoice.data.desc())).all())
+        offline = True
     now = date.today()
     monthly: dict[str, Decimal] = {}
     suppliers = set()
@@ -406,16 +446,20 @@ def central_summary(role: str = Depends(current_role), db: Session = Depends(get
     credits = Decimal("0")
     credit_documents = 0
     for record in records:
-        key = record.invoice_date.strftime("%Y-%m")
-        monthly[key] = monthly.get(key, Decimal("0")) + (record.total or Decimal("0"))
-        if (record.total or Decimal("0")) < 0:
-            credits += record.total or Decimal("0")
+        invoice_date = record.invoice_date if isinstance(record, CentralInvoiceCache) else record.data
+        total = record.total if isinstance(record, CentralInvoiceCache) else record.totale
+        supplier_name = record.supplier_name if isinstance(record, CentralInvoiceCache) else (record.supplier.ragione_sociale if record.supplier else "")
+        key = invoice_date.strftime("%Y-%m")
+        monthly[key] = monthly.get(key, Decimal("0")) + (total or Decimal("0"))
+        if (total or Decimal("0")) < 0:
+            credits += total or Decimal("0")
             credit_documents += 1
-        suppliers.add(record.supplier_name)
+        suppliers.add(supplier_name)
         if len(recent) < 6:
-            recent.append({"id": record.source_hash, "numero": record.invoice_number, "data": record.invoice_date.isoformat(), "imponibile": None, "iva": None, "totale": float(record.total or 0), "valuta": "EUR", "stato_importazione": "Supabase", "file_originale": record.payload_json, "supplier": {"id": record.source_hash, "ragione_sociale": record.supplier_name}, "row_count": 0})
-    totals = sum((r.total or Decimal("0")) for r in records)
-    return {"kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": records[-1].invoice_date.isoformat() if records else None, "to": records[0].invoice_date.isoformat() if records else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
+            recent.append({"id": record.source_hash if isinstance(record, CentralInvoiceCache) else record.id, "numero": record.invoice_number if isinstance(record, CentralInvoiceCache) else record.numero, "data": invoice_date.isoformat(), "imponibile": None if isinstance(record, CentralInvoiceCache) else float(record.imponibile), "iva": None if isinstance(record, CentralInvoiceCache) else float(record.iva), "totale": float(total or 0), "valuta": "EUR", "stato_importazione": "Cache locale" if offline else "Supabase", "file_originale": record.payload_json if isinstance(record, CentralInvoiceCache) else record.file_originale, "supplier": {"id": supplier_name, "ragione_sociale": supplier_name}, "row_count": 0})
+    totals = sum(((r.total if isinstance(r, CentralInvoiceCache) else r.totale) or Decimal("0")) for r in records)
+    dates = [r.invoice_date if isinstance(r, CentralInvoiceCache) else r.data for r in records]
+    return {"offline": offline, "kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": min(dates).isoformat() if dates else None, "to": max(dates).isoformat() if dates else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
 
 
 @router.post("/central/sync")
