@@ -95,6 +95,8 @@ def is_family_match(description: str, query: str) -> bool:
         if text == "acqua" or text == "acque":
             return True
         beverage = {"minerale", "naturale", "frizzante", "gassata", "bottiglia", "benedetto", "leviss", "lilia", "tullia", "tonica", "wellness", "brick", "pet", "sant"}
+        if tokens & {"tullia", "lilia", "leviss", "benedetto", "levissima", "sanbenedetto"}:
+            return True
         return ("acqua" in tokens or "acque" in tokens) and bool(tokens & beverage)
     return True
 

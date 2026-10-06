@@ -121,6 +121,11 @@ def test_acquaviva_is_not_classified_as_acqua():
     assert family != "acqua"
 
 
+def test_water_family_accepts_brand_only_invoice_descriptions():
+    assert is_family_match("TULLIA L'UNICA NAT VR 75x12", "acqua") is True
+    assert is_family_match("BAP 4 CON 4 LUPPOLI 24 bt 33 cl", "acqua") is False
+
+
 def test_product_catalog_groups_equivalent_packaging_abbreviations():
     rows = merge_product_catalog([
         {"id": 1, "nome_canonico": "carta igienica bauletto maxi cf8x12rt", "purchases": 4, "avg_price": 18},
