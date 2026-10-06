@@ -858,7 +858,7 @@ function suggestedProductCategory(name: string) {
 
 function suggestedProductSubcategory(name: string, category: string) {
   const value = name.toLowerCase();
-  if (category === "Food & Beverage" && /vino|vin[oò]|cadetto|rosso|bianco|rosato/.test(value)) return "Vino";
+  if (category === "Food & Beverage" && /vino|vin[oò]|cadetto|rosso|bianco|binaco|rosato/.test(value)) return "Vino";
   return "";
 }
 
