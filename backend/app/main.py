@@ -58,8 +58,8 @@ async def local_auth_guard(request: Request, call_next):
                 user = session_user(db, token)
                 if not user or not user.active:
                     return JSONResponse({"detail": "Sessione Eye Supremo richiesta"}, status_code=401)
-                if legacy_admin and user.role_name != "developer":
-                    return JSONResponse({"detail": "Solo lo Sviluppatore può usare questa funzione"}, status_code=403)
+                if legacy_admin and user.role_name not in {"developer", "supremo"}:
+                    return JSONResponse({"detail": "Profilo non autorizzato"}, status_code=403)
                 headers = list(request.scope.get("headers", []))
                 headers = [(k, v) for k, v in headers if k.lower() not in {b"x-eye-role", b"x-eye-user"}]
                 headers.append((b"x-eye-role", user.role_name.encode("utf-8")))

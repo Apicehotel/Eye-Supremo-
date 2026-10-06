@@ -84,10 +84,10 @@ export function Shell({
   setPinned: (v: boolean) => void;
 }) {
   const user = currentUser();
-  const isDeveloper = user?.role_name === "developer";
+  const isFullAccess = user?.role_name === "developer" || user?.role_name === "supremo";
   const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews">("overview");
   const visibleNav = nav.filter(
-    ([id]) => isDeveloper || !["settings", "system"].includes(id),
+    ([id]) => isFullAccess || !["settings", "system"].includes(id),
   );
   async function logout() {
     try {
@@ -211,7 +211,7 @@ export function Shell({
               <MessageSquareWarning size={19} />
               <span>Feedback</span>
             </button>
-            {isDeveloper && (
+            {isFullAccess && (
               <button
                 aria-label="Impostazioni"
                 onClick={() => {
@@ -230,7 +230,7 @@ export function Shell({
             <ShieldCheck size={15} />
             {user?.display_name || "Utente"}
           </label>
-          <small>{user?.role_name || "profilo locale"}</small>
+          <small>Profilo operativo</small>
           <button onClick={logout}>
             <LogOut size={15} />
             Esci

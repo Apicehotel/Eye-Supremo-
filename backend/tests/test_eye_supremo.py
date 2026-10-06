@@ -320,13 +320,13 @@ def test_review_txt_import_endpoint(client):
     assert len(items) == 1
 
 
-def test_non_developer_cannot_manage_users(client):
+def test_created_profiles_share_full_access(client):
     developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
     created = client.post("/api/eye/auth/users", json={"username":"levelcheck","display_name":"Level Check","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
     assert created.status_code == 200
     level_token = client.post("/api/eye/auth/login", json={"username":"levelcheck", "pin":"654321"}).json()["session"]
     response = client.get("/api/eye/users", headers={"X-Eye-Session":level_token, "X-Eye-Role": "developer"})
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_default_pin_unlocks_eye_api_and_session_unlocks_it(client):
@@ -340,7 +340,7 @@ def test_default_pin_unlocks_eye_api_and_session_unlocks_it(client):
     assert len(allowed.json()) == 3
 
 
-def test_created_user_cannot_spoof_developer_after_login(client):
+def test_created_user_has_same_access_level_after_login(client):
     developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
     users = client.get("/api/eye/auth/users", headers={"X-Eye-Session":developer_token}).json()
     created = client.post("/api/eye/auth/users", json={"username":"utente1","display_name":"Utente 1","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
@@ -349,4 +349,4 @@ def test_created_user_cannot_spoof_developer_after_login(client):
     assert login.status_code == 200
     level_token = login.json()["session"]
     protected = client.get("/api/eye/users", headers={"X-Eye-Session":level_token,"X-Eye-Role":"developer"})
-    assert protected.status_code == 403
+    assert protected.status_code == 200

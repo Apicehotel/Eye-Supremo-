@@ -22,7 +22,7 @@ HOTEL_SEEDS = [
 ]
 ROLE_SEEDS = [
     ("sviluppatore", "Sviluppatore", "developer", True),
-    ("supremo", "Supremo", "supremo", False),
+    ("supremo", "Supremo", "supremo", True),
 ]
 REVIEW_CATEGORY_SEEDS = [
     "Camere / Arredi", "Ristorante", "Colazione", "Staff", "Letti", "Pulizia",
@@ -57,10 +57,12 @@ def seed_eye_supremo(db: Session) -> None:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
     db.flush()
-    for username, *_ in ROLE_SEEDS:
-        user = db.scalar(select(UserProfile).where(UserProfile.username == username))
-        if user and not db.get(LocalCredential, user.id):
-            set_pin(db, user, DEFAULT_PIN)
+    # Temporarily keep every local profile at the same full-access level and
+    # PIN for the current PC rollout.
+    for user in db.scalars(select(UserProfile)).all():
+        user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
+        user.can_manage_config = True
+        set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):
             db.add(ReviewCategory(name=name, auto_learned=False))

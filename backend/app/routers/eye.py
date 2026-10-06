@@ -74,8 +74,8 @@ def hotels(role: str = Depends(current_role), username: str = Depends(current_us
 
 @router.get("/users")
 def users(role: str = Depends(current_role), db: Session = Depends(get_db)):
-    if role != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore gestisce utenti e configurazione")
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Profilo non autorizzato")
     return db.scalars(select(UserProfile).order_by(UserProfile.id)).all()
 
 
@@ -91,8 +91,8 @@ def exclusions(role_name: str | None = None, role: str = Depends(current_role), 
 
 @router.post("/role-exclusions")
 def add_exclusion(payload: dict, role: str = Depends(current_role), db: Session = Depends(get_db)):
-    if role != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore modifica le esclusioni")
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Profilo non autorizzato")
     role_name = str(payload.get("role_name", "")).strip()
     exclusion_type = str(payload.get("exclusion_type", "")).strip()
     value = normalize_text(str(payload.get("value", "")))
@@ -245,8 +245,8 @@ def emerging_themes(status: str = "candidate", db: Session = Depends(get_db)):
 
 @router.post("/emerging-themes/{theme_id}/approve")
 def approve_theme(theme_id: int, role: str = Depends(current_role), db: Session = Depends(get_db)):
-    if role != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore approva nuove categorie")
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Profilo non autorizzato")
     theme = db.get(EmergingTheme, theme_id)
     if not theme:
         raise HTTPException(404, "Tema non trovato")

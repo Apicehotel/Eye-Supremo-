@@ -9,6 +9,7 @@ from ..models import UserProfile
 
 router = APIRouter(prefix="/api/eye/auth", tags=["Eye Supremo auth"])
 ALLOWED_ROLES = {"developer", "supremo", "level1", "level2", "level3"}
+FULL_ACCESS_ROLES = {"developer", "supremo"}
 
 
 @router.get("/status")
@@ -68,8 +69,8 @@ def logout(x_eye_session: str | None = Header(default=None, alias="X-Eye-Session
 @router.put("/users/{user_id}/pin")
 def change_pin(user_id: int, payload: dict, x_eye_session: str | None = Header(default=None, alias="X-Eye-Session"), db: Session = Depends(get_db)):
     actor = session_user(db, x_eye_session)
-    if not actor or actor.role_name != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore può configurare i PIN")
+    if not actor or actor.role_name not in FULL_ACCESS_ROLES:
+        raise HTTPException(403, "Profilo non autorizzato")
     target = db.get(UserProfile, user_id)
     if not target:
         raise HTTPException(404, "Utente non trovato")
@@ -83,8 +84,8 @@ def change_pin(user_id: int, payload: dict, x_eye_session: str | None = Header(d
 @router.get("/users")
 def auth_users(x_eye_session: str | None = Header(default=None, alias="X-Eye-Session"), db: Session = Depends(get_db)):
     actor = session_user(db, x_eye_session)
-    if not actor or actor.role_name != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore gestisce gli utenti")
+    if not actor or actor.role_name not in FULL_ACCESS_ROLES:
+        raise HTTPException(403, "Profilo non autorizzato")
     credentials = set(db.scalars(select(LocalCredential.user_id)).all())
     users = db.scalars(select(UserProfile).order_by(UserProfile.id)).all()
     return [{"id": u.id, "username": u.username, "display_name": u.display_name, "role_name": u.role_name, "pin_configured": u.id in credentials, "active": u.active} for u in users]
@@ -93,22 +94,22 @@ def auth_users(x_eye_session: str | None = Header(default=None, alias="X-Eye-Ses
 @router.post("/users")
 def create_user(payload: dict, x_eye_session: str | None = Header(default=None, alias="X-Eye-Session"), db: Session = Depends(get_db)):
     actor = session_user(db, x_eye_session)
-    if not actor or actor.role_name != "developer":
-        raise HTTPException(403, "Solo lo Sviluppatore gestisce gli utenti")
+    if not actor or actor.role_name not in FULL_ACCESS_ROLES:
+        raise HTTPException(403, "Profilo non autorizzato")
     username = str(payload.get("username", "")).strip().lower()
     display_name = str(payload.get("display_name", "")).strip()
-    role_name = str(payload.get("role_name", "")).strip()
+    # I livelli sono temporaneamente disattivati: ogni nuovo profilo ha
+    # lo stesso comportamento operativo del profilo Supremo.
+    role_name = "supremo"
     pin = str(payload.get("pin", ""))
     if not username or not username.replace("_", "").replace("-", "").isalnum() or len(username) > 80:
         raise HTTPException(422, "Username non valido")
     if not display_name or len(display_name) > 160:
         raise HTTPException(422, "Nome visualizzato non valido")
-    if role_name not in ALLOWED_ROLES:
-        raise HTTPException(422, "Permesso non valido")
     try:
         from ..auth_service import validate_pin_format
         validate_pin_format(pin)
-        user = UserProfile(username=username, display_name=display_name, role_name=role_name, can_manage_config=role_name == "developer")
+        user = UserProfile(username=username, display_name=display_name, role_name=role_name, can_manage_config=True)
         db.add(user); db.flush(); set_pin(db, user, pin)
     except ValueError as exc:
         db.rollback(); raise HTTPException(422, str(exc))

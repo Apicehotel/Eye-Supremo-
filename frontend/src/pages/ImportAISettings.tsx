@@ -493,23 +493,24 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
 
 export function SettingsPage() {
   const user = currentUser();
+  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
   const [data, setData] = useState<any>(),
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
     [activeTab, setActiveTab] = useState("IA locale");
   useEffect(() => {
-    if (user?.role_name === "developer") {
+    if (canManage) {
       api("/settings").then(setData);
       api("/ollama/status").then(setStatus);
       eyeApi("/sync/status").then(setSync);
     }
   }, []);
-  if (user?.role_name !== "developer")
+  if (!canManage)
     return (
       <>
         <PageHeader
           title="Impostazioni"
-          subtitle="Area riservata allo Sviluppatore"
+          subtitle="Area gestione locale"
         />
         <section className="panel">
           <Empty
@@ -645,6 +646,7 @@ export function SettingsPage() {
 
 export function SystemPage() {
   const user = currentUser();
+  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
   const [logs, setLogs] = useState<any[]>();
   const [update, setUpdate] = useState<any>();
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -668,11 +670,11 @@ export function SystemPage() {
     finally { setUpdateBusy(false); }
   }
   useEffect(() => {
-    if (user?.role_name === "developer") api<any[]>("/logs").then(setLogs);
+    if (canManage) api<any[]>("/logs").then(setLogs);
     checkForUpdate();
   }, []);
   const updatePanel = <section className="panel update-panel"><div className="panel-title"><h2>Aggiornamenti</h2><button className="secondary-btn" onClick={checkForUpdate} disabled={updateBusy}><RefreshCw size={15}/> Controlla</button></div>{updateError&&<div className="error">{updateError}</div>}{update?.update_available?<><p>È disponibile Eye Supremo {update.latest_version} (versione installata {update.current_version}).</p><button className="primary-btn" onClick={downloadUpdate} disabled={updateBusy}><Download size={16}/> Scarica installer aggiornato</button></>:<p>{updateBusy?"Controllo la GitHub Release…":update?`Eye Supremo è aggiornato alla versione ${update.current_version}.`:"Controllo versione non ancora eseguito."}</p>}</section>;
-  if (user?.role_name !== "developer")
+  if (!canManage)
     return (<><PageHeader title="Sistema" subtitle="Stato applicazione e aggiornamenti" />{updatePanel}<section className="panel"><Empty title="Accesso riservato" text="I log di sistema sono disponibili solo allo Sviluppatore." /></section></>);
   return (
     <>
