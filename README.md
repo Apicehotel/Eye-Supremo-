@@ -167,8 +167,11 @@ Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 
+<<<<<<< HEAD
 **Bootstrap all’installazione:** al primo avvio (o con cache vuota) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
 
+=======
+>>>>>>> origin/main
 Modelli inclusi nel completamento automatico:
 
 ```text

@@ -11,7 +11,10 @@ from ..config import settings
 from ..central_service import central_invoice_detail, central_invoice_search, central_product_detail, central_supplier_detail, central_supplier_page, configured as central_configured
 from ..central_cache import cache_status, cached_row_search, cached_search, refresh_central_cache
 from ..central_service import central_review_upsert
+<<<<<<< HEAD
 from ..local_cache_bootstrap import bootstrap_status, run_local_cache_bootstrap, schedule_bootstrap
+=======
+>>>>>>> origin/main
 from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
 from ..database import SessionLocal, get_db
 from ..eye_services import (
