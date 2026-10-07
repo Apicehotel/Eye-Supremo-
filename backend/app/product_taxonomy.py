@@ -191,6 +191,10 @@ def product_content_group(item: dict) -> tuple[str, str] | None:
     family = re.sub(r"\b(?:pz|pcs|pc|n|nr|num)\s*\d+\b|\bx\b", " ", family)
     family = re.sub(r"\b(?:conf|confez|confezione|confezioni|da|in)\b", " ", family)
     family = " ".join(family.split())
+    # These prefixes are supplier/catalogue abbreviations, not the product
+    # identity. Removing them lets equivalent Pago descriptions converge
+    # without making different flavours converge on the shared brand name.
+    family = re.sub(r"^(?:bev|beve|bevanda|bevande|nett)\s+", "", family)
     if not family:
         return None
     # Water is commonly entered with natural/frizzante/package wording; keep
@@ -268,7 +272,7 @@ def merge_product_catalog(items: list[dict], collapse_family: str | None = None)
     def family_tokens(family: str) -> set[str]:
         return {
             token for token in family.split()
-            if len(token) >= 3 and token not in ignored_family_tokens and not token.isdigit()
+            if len(token) >= 5 and token not in ignored_family_tokens and not token.isdigit()
         }
 
     group_keys = list(groups)

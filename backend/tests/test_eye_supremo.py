@@ -215,6 +215,15 @@ def test_product_catalog_merges_equivalent_packs_for_same_product():
     assert len(rows[0]["canonical_names"]) == 2
 
 
+def test_product_catalog_keeps_pago_flavours_separate():
+    rows = merge_product_catalog([
+        {"id": 1, "nome_canonico": "nett pago albicocca 24x200 ml", "purchases": 1},
+        {"id": 2, "nome_canonico": "nett pago pera 24x200 ml", "purchases": 1},
+    ])
+    assert len(rows) == 2
+    assert {row["nome_canonico"] for row in rows} == {"Nett pago albicocca 24 x 200 ml", "Nett pago pera 24 x 200 ml"}
+
+
 def test_max_invoice_context_chooses_highest_between_local_and_central(db):
     supplier = Supplier(ragione_sociale="Locale Test"); db.add(supplier); db.flush()
     db.add(Invoice(supplier_id=supplier.id, numero="LOCAL-1", data=date(2026, 1, 1), imponibile=900, iva=198, totale=1098))
