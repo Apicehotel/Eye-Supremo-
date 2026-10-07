@@ -1,293 +1,33 @@
-import {useEffect, useMemo, useState} from 'react';
-import {MessageSquareText, Star, Store, Reply, Search, ExternalLink, Loader2} from 'lucide-react';
-import {PageHeader, Status} from '../components/UI';
-import {api} from '../lib/api';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import {MessageSquareText,Star,Search,UploadCloud,Trophy,TriangleAlert,Printer} from 'lucide-react';
+import {PageHeader,Status} from '../components/UI';
+import {currentUser,eyeApi} from '../lib/api';
 
-type Review = {
-  id: string;
-  hotelId: string;
-  author: string;
-  source: string;
-  rating: number;
-  rating_missing?: boolean;
-  date: string;
-  text: string;
-  status: string;
-  room_code?: string | null;
-};
+type Hotel={id:number;code:string;name:string};
+type Review={id:number;hotel:string;hotel_code:string;room:string|null;author:string|null;source:string|null;rating:number|null;date:string;text:string;tags:{category:string;polarity:string;confidence:number}[]};
+type Ranking={best_rooms:any[];worst_rooms:any[];best_services:any[];worst_services:any[]};
 
-type HotelStat = {
-  id: string;
-  name: string;
-  short: string;
-  score: string;
-  count: number;
-  avg_rating?: number | null;
-};
+function cleanReviewText(value:string){return value.replace(/<https?:\/\/[^>]+>/gi,' ').replace(/<mailto:[^>]+>/gi,' ').replace(/<\/?[a-z][^>]*>/gi,' ').replace(/https?:\/\/\S+/gi,' ').replace(/\s{2,}/g,' ').trim()}
+function reviewInitial(value:string|null|undefined){return value?.replace(/[^\p{L}\p{N}]/gu,'').slice(0,1).toUpperCase()||'?'}
 
-const FALLBACK_HOTELS: HotelStat[] = [
-  {id: 'all', name: 'Tutti gli hotel', short: 'Tutti', score: '—', count: 0},
-  {id: 'hotelgio', name: 'Hotel Giò', short: 'Hotel Giò', score: '—', count: 0},
-  {id: 'chocohotel', name: 'Chocohotel', short: 'Chocohotel', score: '—', count: 0},
-  {id: 'brigantino', name: 'Hotel Il Brigantino', short: 'Il Brigantino', score: '—', count: 0},
-];
+export default function Reviews(){
+ const user=currentUser(); const canSeeAll=user?.role_name==='developer'||user?.role_name==='supremo';
+ const [hotels,setHotels]=useState<Hotel[]>([]),[hotel,setHotel]=useState(canSeeAll?'all':''),[view,setView]=useState<'overview'|'ranking'|'reviews'>('overview'),[query,setQuery]=useState(''),[sourceFilter,setSourceFilter]=useState('all'),[ratingFilter,setRatingFilter]=useState('all'),[sortBy,setSortBy]=useState('date_desc'),[reviews,setReviews]=useState<Review[]>([]),[rank,setRank]=useState<Ranking>({best_rooms:[],worst_rooms:[],best_services:[],worst_services:[]}),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[expanded,setExpanded]=useState<number|null>(null);
+ const input=useRef<HTMLInputElement>(null);
+ const selected=hotels.find(h=>h.code===hotel);
+ const load=async()=>{const hotelParam=hotel&&hotel!=='all'?`?hotel_code=${hotel}`:'';const [r,k]=await Promise.all([eyeApi<Review[]>(`/reviews${hotelParam}`),eyeApi<Ranking>(`/rankings${hotelParam}`)]);setReviews(r);setRank(k)};
+ useEffect(()=>{eyeApi<Hotel[]>('/hotels').then(h=>{setHotels(h);if(!canSeeAll&&h[0])setHotel(h[0].code)})},[]);
+ useEffect(()=>{if(hotel)load().catch(()=>{})},[hotel]);
+ useEffect(()=>{const onView=(e:Event)=>{const next=(e as CustomEvent).detail;if(next==='overview'||next==='ranking'||next==='reviews')setView(next)};window.addEventListener('eye-review-view',onView);return()=>window.removeEventListener('eye-review-view',onView)},[]);
+ const visible=useMemo(()=>{const q=query.trim().toLowerCase();const filtered=reviews.filter(r=>{const haystack=(r.text+' '+(r.room||'')+' '+r.hotel+' '+r.tags.map(t=>t.category).join(' ')).toLowerCase();return (!q||haystack.includes(q))&&(sourceFilter==='all'||(r.source||'TXT')===sourceFilter)&&(ratingFilter==='all'||(ratingFilter==='rated'?r.rating!==null:r.rating===null))});return [...filtered].sort((a,b)=>{if(sortBy.startsWith('rating')){const ar=a.rating??(sortBy==='rating_desc'?-Infinity:Infinity),br=b.rating??(sortBy==='rating_desc'?-Infinity:Infinity);return sortBy==='rating_desc'?br-ar:ar-br}const cmp=a.date.localeCompare(b.date);return sortBy==='date_desc'?-cmp:cmp})},[reviews,query,sourceFilter,ratingFilter,sortBy]);
+ const rated=visible.filter(r=>r.rating!==null); const avg=rated.length?rated.reduce((a,r)=>a+(r.rating||0),0)/rated.length:0;
+ const sourceSummary=useMemo(()=>['Booking','TripAdvisor','Google'].map(source=>{const rows=visible.filter(r=>r.source===source);const scored=rows.filter(r=>r.rating!==null);return {source,total:rows.length,rated:scored.length,avg:scored.length?scored.reduce((sum,r)=>sum+(r.rating||0),0)/scored.length:null,scale:source==='Booking'?10:5}}),[visible]);
+ async function upload(files:FileList|null){if(!files?.length||!hotel||hotel==='all'){setMessage('Seleziona prima un singolo hotel.');return}setBusy(true);setMessage('');const body=new FormData();Array.from(files).forEach(f=>body.append('files',f));try{const res:any=await eyeApi(`/reviews/import/${hotel}`,{method:'POST',body});setMessage(`${res.imported} recensioni importate${res.errors?.length?` · ${res.errors.length} file/blocchi da verificare`:''}`);await load()}catch(e:any){setMessage(e.message)}finally{setBusy(false);if(input.current)input.current.value=''}}
+ const card=(title:string,items:any[],type:'room'|'service',bad=false)=><article className="panel"><div className="panel-title"><h2>{bad?<TriangleAlert size={18}/>:<Trophy size={18}/>} {title}</h2></div>{items.length?<ol className="ranking-list">{items.map((x,i)=><li value={i+1} key={`${type}-${i}-${x.room||x.service}`}><b>{type==='room'?`Camera ${x.room}`:x.service}</b><span>{type==='room'?`${x.hotel} · voto ${x.rating} · ${x.reviews} recensioni`:`${x.mentions} menzioni · +${x.positive}/-${x.negative}`}</span></li>)}</ol>:<div className="empty"><span>Nessun dato sufficiente.</span></div>}</article>;
+ return <><PageHeader title="Recensioni" subtitle="Tre sezioni hotel separate; Supremo e Sviluppatore possono confrontarle tutte"><div className="header-actions">{view==='reviews'&&<><label className="global-search review-search"><Search/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cerca nelle recensioni…"/></label><select className="review-control" aria-label="Filtra per fonte" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}><option value="all">Tutte le fonti</option><option value="Booking">Booking</option><option value="TripAdvisor">TripAdvisor</option><option value="Google">Google</option><option value="TXT">TXT</option></select><select className="review-control" aria-label="Filtra per voto" value={ratingFilter} onChange={e=>setRatingFilter(e.target.value)}><option value="all">Tutti i voti</option><option value="rated">Solo con voto</option><option value="unrated">Senza voto</option></select><select className="review-control" aria-label="Ordina recensioni" value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="date_desc">Più recenti</option><option value="date_asc">Più vecchie</option><option value="rating_desc">Voto più alto</option><option value="rating_asc">Voto più basso</option></select></>}<button className="secondary-btn print-report-btn" onClick={()=>window.print()}><Printer size={16}/>Stampa report</button></div></PageHeader>
+ <section className="hotel-selector">{canSeeAll&&<button className={hotel==='all'?'active':''} onClick={()=>setHotel('all')}>Tutti gli hotel</button>}{hotels.map(h=><button key={h.code} className={hotel===h.code?'active':''} onClick={()=>setHotel(h.code)}>{h.name}</button>)}</section>
 
-export default function Reviews() {
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('Tutte');
-  const [hotel, setHotel] = useState('all');
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [hotels, setHotels] = useState<HotelStat[]>(FALLBACK_HOTELS);
-  const [total, setTotal] = useState(0);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setBusy(true);
-      setError('');
-      try {
-        const data = await api<{
-          items: Review[];
-          hotels: HotelStat[];
-          total: number;
-          configured: boolean;
-        }>('/storage/central/reviews');
-        if (!alive) return;
-        setReviews(data.items || []);
-        setHotels(data.hotels?.length ? data.hotels : FALLBACK_HOTELS);
-        setTotal(data.total || data.items?.length || 0);
-      } catch (e: any) {
-        if (!alive) return;
-        const msg = String(e?.message || e);
-        setError(
-          msg.includes('503') || msg.includes('non configurate')
-            ? 'Configura URL, chiave anon e PIN catalogo nel file .env per leggere le recensioni centrali.'
-            : msg,
-        );
-        setReviews([]);
-      } finally {
-        if (alive) setBusy(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const selected = hotels.find((h) => h.id === hotel) || hotels[0];
-  const visible = useMemo(
-    () =>
-      reviews.filter(
-        (r) =>
-          (hotel === 'all' || r.hotelId === hotel) &&
-          (filter === 'Tutte' || (filter === 'Da rispondere' && r.status === 'Da rispondere')) &&
-          (r.author + ' ' + r.text + ' ' + r.source).toLowerCase().includes(query.toLowerCase()),
-      ),
-    [reviews, query, filter, hotel],
-  );
-
-  const ratingBars = useMemo(() => {
-    const pool = hotel === 'all' ? reviews : reviews.filter((r) => r.hotelId === hotel);
-    const withRating = pool.filter((r) => !r.rating_missing && r.rating > 0);
-    const totalR = withRating.length || 1;
-    return [5, 4, 3, 2, 1].map((stars) => {
-      const n = withRating.filter((r) => Math.round(r.rating) === stars).length;
-      return {stars, pct: Math.round((n / totalR) * 100), n};
-    });
-  }, [reviews, hotel]);
-
-  const hotelName = (id: string) => hotels.find((h) => h.id === id)?.name || id;
-
-  return (
-    <>
-      <PageHeader
-        title="Recensioni"
-        subtitle={
-          busy
-            ? 'Caricamento da Supabase MultiHotel…'
-            : total
-              ? `${total} recensioni in eye_central_reviews · Giò / Choco / Brigantino`
-              : 'Monitora i feedback da Supabase MultiHotel'
-        }
-      >
-        <label className="global-search review-search">
-          <Search />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cerca nelle recensioni…"
-          />
-        </label>
-      </PageHeader>
-
-      {error && <div className="error">{error}</div>}
-
-      <section className="hotel-selector" aria-label="Classifica recensioni per hotel">
-        {hotels.map((h) => (
-          <button
-            key={h.id}
-            className={hotel === h.id ? 'active' : ''}
-            onClick={() => setHotel(h.id)}
-          >
-            <span>{h.short}</span>
-            <small>
-              {h.count} recensioni · {h.score} ★
-            </small>
-          </button>
-        ))}
-      </section>
-
-      <section className="review-kpis">
-        <article className="kpi">
-          <MessageSquareText />
-          <div>
-            <span>Recensioni · {selected.short}</span>
-            <strong>{busy ? '…' : selected.count}</strong>
-            <small>Archivio MultiHotel</small>
-          </div>
-        </article>
-        <article className="kpi">
-          <Star />
-          <div>
-            <span>Valutazione media</span>
-            <strong>{busy ? '…' : selected.score}</strong>
-            <small>
-              {selected.avg_rating != null ? 'Media sulle recensioni con voto' : 'Nessun voto disponibile'}
-            </small>
-          </div>
-        </article>
-        <article className="kpi">
-          <Reply />
-          <div>
-            <span>Da rispondere</span>
-            <strong>0</strong>
-            <small>stato risposta non ancora sincronizzato</small>
-          </div>
-        </article>
-        <article className="kpi">
-          <Store />
-          <div>
-            <span>Struttura</span>
-            <strong className="hotel-kpi-name">{selected.short}</strong>
-            <small>{hotel === 'all' ? '3 hotel Apicehotel' : 'Dati isolati per hotel'}</small>
-          </div>
-        </article>
-      </section>
-
-      <section className="reviews-layout">
-        <article className="panel reviews-panel">
-          <div className="panel-title review-toolbar">
-            <div>
-              <h2>Recensioni recenti</h2>
-              <span>
-                {selected.name} · {visible.length} visibili
-              </span>
-            </div>
-            <div className="review-filters">
-              <button className={filter === 'Tutte' ? 'active' : ''} onClick={() => setFilter('Tutte')}>
-                Tutte
-              </button>
-              <button
-                className={filter === 'Da rispondere' ? 'active' : ''}
-                onClick={() => setFilter('Da rispondere')}
-              >
-                Da rispondere
-              </button>
-            </div>
-          </div>
-          <div className="review-list">
-            {busy && (
-              <div className="empty">
-                <Loader2 className="spin" />
-                <strong>Lettura da Supabase…</strong>
-                <span>RPC eye_central_review_page</span>
-              </div>
-            )}
-            {!busy &&
-              visible.map((r) => (
-                <article className="review-row" key={r.id}>
-                  <div className="review-avatar">{(r.author[0] || '?').toUpperCase()}</div>
-                  <div className="review-body">
-                    <div className="review-meta">
-                      <b>{r.author}</b>
-                      <span>
-                        {r.source} · {r.date || '—'}
-                        {r.room_code ? ` · cam. ${r.room_code}` : ''}
-                      </span>
-                    </div>
-                    <div className="review-hotel">{hotelName(r.hotelId)}</div>
-                    <div
-                      className="stars"
-                      aria-label={r.rating_missing ? 'voto assente' : `${r.rating} stelle`}
-                    >
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <Star
-                          key={n}
-                          size={14}
-                          fill={!r.rating_missing && n <= Math.round(r.rating) ? 'currentColor' : 'none'}
-                          className={!r.rating_missing && n <= Math.round(r.rating) ? 'filled' : ''}
-                        />
-                      ))}
-                    </div>
-                    <p>{r.text}</p>
-                    <div className="review-actions">
-                      <Status tone="ok">{r.status}</Status>
-                      <button type="button" disabled>
-                        <Reply size={14} />
-                        Rispondi
-                      </button>
-                      <button type="button" disabled>
-                        <ExternalLink size={14} />
-                        Apri fonte
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            {!busy && !visible.length && (
-              <div className="empty">
-                <strong>Nessuna recensione</strong>
-                <span>
-                  {error
-                    ? 'Collega MultiHotel nel .env per leggere eye_central_reviews.'
-                    : `Nessun risultato per ${selected.name}.`}
-                </span>
-              </div>
-            )}
-          </div>
-        </article>
-        <aside className="panel review-summary">
-          <h2>Riepilogo · {selected.short}</h2>
-          <div className="sentiment-score">
-            <strong>{selected.score}</strong>
-            <span>{selected.count ? 'media voti' : 'Nessun dato'}</span>
-          </div>
-          <div className="rating-bars">
-            {ratingBars.map(({stars, pct}) => (
-              <div key={stars}>
-                <span>{stars} ★</span>
-                <i>
-                  <b style={{width: `${pct}%`}} />
-                </i>
-                <small>{pct}%</small>
-              </div>
-            ))}
-          </div>
-          <hr />
-          <h3>Fonti</h3>
-          <div className="empty">
-            <span>
-              {busy
-                ? '…'
-                : total
-                  ? 'Booking, TripAdvisor, Google e import TXT da digest MSG.'
-                  : 'Disponibili dopo il collegamento a Supabase.'}
-            </span>
-          </div>
-        </aside>
-      </section>
-    </>
-  );
+ {view==='overview'&&<><section className="review-kpis"><article className="kpi"><MessageSquareText/><div><span>Recensioni</span><strong>{visible.length}</strong><small>{selected?.name||'Tutti gli hotel'}</small></div></article><article className="kpi"><Star/><div><span>Valutazione media</span><strong>{avg?avg.toFixed(2):'—'}</strong><small>periodo disponibile</small></div></article><article className="kpi"><UploadCloud/><div><span>Formato import</span><strong>{hotel==='all'?'—':'MSG · EML · TXT'}</strong><small>scegli un hotel per caricare</small></div></article></section><section className="source-summary"><div className="section-label"><b>Voti complessivi per fonte</b><span>Solo Booking, TripAdvisor e Google con voto riconosciuto</span></div><div className="source-summary-grid">{sourceSummary.map(s=><article className="panel source-card" key={s.source}><div><span>{s.source}</span><small>{s.total} recensioni · {s.rated} con voto</small></div><strong>{s.avg===null?'—':`${s.avg.toFixed(2)} / ${s.scale}`}</strong></article>)}</div></section><section className="panel review-upload"><div><div className="panel-title"><h2>Importa recensioni</h2><span>{selected?.name||'seleziona un hotel'}</span></div><p>Un file Outlook può contenere più recensioni: Eye Supremo le separa e le salva nell'hotel selezionato.</p></div><button className="primary-btn" disabled={busy||!hotel||hotel==='all'} onClick={()=>input.current?.click()}><UploadCloud/>{busy?'Importazione…':'Carica file'}</button><input ref={input} hidden multiple type="file" accept=".msg,.eml,.txt" onChange={e=>upload(e.target.files)}/>{message&&<p className="success">{message}</p>}</section></>}
+ {view==='ranking'&&<section className="ranking-grid" id="reviews-ranking">{card('Camere migliori',rank.best_rooms,'room')}{card('Camere da verificare',rank.worst_rooms,'room',true)}{card('Servizi migliori',rank.best_services,'service')}{card('Servizi da verificare',rank.worst_services,'service',true)}</section>}
+ {view==='reviews'&&<section className="panel reviews-panel"><div className="panel-title"><div><h2>Archivio recensioni</h2><span>Testo pulito · fonte e data sempre visibili</span></div><Status tone="ok">{visible.length} risultati</Status></div><div className="review-list">{visible.map(r=>{const text=cleanReviewText(r.text);return <article className="review-row" key={r.id}><div className="review-avatar">{reviewInitial(r.author||r.source)}</div><div className="review-body"><div className="review-meta"><b>{r.hotel}{r.room?` · Camera ${r.room}`:''}</b><span className="review-source">{r.source||'Fonte non indicata'} · {r.date}</span></div><div className="stars">{r.rating!==null?`${r.rating} ★`:'senza voto'}</div><p className={expanded===r.id?'review-text expanded':'review-text'}>{text||'Testo non disponibile'}</p>{text.length>280&&<button className="review-more" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?'Mostra meno':'Leggi tutto'}</button>}<div className="review-actions">{r.tags.map(t=><Status key={`${t.category}-${t.polarity}`} tone={t.polarity==='negative'?'warn':'ok'}>{t.category} · {t.polarity==='negative'?'−':'+'}</Status>)}</div></div></article>})}</div></section>}</>;
 }

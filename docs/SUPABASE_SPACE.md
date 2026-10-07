@@ -22,7 +22,7 @@ Older Eye builds continue to work because the existing `public.eye_central_*` ta
 The environment variable:
 
 ```env
-RANDFATTURE_SUPABASE_SCHEMA=eye_supremo
+EYESUPREMO_SUPABASE_SCHEMA=eye_supremo
 ```
 
 records the owned namespace. Runtime RPC compatibility remains on `public` until the gateway/client migration is completed.

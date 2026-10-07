@@ -1,118 +1,257 @@
-import {ReactNode} from 'react';
+import { ReactNode, useState } from "react";
 import {
-  LayoutDashboard, FileText, FilePenLine, Package, Boxes, Users, Upload, Sparkles,
-  ChartNoAxesCombined, History, TriangleAlert, Tags, Settings, MonitorCog, Menu, X,
-  ReceiptText, MessageSquareText, CloudUpload, Inbox, LogOut, PanelLeftClose, PanelLeftOpen, Pin,
-} from 'lucide-react';
-import {clearAuth, AuthUser, currentSession} from '../lib/api';
-
+  LayoutDashboard,
+  FileText,
+  Package,
+  Users,
+  Upload,
+  Sparkles,
+  ChartNoAxesCombined,
+  History,
+  TriangleAlert,
+  Tags,
+  Settings,
+  MonitorCog,
+  Menu,
+  X,
+  Pin,
+  ReceiptText,
+  MessageSquareText,
+  ShieldCheck,
+  LogOut,
+  MapPin,
+  TrendingUp,
+  Trophy,
+  MessageSquareWarning,
+} from "lucide-react";
+import { clearAuth, currentUser, eyeApi } from "../lib/api";
 export type Page =
-  | 'dashboard' | 'invoices' | 'editor' | 'products' | 'warehouse' | 'suppliers'
-  | 'import' | 'storage-inbox' | 'central-catalog' | 'ai' | 'reports' | 'history' | 'anomalies'
-  | 'categories' | 'settings' | 'system' | 'uploader';
-
+  | "dashboard"
+  | "invoices"
+  | "products"
+  | "suppliers"
+  | "import"
+  | "ai"
+  | "reports"
+  | "history-report"
+  | "destinations"
+  | "history"
+  | "anomalies"
+  | "categories"
+  | "settings"
+  | "system"
+  | "feedback";
 const nav: [Page, string, any][] = [
-  ['dashboard', 'Dashboard', LayoutDashboard],
-  ['invoices', 'Fatture', FileText],
-  ['editor', 'Editor fattura', FilePenLine],
-  ['products', 'Prodotti', Package],
-  ['warehouse', 'Magazzino', Boxes],
-  ['suppliers', 'Fornitori', Users],
-  ['import', 'Importa', Upload],
-  ['storage-inbox', 'Coda Storage', Inbox],
-  ['ai', 'Ricerca IA', Sparkles],
-  ['reports', 'Report', ChartNoAxesCombined],
-  ['history', 'Storico', History],
-  ['anomalies', 'Anomalie', TriangleAlert],
-  ['categories', 'Categorie', Tags],
-  ['settings', 'Impostazioni', Settings],
-  ['system', 'Sistema', MonitorCog],
+  ["dashboard", "Dashboard", LayoutDashboard],
+  ["invoices", "Fatture", FileText],
+  ["products", "Prodotti", Package],
+  ["suppliers", "Fornitori", Users],
+  ["import", "Importa", Upload],
+  ["destinations", "Destinazione fattura", MapPin],
+  ["history-report", "Report storico", TrendingUp],
+  ["ai", "Ask Fatture", Sparkles],
+  ["reports", "Report", ChartNoAxesCombined],
+  ["history", "Storico", History],
+  ["anomalies", "Alert", TriangleAlert],
+  ["categories", "Categorie", Tags],
+  ["settings", "Impostazioni", Settings],
+  ["system", "Sistema", MonitorCog],
+  ["feedback", "Feedback", MessageSquareWarning],
 ];
-
 export function Shell({
-  page, setPage, area, setArea, children, mode, setMode, mobileOpen, setMobileOpen, user,
+  page,
+  setPage,
+  area,
+  setArea,
+  reviewPage,
+  setReviewPage,
+  children,
+  open,
+  setOpen,
+  pinned,
+  setPinned,
 }: {
   page: Page;
   setPage: (p: Page) => void;
-  area: 'invoices' | 'reviews';
-  setArea: (a: 'invoices' | 'reviews') => void;
+  area: "invoices" | "reviews";
+  setArea: (a: "invoices" | "reviews") => void;
+  reviewPage: "reviews" | "ai";
+  setReviewPage: (p: "reviews" | "ai") => void;
   children: ReactNode;
-  mode: 'open' | 'collapsed' | 'pinned';
-  setMode: (v: 'open' | 'collapsed' | 'pinned') => void;
-  mobileOpen: boolean;
-  setMobileOpen: (v: boolean) => void;
-  user: AuthUser | null;
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  pinned: boolean;
+  setPinned: (v: boolean) => void;
 }) {
-  const uploaderOnly = user?.role_name === 'uploader';
-  function logout() {
-    const session = currentSession();
-    fetch('/api/auth/logout', {method: 'POST', headers: {'X-Eye-Session': session || ''}}).finally(() => {
-      clearAuth();
-      window.dispatchEvent(new Event('eye-auth-expired'));
-    });
+  const user = currentUser();
+  const isFullAccess = user?.role_name === "developer" || user?.role_name === "supremo";
+  const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews">("overview");
+  const visibleNav = nav.filter(
+    ([id]) => isFullAccess || !["settings", "system"].includes(id),
+  );
+  async function logout() {
+    try {
+      await eyeApi("/auth/logout", { method: "POST" });
+    } catch {}
+    clearAuth();
+    window.dispatchEvent(new Event("eye-auth-expired"));
   }
-
   return (
-    <div className={`app-shell sidebar-${mode}`}>
-      <aside className={`sidebar ${mode} ${mobileOpen ? 'mobile-open' : ''}`}>
+    <div className="app-shell">
+      <aside className={`sidebar ${open ? "open" : ""} ${pinned ? "pinned" : ""}`}>
         <div className="brand">
-          <img className="brand-mark" src="/favicon-32.png" alt="Eye Supremo" width={28} height={28} />
-          <div>
-            <b>EYE</b> SUPREMO
-            <span>{uploaderOnly ? 'Solo carico file' : area === 'invoices' ? 'Le tue fatture, più valore.' : 'Ascolta, rispondi, migliora.'}</span>
-          </div>
+          <img className="brand-logo" src="/eye-supremo-logo.png" alt="Eye Supremo" />
+          <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · Local first</span></div>
         </div>
-        {!uploaderOnly && (
-          <div className="area-switch" role="group" aria-label="Cambia area">
-            <button className={area === 'invoices' ? 'active' : ''} onClick={() => setArea('invoices')}>
-              <ReceiptText />Fatture
-            </button>
-            <button className={area === 'reviews' ? 'active' : ''} onClick={() => setArea('reviews')}>
-              <MessageSquareText />Recensioni
-            </button>
-          </div>
-        )}
-        {uploaderOnly ? (
+        <div className="area-switch" role="group" aria-label="Cambia area">
+          <button
+            className={area === "invoices" ? "active" : ""}
+            onClick={() => {
+              setArea("invoices");
+              setPage("invoices");
+            }}
+          >
+            <ReceiptText />
+            Fatture
+          </button>
+          <button
+            className={area === "reviews" ? "active" : ""}
+            onClick={() => setArea("reviews")}
+          >
+            <MessageSquareText />
+            Recensioni
+          </button>
+        </div>
+        <div className="sidebar-top-tools">
+          <button className={pinned ? "sidebar-pin active" : "sidebar-pin"} aria-label={pinned ? "Sblocca menu" : "Fissa menu aperto"} title={pinned ? "Sblocca menu" : "Fissa menu aperto"} onClick={() => setPinned(!pinned)}>
+            <Pin size={14} /> <span>{pinned ? "Menu fissato" : "Fissa menu"}</span>
+          </button>
+        </div>
+        {area === "invoices" ? (
           <nav>
-            <button className={page === 'uploader' ? 'active' : ''} onClick={() => { setPage('uploader'); setMobileOpen(false); }}>
-              <CloudUpload size={19} /><span>Carica fatture</span>
-            </button>
-          </nav>
-        ) : area === 'invoices' ? (
-          <nav>
-            {nav.map(([id, label, Icon]) => (
-              <button key={id} className={page === id ? 'active' : ''} onClick={() => { setPage(id); if (mode !== 'pinned') setMobileOpen(false); }}>
-                <Icon size={19} /><span>{label}</span>
+            {visibleNav.map(([id, label, Icon]) => (
+              <button
+                key={id}
+                aria-label={label}
+                className={page === id ? "active" : ""}
+                onClick={() => {
+                  setPage(id);
+                  setOpen(false);
+                }}
+              >
+                <Icon size={19} />
+                <span>{label}</span>
               </button>
             ))}
           </nav>
         ) : (
           <nav>
-            <button className="active"><LayoutDashboard size={19} /><span>Panoramica</span></button>
-            <button><MessageSquareText size={19} /><span>Tutte le recensioni</span></button>
-            <button><Sparkles size={19} /><span>Analisi IA</span></button>
-            <button><Settings size={19} /><span>Impostazioni</span></button>
+            <button
+              aria-label="Panoramica"
+              className={reviewPage === "reviews" && reviewView === "overview" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("overview");
+                window.dispatchEvent(
+                  new CustomEvent("eye-review-view", { detail: "overview" }),
+                );
+              }}
+            >
+              <LayoutDashboard size={19} />
+              <span>Panoramica</span>
+            </button>
+            <button
+              aria-label="Ranking"
+              className={reviewPage === "reviews" && reviewView === "ranking" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("ranking");
+                window.dispatchEvent(
+                  new CustomEvent("eye-review-view", { detail: "ranking" }),
+                );
+                setTimeout(
+                  () =>
+                    document
+                      .getElementById("reviews-ranking")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                  0,
+                );
+              }}
+            >
+              <Trophy size={19} />
+              <span>Ranking</span>
+            </button>
+            <button
+              aria-label="Recensioni"
+              className={reviewPage === "reviews" && reviewView === "reviews" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("reviews");
+                window.dispatchEvent(
+                  new CustomEvent("eye-review-view", { detail: "reviews" }),
+                );
+              }}
+            >
+              <MessageSquareText size={19} />
+              <span>Recensioni</span>
+            </button>
+            <button
+              aria-label="Analisi IA"
+              className={reviewPage === "ai" ? "active" : ""}
+              onClick={() => setReviewPage("ai")}
+            >
+              <Sparkles size={19} />
+              <span>Analisi IA</span>
+            </button>
+            <button
+              aria-label="Feedback"
+              className={page === "feedback" ? "active" : ""}
+              onClick={() => { setArea("invoices"); setPage("feedback"); setOpen(false); }}
+            >
+              <MessageSquareWarning size={19} />
+              <span>Feedback</span>
+            </button>
+            {isFullAccess && (
+              <button
+                aria-label="Impostazioni"
+                onClick={() => {
+                  setArea("invoices");
+                  setPage("settings");
+                }}
+              >
+                <Settings size={19} />
+                <span>Impostazioni</span>
+              </button>
+            )}
           </nav>
         )}
+        <div className="role-box">
+          <label>
+            <ShieldCheck size={15} />
+            {user?.display_name || "Utente"}
+          </label>
+          <small>Profilo operativo</small>
+          <button onClick={logout}>
+            <LogOut size={15} />
+            Esci
+          </button>
+        </div>
         <div className="local-status">
           <i />
-          {user?.display_name || 'Utente'}
-          <small>{user?.role_name} · PC locale</small>
-          <button className="logout-btn" onClick={logout}><LogOut size={14} /> Esci</button>
-        </div>
-        <div className="sidebar-controls">
-          <button title={mode === 'collapsed' ? 'Apri barra laterale' : 'Chiudi barra laterale'} aria-label={mode === 'collapsed' ? 'Apri barra laterale' : 'Chiudi barra laterale'} onClick={() => setMode(mode === 'collapsed' ? 'open' : 'collapsed')}>
-            {mode === 'collapsed' ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-            <span>{mode === 'collapsed' ? 'Apri' : 'Riduci'}</span>
-          </button>
-          <button className={mode === 'pinned' ? 'active' : ''} title={mode === 'pinned' ? 'Sblocca barra laterale' : 'Fissa barra laterale'} aria-label={mode === 'pinned' ? 'Sblocca barra laterale' : 'Fissa barra laterale'} onClick={() => setMode(mode === 'pinned' ? 'open' : 'pinned')}>
-            <Pin size={16} /><span>{mode === 'pinned' ? 'Fissata' : 'Fissa'}</span>
-          </button>
+          Archivio locale<small>Windows · Offline first · Sync opzionale</small>
         </div>
       </aside>
-      {mobileOpen && <button className="scrim" aria-label="Chiudi menu" onClick={() => setMobileOpen(false)} />}
+      {open && (
+        <button
+          className="scrim"
+          aria-label="Chiudi menu"
+          onClick={() => setOpen(false)}
+        />
+      )}
       <main>
-        <button className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
+        <button className="mobile-menu" onClick={() => setOpen(!open)}>
+          {open ? <X /> : <Menu />}
+        </button>
         {children}
       </main>
     </div>

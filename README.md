@@ -1,126 +1,257 @@
 # Eye Supremo
 
-Eye Supremo è un gestionale locale-first per archiviare fatture aziendali, normalizzare prodotti e unità, analizzare prezzi, gestire recensioni multi-hotel e interrogare lo storico con Ollama. Continua a funzionare quando Ollama è spento: database, import, ricerca, filtri, calcoli, report, backup e log sono deterministici.
+Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per analizzare fatture, recensioni, camere, servizi, ranking, storico prezzi e anomalie. Il PC resta pienamente operativo anche senza Internet; Supabase è un ponte opzionale per sincronizzare dati autorizzati tra Hotel Giò, Chocohotel e Hotel Il Brigantino.
 
-> **Ask Fatture** (cartella `ask-fatture/`, v0.3.0) è incluso nell’**installer unico** `EyeSupremo-Setup.exe` insieme a Eye Supremo: import XML, catalogo fornitori/prodotti, pack **Chili / Litri / Pezzi**, domande con `qwen3:8b` locale. Non usa RandAI.
+## Principi
 
-## Architettura
+- **PC = motore principale**: SQLite, import, ricerca, ranking, backup e IA locale.
+- **GitHub = codice e versioni**: mai fatture o recensioni reali.
+- **Supabase = ponte opzionale**: sync autenticata push/pull, separata dal funzionamento locale.
+- **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
+- **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
 
-- React + TypeScript + Vite per l'interfaccia responsive.
-- FastAPI + SQLAlchemy 2 per le API REST.
-- SQLite in modalità WAL; schema predisposto alla migrazione PostgreSQL.
-- File e backup nella cartella locale `data` (ignorata da Git) o `%LOCALAPPDATA%\EyeSupremo` con l’exe.
-- Login locale con PIN; ruolo **Caricatore** solo per upload file.
-- Supabase opzionale **solo come Storage file** + catalogo centrale MultiHotel (non database fatture PC).
-- Ollama opzionale (profilo light: `qwen3:4b` + `nomic-embed-text` per PC ~16 GB).
+La sezione **Feedback** consente di descrivere un problema, allegare uno screenshot, salvare la segnalazione localmente ed esportarla in JSON per inviarla allo sviluppatore.
 
-Le decisioni e i flussi sono descritti in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PC_STORAGE.md](docs/PC_STORAGE.md), [docs/SUPABASE_INVOICES.md](docs/SUPABASE_INVOICES.md) (bucket `eye-invoices` su MultiHotel) e [docs/SUPABASE_REVIEWS.md](docs/SUPABASE_REVIEWS.md) (`eye_central_reviews`). Copia `.env.example` in `.env` per configurare Storage. Su Windows puoi usare anche `checklist-pc.bat`.
+## Stato del progetto
+
+**Versione applicativa:** `2.0.0`
+**Branch di lavoro:** `feat/eye-supremo-foundations`
+**Ultimo aggiornamento:** 6 ottobre 2026
+
+### Completato
+
+- archivio locale fatture con import XML FatturaPA, anteprima, duplicati, imponibile, IVA e totale;
+- ricerca fatture, prodotti e fornitori con filtri e ordinamento per data, prezzo, fornitore, imponibile e totale;
+- catalogo prodotti, classificazione conservativa e storico prezzi per fornitore;
+- report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
+- recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
+- dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
+- login locale per profilo utente con PIN, ruoli e permessi; il login sviluppatore non è più obbligatorio;
+- gestione utenti e PIN riservata al ruolo Sviluppatore;
+- Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
+- GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
+- modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
+
+### Verificato
+
+- backend: `50 passed`;
+- build frontend Vite: riuscita;
+- installer Windows: workflow e smoke test configurati;
+- branch locale e remoto allineati dopo il commit `3865ee0`.
+
+### Da completare
+
+- pubblicare una GitHub Release `v2.0.0` coerente con la versione dell'installer;
+- verificare il percorso completo su un PC pulito: installazione, primo login, import XML e aggiornamento;
+- eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
+
+GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla le release da GitHub e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
+
+## Hotel preconfigurati
+
+- `gio` — Hotel Giò
+- `choco` — Chocohotel
+- `brigantino` — Hotel Il Brigantino
+
+## Accesso e ruoli
+
+Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con un PIN iniziale temporaneo (non riportato qui): lo Sviluppatore deve sostituirlo al primo accesso dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
+
+- **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
+- **Supremo**: visibilità globale operativa sui tre hotel.
+- **Livello 1 / 2 / 3**: accesso operativo limitabile all'hotel assegnato e alle esclusioni configurate.
+
+Per le recensioni, Sviluppatore e Supremo vedono **Tutti gli hotel** oltre alle tre sezioni Giò/Choco/Brigantino. Gli utenti assegnati a una sola struttura vedono solo quella.
+
+Per le fatture la visibilità resta aziendale Apice con esclusioni per categoria/prodotto/fornitore/parola chiave; le fatture **non vengono separate in tre archivi hotel**.
+
+## Fatture: archivio unico Apice
+
+Import principale: **XML FatturaPA, TXT e PDF**.
+
+Pipeline:
+
+1. hash SHA-256 e controllo duplicati;
+2. parsing e anteprima;
+3. conferma esplicita;
+   nella schermata lotto è possibile confermare una singola fattura oppure tutte le fatture pronte;
+4. classificazione righe;
+5. voci contabili non utili all'analisi restano nella fattura ma vengono escluse dalla ricerca prodotto;
+6. indicizzazione FTS5;
+7. confronto prezzi e creazione alert quando applicabile.
+
+La sezione **Destinazione fattura** è separata dall'import: una fattura resta dell'archivio centrale Apice e può essere marcata facoltativamente come `Generale / Apice`, `Hotel Giò`, `Chocohotel` o `Hotel Il Brigantino` per filtri e analisi.
+
+Le domande di spesa sommano **le righe pertinenti**, non il totale completo delle fatture che le contengono.
+
+## Report storico prodotto
+
+Il modulo **Report storico** riprende la logica dell'Excel operativo e la rende automatica.
+
+Ricerca:
+
+`Prodotto → Produttore/Marca → Fornitore → date → prezzi`
+
+In alto mostra subito:
+
+- prezzo iniziale + data;
+- prezzo medio;
+- miglior prezzo + data;
+- ultimo prezzo + data;
+- fornitore mediamente più conveniente.
+
+Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. Ogni nuovo prezzo è confrontato con il precedente con indicazione `↑`, `↓` o `=` e variazione in euro/%.
+
+I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
+
+### Stampa
+
+Il report ha un layout dedicato **A4 orizzontale**. Quando le date diventano troppe vengono suddivise in più pagine; su **ogni pagina** vengono ripetuti prodotto, produttore/marca e fornitore, così ogni prezzo mantiene sempre il proprio riferimento. La UI espone `Stampa / PDF` e genera pagine compatte pensate per la stampa, non una semplice schermata web ridotta.
+
+## Ricerca veloce
+
+La ricerca parte mentre si digita:
+
+1. **SQLite FTS5** con prefix index;
+2. SQL filtrato;
+3. **RapidFuzz** come fallback;
+4. Qwen solo per interpretazione finale.
+
+L'evoluzione prevista per l'archivio massivo usa prodotto canonico, alias/anti-alias, classificazione `Food & Beverage` / `Non Food`, vector search locale e Qwen solo sui casi ambigui. Similarità testuale non equivale a equivalenza semantica: per esempio `bombolone` e `bombola` devono restare separati.
+
+## Recensioni
+
+Le recensioni sono divise per hotel. Prima si seleziona **Giò / Choco / Brigantino**, poi si caricano i file: tutte le recensioni estratte ereditano l'hotel scelto.
+
+Formati supportati:
+
+- **Outlook `.msg`**;
+- EML;
+- TXT.
+
+Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
+
+## Eye AI e agenti interni
+
+Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
+
+Agenti interni:
+
+- `router` — comprende l'intento;
+- `products` — ricerca prodotto, alias e storico;
+- `classifier` — classifica Food & Beverage / Non Food e sottocategorie;
+- `invoices` — dati fattura e fornitore;
+- `prices` — storico, medie, minimi e variazioni;
+- `reviews` — recensioni, camere, servizi e ranking;
+- `verifier` — controlla unità incompatibili e falsi positivi;
+- `answer` — genera la risposta finale breve e verificabile.
+
+Gli specialisti che leggono il database possono lavorare in parallelo, ma **ognuno apre una propria sessione SQLAlchemy/SQLite**: non condividono la stessa sessione tra thread. Somme, medie, ranking e confronti restano deterministici; Qwen viene usato soprattutto per interpretazione e sintesi.
+
+La chiamata Ollama usa **structured output JSON Schema** (`answer`, `facts`, `confidence`). Se Ollama non è disponibile, l'orchestratore ricade sul motore deterministico locale. L'endpoint `/api/eye/agents/registry` espone il registro degli agenti e dei tool consentiti.
+
+Durante l'installazione Windows lo script incluso installa Ollama se necessario e scarica automaticamente i modelli. Sono necessari Internet e spazio disco locale; i modelli non vengono committati nel repository né incorporati nell'EXE per le loro dimensioni.
+
+Modelli inclusi nel completamento automatico:
+
+```text
+qwen3:8b
+llama3.2:3b
+qwen3-embedding:0.6b
+```
+
+Il file `scarica-modelli-ia.bat` resta disponibile nella cartella dell'app per ripetere o completare il download dei modelli.
+
+## Alert
+
+Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture può generare alert quando il prezzo corrente supera in modo rilevante lo storico. Le righe contabili escluse non generano alert prodotto.
 
 ## Spazio dati separato
 
 Eye Supremo condivide temporaneamente l'infrastruttura Supabase di MultiHotel per evitare un secondo progetto/costo, ma ha un confine applicativo dedicato: schema logico `eye_supremo` + bucket privato `eye-invoices`. Le tabelle legacy `public.eye_central_*` restano disponibili durante il cutover per non rompere installazioni esistenti. HotelGio è fuori scope e non viene modificato. Vedi [docs/SUPABASE_SPACE.md](docs/SUPABASE_SPACE.md).
 
-## Requisiti e avvio
+## Ponte Supabase
 
-Servono Windows 10/11, Python 3.11+ e Node.js 20+. Ollama è facoltativo. Fare doppio clic su `setup.bat` una sola volta, quindi su `start.bat`. Il browser si apre su `http://127.0.0.1:5173`; le API sono documentate su `http://127.0.0.1:8000/api/docs`.
+Sul progetto **Apice MultiHotel** sono presenti:
 
-### Installer Windows (unico Setup)
+- `eye_sync_memberships`
+- `eye_sync_objects`
+- Edge Function `eye-supremo-sync`
+- tabelle centrali `eye_central_invoices`, `eye_central_invoice_rows`, `eye_central_suppliers`;
+- funzione SQL `eye_central_invoice_page` per lettura autenticata paginata;
+- cache SQLite locale `central_invoice_cache`, usata per elenco fatture veloce;
+- la prima apertura su un PC vuoto avvia automaticamente la replica in background;
+- la ricerca di prodotto/famiglia usa ancora l'indice centrale quando la cache non contiene le righe.
+- recensioni: `eye_central_reviews`, upsert autenticato all'importazione e pull nella cache `central_review_cache`;
+- endpoint diagnostici: `/api/eye/central/sync/status` e `/api/eye/reviews/sync/status`.
 
-Un solo installer per **Eye Supremo + Ask Fatture**:
+L'Edge Function richiede JWT valido. `developer` e `supremo` possono essere configurati per lettura globale; gli altri utenti ricevono solo gli hotel autorizzati dalla membership server-side.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_suite.ps1
+Variabili locali in `.env.example`:
+
+```text
+EYESUPREMO_SYNC_ENABLED=false
+EYESUPREMO_SUPABASE_URL=
+EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
+EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 ```
 
-Oppure i passi singoli:
+La replica centrale è disponibile con le credenziali Eye dell'utente centrale (non riportate qui; vanno impostate in locale tramite variabili d'ambiente). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
+
+## Avvio sviluppo
+
+Requisiti: Python 3.11+ e Node 20+.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\build_ask_fatture.ps1
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss
+setup.bat
+start.bat
 ```
 
-Produce `release\EyeSupremo-Setup.exe` (v1.4.2) con:
+API: `http://127.0.0.1:8000/api/docs`
+UI dev: `http://127.0.0.1:5173`
 
-- `EyeSupremo.exe` — gestionale (dati in `%LOCALAPPDATA%\EyeSupremo`)
-- `AskFatture.exe` — domande/catalogo/pack Chili·Litri·Pezzi (dati in `%LOCALAPPDATA%\AskFatture`)
-- collegamenti Start Menu / desktop per entrambi
-- script per scaricare i modelli Ollama
+## Installer Windows
 
-Serve **Microsoft Edge WebView2**. CI: `windows-installer.yml` (smoke headless di entrambi gli exe + Setup unico).
+Il PC finale **non deve avere Python o Node**.
 
-`start.bat` resta solo per sviluppo (Vite + browser). Dettagli Ask Fatture in [ask-fatture/README.md](ask-fatture/README.md).
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
 
-### Aggiornamenti sui PC (senza girarli a mano)
+Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller e incorpora la UI nel backend. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
 
-1. Pubblica una **GitHub Release** con asset `EyeSupremo-Setup.exe`  
-   (Actions → **Publish Eye Supremo Release**, oppure tag `v1.4.2`).
-   Download: https://github.com/Apicehotel/Eye-Supremo-/releases/latest
-2. Su ogni PC, in **Impostazioni → Aggiornamenti**:
-   - **Controlla ora** / **Scarica e installa**, oppure
-   - attiva **Installa automaticamente**.
-3. L’installer aggiorna entrambi i programmi; i dati restano nelle cartelle LocalAppData.
+I dati vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
 
-Senza Release su GitHub i PC non vedono nulla di nuovo (il solo push su `main` non basta).
-
-## Variabili ambiente
-
-Le variabili del catalogo centrale mantengono il prefisso legacy `RANDFATTURE_` per compatibilità con i `.env` già in produzione (per esempio `RANDFATTURE_SUPABASE_URL`); non è un nome mostrato agli utenti. Il database locale mantiene inoltre il filename legacy `randfatture.db` per consentire l’aggiornamento in-place. Il nome prodotto e la UI sono **Eye Supremo**.
-
-## Importazione
-
-La pagina Importa accetta PDF, XML, DOCX, XLSX e PPTX. MarkItDown converte i documenti locali in Markdown per l'analisi; l'XML FatturaPA resta letto con il parser strutturato e il PDF mantiene il fallback pypdf. Ogni import crea un'anteprima con confidenza e avvisi prima della conferma. Hash SHA-256 e metadati contabili rilevano possibili duplicati. JPG/PNG/CSV sono validati in upload ma richiedono il parser OCR/tabellare della roadmap.
-
-## Unità e prezzi
-
-Le descrizioni originali restano immutate. La normalizzazione riconosce kg/g, L/ml, pezzi, rotoli, confezioni, scatole, metri, m²/m³ e paia. Prezzo dichiarato e normalizzato sono salvati separatamente.
-
-## Ollama
-
-Installare Ollama e avviare `scarica-modelli-ia.bat`. Lo script installa `qwen3:4b` come modello principale e `nomic-embed-text` per gli embedding; `qwen3:8b` resta opzionale sui PC con RAM sufficiente. URL e modello attivo si modificano in Impostazioni. Eye AI recupera prima un insieme limitato di righe via SQL/fuzzy e passa soltanto quelle al modello, mostrando le fonti.
-
-
-## Modalità offline-first fatture
-
-Eye Supremo usa il PC come fonte operativa primaria. In **Impostazioni → Modalità offline**:
-
-- Al primo avvio, se URL, chiave e PIN del catalogo centrale sono configurati, Eye Supremo sincronizza automaticamente il catalogo fatture una volta per sessione.
-- **Sincronizza catalogo** scarica tutte le pagine di `eye_central_invoices` e salva una copia locale in `%LOCALAPPDATA%\\EyeSupremo\\offline\\central_invoices.json`.
-- **Prepara offline completo** salva anche i PDF/XML disponibili in Supabase Storage sotto `%LOCALAPPDATA%\\EyeSupremo\\offline\\documents`.
-- La pagina **Fatture** legge prima la cache locale; se Internet cade continua a cercare e filtrare l'intero catalogo già sincronizzato.
-- La cache viene sostituita solo a sincronizzazione completata: una caduta di rete non cancella mai l'ultima copia valida.
-- Senza una cache iniziale, Eye Supremo mantiene il fallback live limitato finché non viene eseguita la prima sincronizzazione completa.
-
-Supabase resta il punto di sincronizzazione/condivisione, non un requisito per usare l'archivio quotidiano.
-
-## Backup e test
-
-Impostazioni → Backup crea uno ZIP locale con database, allegati e configurazione sotto `data/backups` (o `%LOCALAPPDATA%\EyeSupremo\backups`).
+## Test e CI
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pytest
+pytest -q
 cd ..\frontend
+npm ci
 npm run build
 ```
 
-I test coprono normalizzazione, prezzi, database, duplicati, API, ricerca, fallback Ollama e XML FatturaPA.
+La PR esegue automaticamente backend test + frontend build e la pipeline Windows genera l'installer.
 
 ## Sicurezza
 
-Nessuna telemetria o invio cloud. Upload limitati, estensioni consentite, nomi file generati, protezione path traversal nei download, hash e audit log. Per il futuro multiutente serviranno autenticazione, cifratura e ruoli.
+- dati reali locali per default;
+- autenticazione locale con PIN e sessione;
+- ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
+- hotel delle recensioni limitato ai permessi utente;
+- agenti con strumenti dichiarati e limitati;
+- sessioni database isolate per worker concorrente;
+- Qwen non modifica direttamente fatture o prodotti;
+- upload con limiti e nomi generati;
+- hash duplicati;
+- audit log;
+- sync remota centrale autenticata con PIN e paginazione;
+- nessun token reale committato.
 
-## Troubleshooting
+## Limitazioni note
 
-- **IA locale non disponibile**: avviare Ollama e verificare URL/modello; il resto funziona comunque.
-- **Porta occupata**: liberare la porta 8000 o 5173.
-- **PDF senza testo**: è una scansione; viene segnalata per revisione.
-- **Browser non aperto**: visitare `http://127.0.0.1:5173`.
-
-## Roadmap dichiarata
-
-- OCR Tesseract per scansioni e immagini; import CSV/XLSX con mappatura.
-- Conferma completa dell'anteprima UI e riconciliazione alias assistita.
-- Embedding incrementali con indice vettoriale locale.
-- Report PDF/XLSX e ripristino backup guidato.
-- Multiutente con ruoli e cifratura; packaging Tauri come alternativa al PyInstaller attuale; PostgreSQL opzionale.
+- il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
+- il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;
+- `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.

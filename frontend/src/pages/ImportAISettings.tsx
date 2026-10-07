@@ -1,72 +1,726 @@
-import {useEffect,useRef,useState} from 'react';
-import {UploadCloud,FileCheck,BrainCircuit,DatabaseBackup,RefreshCw,RotateCcw,Save} from 'lucide-react';
-import {api,currentSession,euro} from '../lib/api';
-import {Empty,PageHeader,Status} from '../components/UI';
+import { useEffect, useRef, useState } from "react";
+import {
+  UploadCloud,
+  FileCheck,
+  BrainCircuit,
+  DatabaseBackup,
+  Download,
+  RefreshCw,
+} from "lucide-react";
+import {
+  api,
+  currentRole,
+  currentSession,
+  currentUser,
+  eyeApi,
+  euro,
+} from "../lib/api";
+import { Empty, PageHeader, Status } from "../components/UI";
+import { UserAdmin } from "../components/UserAdmin";
 
-export function ImportPage({initialPreview,onPreviewConsumed}:{initialPreview?:any,onPreviewConsumed?:()=>void}={}){
- const input=useRef<HTMLInputElement>(null),[busy,setBusy]=useState(false),[preview,setPreview]=useState<any>(),[error,setError]=useState(''),[done,setDone]=useState('');
- useEffect(()=>{if(initialPreview){setPreview(initialPreview);setDone('');setError('');onPreviewConsumed?.()}},[initialPreview]);
- async function upload(file:File){setBusy(true);setError('');setDone('');const body=new FormData();body.append('file',file);try{const session=currentSession()||'';const res=await fetch('/api/imports/preview',{method:'POST',headers:{'X-Eye-Session':session},body});if(!res.ok)throw new Error(await res.text());setPreview(await res.json())}catch(e:any){setError(e.message)}finally{setBusy(false)}}
- async function confirm(force=false){setBusy(true);setError('');try{const result:any=await api(`/imports/${preview.job_id}/confirm?force=${force?'true':'false'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(preview.remote_upload_id){try{await api(`/storage/${preview.remote_upload_id}/mark-imported`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice_id:result.invoice_id})})}catch{/* non bloccare */} }
- setDone(force?`Fattura forzata e salvata con ID ${result.invoice_id}`:`Fattura salvata con ID ${result.invoice_id}`);setPreview(undefined)}catch(e:any){const msg=String(e.message||'');setError(msg.includes('duplicato')||msg.includes('409')?`${msg} — usa «Forza comunque» se vuoi importarla lo stesso.`:msg)}finally{setBusy(false)}}
- return <><PageHeader title="Importa" subtitle="Factur-X/ZUGFeRD e FatturaPA hanno priorità. I file da Storage arrivano qui dopo la coda."/><section className="import-layout"><article className="panel dropzone" onClick={()=>input.current?.click()} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0])}}><UploadCloud/><h2>{busy?'Operazione in corso…':'Trascina qui una fattura'}</h2><p>PDF, Factur-X/ZUGFeRD o XML FatturaPA · massimo 30 MB</p><button className="primary-btn">Seleziona file</button><input ref={input} hidden type="file" accept=".pdf,.xml,.jpg,.jpeg,.png,.csv" onChange={e=>e.target.files?.[0]&&upload(e.target.files[0])}/>{error&&<div className="error">{error}</div>}{done&&<div className="success">{done}</div>}</article>{preview?<article className="panel preview"><div className="panel-title"><h2>Anteprima estrazione</h2><Status tone={preview.confidence>.8?'ok':'warn'}>{Math.round((preview.confidence||0)*100)}% confidenza</Status></div>{preview.source&&<div className="success"><b>Sorgente:</b> {preview.source==='factur-x'?'Factur-X / ZUGFeRD strutturato':preview.source==='fatturapa'?'FatturaPA strutturata':preview.source}</div>}{preview.e_invoice&&<div className="preview-grid"><label>Formato<input readOnly value={preview.e_invoice.format||'—'}/></label><label>Profilo<input readOnly value={preview.e_invoice.profile||'—'}/></label><label>XML<input readOnly value={preview.e_invoice.syntax_valid?'Valido':'Non valido'}/></label><label>Struttura<input readOnly value={preview.e_invoice.structure_valid===false?'Da verificare':'Valida'}/></label></div>}<div className="preview-grid"><label>Fornitore<input defaultValue={preview.supplier?.ragione_sociale}/></label><label>Numero<input defaultValue={preview.invoice?.numero}/></label><label>Data<input type="date" defaultValue={preview.invoice?.data}/></label><label>Totale<input defaultValue={preview.invoice?.totale}/></label></div>{preview.warnings?.length>0&&<div className="warning">{preview.warnings.join(' · ')}</div>}{preview.duplicate_matches?.length>0&&<div className="warning">Possibile duplicato: fattura #{preview.duplicate_matches.join(', #')}</div>}<h3>{(preview.rows||[]).length} righe rilevate</h3><div className="table-wrap"><table><thead><tr><th>Descrizione</th><th>Quantità</th><th>Unità</th><th>Prezzo</th><th>Confidenza</th></tr></thead><tbody>{(preview.rows||[]).map((r:any,i:number)=><tr key={i}><td>{r.descrizione_originale}</td><td>{r.quantita}</td><td>{r.unita_originale||'—'}</td><td>{euro(Number(r.prezzo_unitario))}</td><td>{Math.round(Number(r.confidence||0)*100)}%</td></tr>)}</tbody></table></div><div className="form-actions" style={{justifyContent:'flex-start',marginTop:14}}><button className="primary-btn" disabled={busy} onClick={()=>confirm(false)}><FileCheck/>Conferma e salva</button>{preview.duplicate_matches?.length>0&&<button className="secondary-btn" disabled={busy} onClick={()=>confirm(true)}>Forza comunque</button>}</div></article>:<article className="panel preview"><Empty title="Anteprima" text="I dati estratti appariranno qui senza essere salvati automaticamente."/></article>}</section></>}
-
-export function AIPage(){const [q,setQ]=useState(''),[answer,setAnswer]=useState<any>(),[busy,setBusy]=useState(false);async function ask(){if(!q.trim())return;setBusy(true);try{setAnswer(await api('/ai/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})}))}finally{setBusy(false)}}return <><PageHeader title="Chiedi a RandAI" subtitle="Ricerca intelligente sui dati reali dell'archivio"/><section className="ai-layout"><article className="panel ai-hero"><BrainCircuit/><h2>Cosa vuoi sapere sulle tue fatture?</h2><div className="ask-box"><textarea value={q} onChange={e=>setQ(e.target.value)} placeholder="Es. Quali prodotti sono aumentati più del 20%?"/><button className="primary-btn" onClick={ask}>{busy?'Analisi…':'Chiedi'}</button></div><div className="examples">{['Quanto ho speso nel 2024?','Confronta i prezzi della carta','Da chi compro più spesso?'].map(x=><button onClick={()=>setQ(x)} key={x}>{x}</button>)}</div></article>{answer&&<article className="panel ai-answer"><div className="panel-title"><h2>Risposta</h2><Status tone={answer.mode==='ollama'?'ok':'warn'}>{answer.mode==='ollama'?'Ollama':'Ricerca locale'}</Status></div><p>{answer.answer}</p><h3>Fonti ({answer.sources.length})</h3>{answer.sources.map((s:any)=><div className="source" key={s.row_id}><b>{s.descrizione}</b><span>Fattura {s.fattura} · {s.data} · {s.fornitore} · {euro(s.prezzo_unitario)}</span></div>)}</article>}</section></>}
-
-type PdfLayout={brand:string;document_title:string;show_unit:boolean;show_tax:boolean;show_notes:boolean;paper_size:'A4'|'Letter'|'80mm';font_scale:number};
-const DEFAULT_LAYOUT:PdfLayout={brand:'EYE SUPREMO',document_title:'FATTURA',show_unit:true,show_tax:true,show_notes:true,paper_size:'A4',font_scale:1};
-
-type OfflineStatus={
-  cached_invoices:number;reported_total?:number|null;complete:boolean;synced_at?:string|null;cached_documents:number;catalog_path:string;documents_path:string;central_configured:boolean;storage_configured:boolean;
+type Hotel = { id: number; code: string; name: string };
+type BatchItem = {
+  filename: string;
+  ok: boolean;
+  error?: string;
+  preview?: any;
+  confirmed?: boolean;
+  confirmError?: string;
+  result?: any;
 };
 
-type UpdateStatus={
-  current_version:string;
-  latest_version?:string|null;
-  update_available?:boolean;
-  available?:boolean;
-  auto_check:boolean;
-  auto_install:boolean;
-  release_notes?:string|null;
-  html_url?:string|null;
-  asset_name?:string|null;
-  reason?:string|null;
-  error?:string|null;
-  checked?:boolean;
-};
+export function ImportPage() {
+  const input = useRef<HTMLInputElement>(null),
+    [busy, setBusy] = useState(false),
+    [items, setItems] = useState<BatchItem[]>([]),
+    [selectedJob, setSelectedJob] = useState<number | undefined>(),
+    [error, setError] = useState(""),
+    [done, setDone] = useState("");
+  const preview = items.find(
+    (x) => x.ok && x.preview?.job_id === selectedJob,
+  )?.preview;
+  const ready = items.filter((x) => x.ok && !x.confirmed).length;
+  const confirmed = items.filter((x) => x.confirmed).length;
+  const failed = items.filter((x) => !x.ok || x.confirmError).length;
 
-export function SettingsPage(){
- const [data,setData]=useState<any>(),[status,setStatus]=useState<any>(),[storage,setStorage]=useState<any>(),[offline,setOffline]=useState<OfflineStatus|null>(null),[offlineBusy,setOfflineBusy]=useState(false),[users,setUsers]=useState<any[]>(),[pins,setPins]=useState<Record<number,string>>({}),[layout,setLayout]=useState<PdfLayout>(DEFAULT_LAYOUT),[updates,setUpdates]=useState<UpdateStatus|null>(null),[updBusy,setUpdBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState('');
- const restoreInput=useRef<HTMLInputElement>(null);
- useEffect(()=>{api('/settings').then(setData);api('/ollama/status').then(setStatus);api('/storage/status').then(setStorage).catch(()=>null);api<OfflineStatus>('/offline/status').then(setOffline).catch(()=>setOffline(null));api<any[]>('/auth/users').then(setUsers).catch(()=>setUsers(undefined));api<PdfLayout>('/pdf-layout').then(setLayout).catch(()=>setLayout(DEFAULT_LAYOUT));api<UpdateStatus>('/updates/status').then(setUpdates).catch(()=>setUpdates(null))},[]);
- async function save(){await api('/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});setMessage('Impostazioni salvate')}
- async function saveLayout(){setError('');try{const result=await api<PdfLayout>('/pdf-layout',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(layout)});setLayout(result);setMessage('Layout PDF salvato')}catch(e:any){setError(e.message)}}
- async function backup(){const r:any=await api('/backups',{method:'POST'});setMessage(`Backup creato: ${r.filename}`)}
- async function restore(file:File){if(!confirm('Ripristinare questo backup? Prima verrà creato automaticamente un backup di sicurezza.'))return;setError('');setMessage('');const body=new FormData();body.append('file',file);try{const res=await fetch('/api/backups/restore',{method:'POST',body});if(!res.ok)throw new Error(await res.text());const result=await res.json();setMessage(`Ripristino completato. Backup di sicurezza: ${result.safety_backup}.`)}catch(e:any){setError(e.message)}finally{if(restoreInput.current)restoreInput.current.value=''}}
- async function savePin(userId:number){setError('');try{await api(`/auth/users/${userId}/pin`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pins[userId]})});setMessage('PIN aggiornato');setPins({...pins,[userId]:''});setUsers(await api('/auth/users'))}catch(e:any){setError(e.message)}}
- async function refreshUpdates(){setUpdBusy(true);setError('');try{setUpdates(await api<UpdateStatus>('/updates/status'))}catch(e:any){setError(e.message)}finally{setUpdBusy(false)}}
- async function syncOffline(downloadDocuments=false){setOfflineBusy(true);setError('');setMessage('');try{const r:any=await api(`/offline/sync?download_documents=${downloadDocuments?'true':'false'}`,{method:'POST'});setOffline(await api<OfflineStatus>('/offline/status'));setMessage(downloadDocuments?`Modalità offline pronta: ${r.cached_invoices} fatture, ${r.documents_downloaded} file disponibili localmente.`:`Catalogo offline sincronizzato: ${r.cached_invoices} fatture.`)}catch(e:any){setError(e.message)}finally{setOfflineBusy(false)}}
- async function saveUpdatePrefs(next:{auto_check?:boolean;auto_install?:boolean}){setError('');try{const saved=await api<{auto_check:boolean;auto_install:boolean}>('/updates/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});setUpdates(u=>u?{...u,...saved}:u);setMessage('Preferenze aggiornamenti salvate')}catch(e:any){setError(e.message)}}
- async function downloadUpdate(){if(!confirm('Scaricare e avviare l\'installer? Eye Supremo si chiuderà durante l\'aggiornamento. I dati restano in LOCALAPPDATA.'))return;setUpdBusy(true);setError('');try{const result:any=await api('/updates/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({install:true})});setMessage(result.install?.launched?`Installer avviato (${result.latest_version}). Segui la procedura e riapri l'app.`:`Scaricato ${result.filename}. Avvio installer non riuscito: ${result.install?.error||'sconosciuto'}`)}catch(e:any){setError(e.message)}finally{setUpdBusy(false)}}
- return <><PageHeader title="Impostazioni" subtitle="Aggiornamenti, archivio, IA locale, utenti, Storage e backup"/><div className="settings-layout"><aside className="settings-nav">{['Aggiornamenti','Utenti','IA locale','Storage','Backup','PDF'].map((x,i)=><button className={i===0?'active':''} key={x}>{x}</button>)}</aside><section className="panel settings-form">
- <div className="panel-title"><h2>Aggiornamenti</h2>{updates&&<Status tone={updates.available?'warn':(updates.reason&&!updates.latest_version?'warn':'ok')}>{updates.available?'Nuova versione':(updates.reason&&!updates.latest_version?'Release assente':'Aggiornato')}</Status>}</div>
- {message&&<div className="success">{message}</div>}{error&&<div className="error">{error}</div>}
- {updates?<div className="preview-grid">
-  <label>Versione installata<input readOnly value={updates.current_version}/></label>
-  <label>Ultima su GitHub<input readOnly value={updates.latest_version||'—'}/></label>
-  <label className="checkbox-row"><span>Controlla all&apos;avvio</span><input type="checkbox" checked={updates.auto_check} onChange={e=>saveUpdatePrefs({auto_check:e.target.checked})}/></label>
-  <label className="checkbox-row"><span>Installa automaticamente</span><input type="checkbox" checked={updates.auto_install} onChange={e=>saveUpdatePrefs({auto_install:e.target.checked})}/></label>
- </div>:<p>Stato aggiornamenti non disponibile.</p>}
- {updates?.available&&<div className="warning">Disponibile <b>v{updates.latest_version}</b>{updates.asset_name?` · ${updates.asset_name}`:''}. I PC scaricano da GitHub Releases.</div>}
- {updates?.reason&&!updates.available&&<div className="warning">{updates.reason}</div>}
- {updates?.error&&<div className="error">{updates.error}</div>}
- {updates?.release_notes&&<pre className="update-notes">{updates.release_notes}</pre>}
- <div className="form-actions">
-  <button className="secondary-btn" disabled={updBusy} onClick={refreshUpdates}><RefreshCw/>Controlla ora</button>
-  <button className="primary-btn" disabled={updBusy||!updates?.available} onClick={downloadUpdate}>Scarica e installa</button>
-  {updates?.html_url&&<a className="secondary-btn" href={updates.html_url} target="_blank" rel="noreferrer">Apri release</a>}
- </div>
- <p style={{fontSize:12,opacity:.75,marginTop:8}}>Gli aggiornamenti arrivano da GitHub Releases (<code>EyeSupremo-Setup.exe</code>). Serve una release pubblicata (tag <code>v*</code>). Con «Installa automaticamente» i PC aggiornano da soli al controllo.</p>
- <hr/><div className="panel-title"><h2>Utenti e PIN</h2></div>{users?users.map(u=><div key={u.id} className="user-pin-row"><div><b>{u.display_name}</b><small>{u.username} · {u.role_name} · {u.pin_configured?'PIN ok':'PIN mancante'}</small></div><input inputMode="numeric" placeholder="Nuovo PIN 6–12" value={pins[u.id]||''} onChange={e=>setPins({...pins,[u.id]:e.target.value.replace(/\D/g,'')})}/><button className="secondary-btn" disabled={(pins[u.id]||'').length<6} onClick={()=>savePin(u.id)}>Salva PIN</button></div>):<p>Solo lo Sviluppatore gestisce i PIN (incluso il Caricatore).</p>}<hr/><div className="panel-title"><h2>IA locale e Ollama</h2><Status tone={status?.available?'ok':'warn'}>{status?.available?'Connesso':'Non disponibile'}</Status></div>{data&&<><label>URL Ollama<input value={data.ollama_url} onChange={e=>setData({...data,ollama_url:e.target.value})}/></label><label>Modello chat<input value={data.chat_model} onChange={e=>setData({...data,chat_model:e.target.value})}/></label><label>Modello embedding<input value={data.embedding_model} onChange={e=>setData({...data,embedding_model:e.target.value})}/></label><div className="form-actions"><button className="secondary-btn" onClick={()=>api('/ollama/status').then(setStatus)}><RefreshCw/>Test connessione</button><button className="primary-btn" onClick={save}><Save/>Salva</button></div></>}<hr/><h2>Supabase Storage (solo file)</h2>{storage?<div className={storage.configured?'success':'warning'}><b>{storage.mode}</b>{storage.message?` — ${storage.message}`:` · bucket ${storage.bucket}`}<div style={{marginTop:8,fontSize:11}}>Configura le variabili Supabase legacy documentate nel file <code>.env</code>.</div></div>:<p>Stato Storage non disponibile.</p>}<hr/><div className="panel-title"><h2>Modalità offline</h2>{offline&&<Status tone={offline.complete?'ok':'warn'}>{offline.complete?'Pronta':'Da sincronizzare'}</Status>}</div>{offline?<><div className="preview-grid"><label>Fatture locali/cache<input readOnly value={offline.cached_invoices}/></label><label>Totale centrale<input readOnly value={offline.reported_total??'—'}/></label><label>Documenti locali<input readOnly value={offline.cached_documents}/></label><label>Ultima sincronizzazione<input readOnly value={offline.synced_at?new Date(offline.synced_at).toLocaleString('it-IT'):'Mai'}/></label></div><p style={{fontSize:12,opacity:.78}}>Eye Supremo legge la copia locale anche senza Internet. «Sincronizza catalogo» scarica tutti i metadati; «Prepara offline completo» prova a salvare anche PDF/XML originali nella cartella locale.</p><div className="form-actions"><button className="secondary-btn" disabled={offlineBusy||!offline.central_configured} onClick={()=>syncOffline(false)}><RefreshCw/>{offlineBusy?'Sincronizzazione…':'Sincronizza catalogo'}</button><button className="primary-btn" disabled={offlineBusy||!offline.central_configured||!offline.storage_configured} onClick={()=>syncOffline(true)}><DatabaseBackup/>Prepara offline completo</button></div><small>Catalogo: <code>{offline.catalog_path}</code><br/>Documenti: <code>{offline.documents_path}</code></small></>:<p>Stato offline non disponibile.</p>}<hr/><h2>Backup locale</h2><p>ZIP di database, allegati e configurazione.</p><div className="form-actions"><button className="secondary-btn" onClick={backup}><DatabaseBackup/>Crea backup ora</button><button className="secondary-btn" onClick={()=>restoreInput.current?.click()}><RotateCcw/>Ripristina backup</button><input ref={restoreInput} hidden type="file" accept=".zip" onChange={e=>e.target.files?.[0]&&restore(e.target.files[0])}/></div><hr/><h2>Layout PDF</h2><label>Brand<input value={layout.brand} onChange={e=>setLayout({...layout,brand:e.target.value})}/></label><label>Titolo documento<input value={layout.document_title} onChange={e=>setLayout({...layout,document_title:e.target.value})}/></label><label>Formato carta<select value={layout.paper_size} onChange={e=>setLayout({...layout,paper_size:e.target.value as PdfLayout['paper_size']})}><option>A4</option><option>Letter</option><option>80mm</option></select></label><label>Scala testo<input type="number" min="0.75" max="1.5" step="0.05" value={layout.font_scale} onChange={e=>setLayout({...layout,font_scale:Number(e.target.value)})}/></label><div className="preview-grid"><label><span>Mostra unità</span><input type="checkbox" checked={layout.show_unit} onChange={e=>setLayout({...layout,show_unit:e.target.checked})}/></label><label><span>Mostra IVA</span><input type="checkbox" checked={layout.show_tax} onChange={e=>setLayout({...layout,show_tax:e.target.checked})}/></label><label><span>Mostra note</span><input type="checkbox" checked={layout.show_notes} onChange={e=>setLayout({...layout,show_notes:e.target.checked})}/></label></div><div className="form-actions"><button className="secondary-btn" onClick={()=>setLayout(DEFAULT_LAYOUT)}><RefreshCw/>Ripristina default</button><button className="primary-btn" onClick={saveLayout}><Save/>Salva layout PDF</button></div></section></div></>}
+  async function upload(files: File[]) {
+    if (!files.length) return;
+    setBusy(true);
+    setError("");
+    setDone("");
+    setItems([]);
+    setSelectedJob(undefined);
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file));
+    try {
+      const headers: Record<string, string> = { "X-Eye-Role": currentRole() };
+      if (currentSession()) headers["X-Eye-Session"] = currentSession();
+      const res = await fetch("/api/eye/invoices/import/preview-batch", {
+        method: "POST",
+        headers,
+        body,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
+      const batch: BatchItem[] = result.items || [];
+      setItems(batch);
+      const first = batch.find((x) => x.ok && x.preview);
+      if (first) setSelectedJob(first.preview.job_id);
+      setDone(
+        `${result.ready} fatture pronte${result.failed ? ` · ${result.failed} file scartati` : ""}`,
+      );
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+      if (input.current) input.current.value = "";
+    }
+  }
 
-export function SystemPage(){const [logs,setLogs]=useState<any[]>();useEffect(()=>{api<any[]>('/logs').then(setLogs)},[]);return <><PageHeader title="Sistema" subtitle="Stato applicazione e registro attività"/><section className="panel list-panel">{logs?.length?<div className="log-list">{logs.map(l=><div className="log" key={l.id}><Status tone={l.severity==='error'?'danger':'ok'}>{l.event_type}</Status><span>{l.message}</span><time>{new Date(l.created_at).toLocaleString('it-IT')}</time></div>)}</div>:<Empty title="Nessun evento" text="Le operazioni importanti verranno registrate qui."/>}</section></>}
+  async function confirmOne(index: number) {
+    const item = items[index];
+    if (!item?.ok || !item.preview || item.confirmed) return;
+    try {
+      const result: any = await eyeApi(
+        `/invoices/import/${item.preview.job_id}/confirm`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      setItems((current) =>
+        current.map((x, i) =>
+          i === index
+            ? { ...x, confirmed: true, confirmError: undefined, result }
+            : x,
+        ),
+      );
+      return true;
+    } catch (e: any) {
+      setItems((current) =>
+        current.map((x, i) =>
+          i === index ? { ...x, confirmError: e.message } : x,
+        ),
+      );
+      return false;
+    }
+  }
+
+  async function confirmAll() {
+    setBusy(true);
+    setError("");
+    let ok = 0,
+      bad = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].ok && !items[i].confirmed) {
+        (await confirmOne(i)) ? ok++ : bad++;
+      }
+    }
+    setDone(`${ok} fatture salvate${bad ? ` · ${bad} da verificare` : ""}`);
+    setBusy(false);
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Importa fatture"
+        subtitle="Archivio unico Apice · multi-file e ZIP · massimo 100 fatture per lotto"
+      />
+      <section className="import-layout">
+        <article
+          className="panel dropzone"
+          onClick={() => input.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            upload(Array.from(e.dataTransfer.files));
+          }}
+        >
+          <UploadCloud />
+          <h2>
+            {busy ? "Operazione in corso…" : "Trascina qui fatture o uno ZIP"}
+          </h2>
+          <p>
+            Puoi selezionare più XML/TXT/PDF insieme oppure uno ZIP. Eye Supremo
+            estrae e analizza fino a 100 fatture per lotto.
+          </p>
+          <p>XML FatturaPA, TXT, PDF · massimo 100 MB per file</p>
+          <p>
+            ZIP · massimo 120 MB · massimo 200 MB estratti · fino a 100 fatture
+          </p>
+          <button className="primary-btn">Seleziona file</button>
+          <input
+            ref={input}
+            hidden
+            multiple
+            type="file"
+            accept=".xml,.txt,.pdf,.zip"
+            onChange={(e) => upload(Array.from(e.target.files || []))}
+          />
+          {error && <div className="error">{error}</div>}
+          {done && <div className="success">{done}</div>}
+        </article>
+
+        {items.length > 0 ? (
+          <article className="panel preview">
+            <div className="panel-title">
+              <h2>Lotto importazione</h2>
+              <Status tone={failed ? "warn" : "ok"}>
+                {confirmed}/{items.length} salvate
+              </Status>
+            </div>
+            <div className="form-actions">
+              <button
+                className="primary-btn"
+                disabled={busy || ready === 0}
+                onClick={confirmAll}
+              >
+                <FileCheck />
+                Conferma tutte ({ready})
+              </button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Stato</th>
+                    <th>Fornitore</th>
+                    <th>Totale</th>
+                    <th>Azione</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, i) => (
+                    <tr
+                      key={`${item.filename}-${i}`}
+                      className={
+                        item.preview?.job_id === selectedJob ? "active-row" : ""
+                      }
+                      onClick={() =>
+                        item.preview && setSelectedJob(item.preview.job_id)
+                      }
+                    >
+                      <td>{item.filename}</td>
+                      <td>
+                        {item.confirmed ? (
+                          <Status tone="ok">Salvata</Status>
+                        ) : item.confirmError ? (
+                          <Status tone="danger">Da verificare</Status>
+                        ) : item.ok ? (
+                          <Status tone="ok">Pronta</Status>
+                        ) : (
+                          <Status tone="danger">Scartata</Status>
+                        )}
+                      </td>
+                      <td>
+                        {item.preview?.supplier?.ragione_sociale ||
+                          item.error ||
+                          item.confirmError ||
+                          "—"}
+                      </td>
+                      <td>
+                        {item.preview?.invoice?.totale != null
+                          ? euro(Number(item.preview.invoice.totale))
+                          : "—"}
+                      </td>
+                      <td>
+                        {item.ok && !item.confirmed && (
+                          <button
+                            className="secondary-btn"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              confirmOne(i);
+                            }}
+                          >
+                            Conferma
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        ) : (
+          <article className="panel preview">
+            <Empty
+              title="Import multiplo"
+              text="Seleziona fino a 100 fatture oppure uno ZIP. I file non supportati vengono scartati senza bloccare il resto del lotto."
+            />
+          </article>
+        )}
+      </section>
+
+      {preview && (
+        <section className="panel preview" style={{ marginTop: 16 }}>
+          <div className="panel-title">
+            <h2>Anteprima · {preview.filename}</h2>
+            <Status tone={preview.confidence > 0.8 ? "ok" : "warn"}>
+              {Math.round(preview.confidence * 100)}% confidenza
+            </Status>
+          </div>
+          <div className="preview-grid">
+            <label>
+              Fornitore
+              <input readOnly value={preview.supplier.ragione_sociale || ""} />
+            </label>
+            <label>
+              Numero
+              <input readOnly value={preview.invoice.numero || ""} />
+            </label>
+            <label>
+              Data
+              <input readOnly type="date" value={preview.invoice.data || ""} />
+            </label>
+            <label>
+              Totale
+              <input readOnly value={preview.invoice.totale ?? ""} />
+            </label>
+          </div>
+          {preview.duplicate_matches?.length > 0 && (
+            <div className="warning">
+              Possibile duplicato: #{preview.duplicate_matches.join(", #")}
+            </div>
+          )}
+          <h3>{preview.rows.length} righe rilevate</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Descrizione</th>
+                  <th>Quantità</th>
+                  <th>Unità</th>
+                  <th>Prezzo</th>
+                  <th>Confidenza</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((r: any, i: number) => (
+                  <tr key={i}>
+                    <td>{r.descrizione_originale}</td>
+                    <td>{r.quantita}</td>
+                    <td>{r.unita_originale || "—"}</td>
+                    <td>{euro(Number(r.prezzo_unitario))}</td>
+                    <td>{Math.round(r.confidence * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
+  const [q, setQ] = useState(""),
+    [answer, setAnswer] = useState<any>(),
+    [busy, setBusy] = useState(false),
+    [hotel, setHotel] = useState(""),
+    [hotels, setHotels] = useState<Hotel[]>([]);
+  useEffect(() => {
+    eyeApi<Hotel[]>("/hotels").then(setHotels);
+  }, []);
+  async function ask() {
+    if (!q.trim()) return;
+    setBusy(true);
+    try {
+      setAnswer(
+        await eyeApi("/agents/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q, hotel_code: hotel || undefined }),
+        }),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  const examples = reviewOnly
+    ? [
+        "Quali sono le 5 camere migliori?",
+        "Quali servizi hanno più problemi?",
+        "Qual è il sentiment del Giò?",
+        "Confronta le recensioni degli hotel",
+      ]
+    : [
+        "Qual è la fattura con il totale più alto?",
+        "Chi mi vende meglio i bomboloni?",
+        "Quanto è aumentata l’acqua naturale?",
+        "Confronta il prezzo di un prodotto tra i fornitori",
+      ];
+  const invoiceRows = answer?.context?.invoice_rows || [];
+  return (
+    <>
+      <PageHeader
+        title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
+        subtitle={
+          reviewOnly
+            ? "Analisi separata di recensioni, camere, servizi e ranking"
+            : "Cerca fatture, prodotti, fornitori e prezzi nell’archivio locale"
+        }
+      >
+        {reviewOnly && (
+          <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
+            <option value="">Tutti gli hotel</option>
+            {hotels.map((h) => (
+              <option key={h.code} value={h.code}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </PageHeader>
+      <section className="ai-layout">
+        <article className="panel ai-hero">
+          <BrainCircuit />
+          <h2>Cosa vuoi sapere?</h2>
+          <div className="ask-box">
+            <textarea
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void ask();
+                }
+              }}
+              placeholder={
+                reviewOnly
+                  ? "Es. Quali sono le camere peggiori del Giò?"
+                  : "Es. Qual è la fattura con il totale più alto? Chi mi vende meglio i bomboloni?"
+              }
+            />
+            <button className="primary-btn" onClick={ask}>
+              {busy ? "Agenti al lavoro…" : "Chiedi"}
+            </button>
+          </div>
+          <div className="examples">
+            {examples.map((x) => (
+              <button onClick={() => setQ(x)} key={x}>
+                {x}
+              </button>
+            ))}
+          </div>
+        </article>
+        {answer && (
+          <article className="panel ai-answer">
+            <div className="panel-title">
+              <h2>Risposta</h2>
+              <Status
+                tone={answer.mode === "orchestrated-ollama" ? "ok" : "warn"}
+              >
+                {answer.mode === "orchestrated-ollama"
+                  ? "Qwen + agenti"
+                  : "Agenti locali"}
+              </Status>
+            </div>
+            <p>{answer.answer}</p>
+            {answer.agents?.length > 0 && (
+              <small>
+                Agenti: {answer.agents.map((a: any) => a.name).join(" → ")}
+              </small>
+            )}
+            {answer.verification?.warnings?.map((w: string) => (
+              <div className="warning" key={w}>
+                {w}
+              </div>
+            ))}
+            {answer.context?.invoice_summary && (
+              <small>
+                Righe pertinenti: {answer.context.invoice_summary.rows} · Totale
+                righe: {euro(answer.context.invoice_summary.row_total)}
+              </small>
+            )}
+            {invoiceRows.length > 0 && (
+              <div className="table-wrap" style={{ marginTop: 16 }}>
+                <h3>Dati verificati</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Prodotto</th>
+                      <th>Fornitore</th>
+                      <th>Data</th>
+                      <th>Quantità</th>
+                      <th>Prezzo unit.</th>
+                      <th>Prezzo normalizzato</th>
+                      <th>Totale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceRows.map((r: any, i: number) => (
+                      <tr key={`${r.row_id || r.invoice_id}-${i}`}>
+                        <td>
+                          <b>{r.description || "—"}</b>
+                        </td>
+                        <td>{r.supplier || "—"}</td>
+                        <td>{r.date || "—"}</td>
+                        <td>
+                          {r.quantity ?? "—"} {r.unit || ""}
+                        </td>
+                        <td>
+                          {r.unit_price != null
+                            ? euro(Number(r.unit_price))
+                            : "—"}
+                        </td>
+                        <td>
+                          {r.normalized_price != null
+                            ? `${euro(Number(r.normalized_price))} / ${r.unit || "unità"}`
+                            : "Non disponibile"}
+                        </td>
+                        <td>
+                          {r.row_total != null
+                            ? euro(Number(r.row_total))
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </article>
+        )}
+      </section>
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const user = currentUser();
+  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const [data, setData] = useState<any>(),
+    [status, setStatus] = useState<any>(),
+    [sync, setSync] = useState<any>(),
+    [centralSync, setCentralSync] = useState<any>(),
+    [syncBusy, setSyncBusy] = useState(false),
+    [syncError, setSyncError] = useState(""),
+    [hotels, setHotels] = useState<Hotel[]>([]),
+    [activeTab, setActiveTab] = useState("IA locale");
+  useEffect(() => {
+    if (canManage) {
+      api("/settings").then(setData);
+      api("/ollama/status").then(setStatus);
+      loadSyncStatus();
+      eyeApi<Hotel[]>("/hotels").then(setHotels).catch(() => setHotels([]));
+    }
+  }, []);
+  if (!canManage)
+    return (
+      <>
+        <PageHeader
+          title="Impostazioni"
+          subtitle="Area gestione locale"
+        />
+        <section className="panel">
+          <Empty
+            title="Accesso riservato"
+            text="Il profilo corrente non può modificare configurazione, utenti o backup."
+          />
+        </section>
+      </>
+    );
+  async function save() {
+    await api("/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    alert("Impostazioni salvate");
+  }
+  async function backup() {
+    const r: any = await api("/backups", { method: "POST" });
+    alert(`Backup creato: ${r.filename}`);
+  }
+  async function loadSyncStatus() {
+    try {
+      const [bridge, central] = await Promise.all([
+        eyeApi<any>("/sync/status"),
+        eyeApi<any>("/central/sync/status"),
+      ]);
+      setSync(bridge); setCentralSync(central); setSyncError("");
+    } catch (error: any) { setSyncError(error.message || "Stato sincronizzazione non disponibile"); }
+  }
+  async function refreshCentralCache() {
+    setSyncBusy(true); setSyncError("");
+    try { await eyeApi("/central/sync", { method: "POST" }); await loadSyncStatus(); }
+    catch (error: any) { setSyncError(error.message || "Aggiornamento cache non riuscito"); }
+    finally { setSyncBusy(false); }
+  }
+  const tabs = [
+    "Generali",
+    "Hotel",
+    "Utenti e ruoli",
+    "Esclusioni fatture",
+    "IA locale",
+    "Sincronizzazione",
+    "Backup",
+    "Sicurezza",
+  ];
+  return (
+    <>
+      <PageHeader
+        title="Impostazioni"
+        subtitle="Utenti, IA locale, sincronizzazione, backup e sicurezza"
+      />
+      <div className="settings-layout">
+        <aside className="settings-nav">
+          {tabs.map((x) => (
+            <button
+              className={activeTab === x ? "active" : ""}
+              key={x}
+              onClick={() => setActiveTab(x)}
+            >
+              {x}
+            </button>
+          ))}
+        </aside>
+        <section className="panel settings-form">
+          <div className="panel-title">
+            <h2>{activeTab}</h2>
+            <Status
+              tone={
+                activeTab === "IA locale" && status?.available ? "ok" : "warn"
+              }
+            >
+              {activeTab === "IA locale"
+                ? status?.available
+                  ? "Connesso"
+                  : "Non disponibile"
+                : "Sezione pronta"}
+            </Status>
+          </div>
+          {activeTab === "Utenti e ruoli" && <UserAdmin />}
+          {activeTab === "Hotel" && (
+            <>
+              <p>Hotel disponibili per la destinazione delle fatture e per le recensioni.</p>
+              {hotels.length ? <div className="settings-hotel-list">{hotels.map((hotel) => <div key={hotel.id}><b>{hotel.name}</b><span>{hotel.code}</span></div>)}</div> : <Empty title="Nessun hotel configurato" text="Gli hotel compariranno qui quando saranno disponibili nell’archivio locale." />}
+            </>
+          )}
+          {activeTab === "Generali" && data && (
+            <>
+              <label>Dimensione massima importazione<input value={`${data.max_upload_mb} MB`} readOnly /></label>
+              <label>Tema interfaccia<select value={data.theme || "zenify"} onChange={(e) => setData({...data, theme: e.target.value})}><option value="zenify">Zenify arancio</option><option value="classic">Classico blu</option></select></label>
+              <div className="form-actions"><button className="primary-btn" onClick={save}>Salva</button></div>
+            </>
+          )}
+          {activeTab === "IA locale" && data && (
+            <>
+              <label>
+                URL Ollama
+                <input
+                  value={data.ollama_url}
+                  onChange={(e) =>
+                    setData({ ...data, ollama_url: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Modello chat
+                <input
+                  value={data.chat_model}
+                  onChange={(e) =>
+                    setData({ ...data, chat_model: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Modello embedding
+                <input
+                  value={data.embedding_model}
+                  onChange={(e) =>
+                    setData({ ...data, embedding_model: e.target.value })
+                  }
+                />
+              </label>
+              <div className="form-actions">
+                <button
+                  className="secondary-btn"
+                  onClick={() => api("/ollama/status").then(setStatus)}
+                >
+                  <RefreshCw />
+                  Test IA
+                </button>
+                <button className="primary-btn" onClick={save}>
+                  Salva
+                </button>
+              </div>
+            </>
+          )}
+          {activeTab === "Esclusioni fatture" && <Empty title="Esclusioni fatture" text="Le righe di servizio, consegna, carburante e altre spese non prodotto restano ricercabili senza entrare nel catalogo prodotti." />}
+          {activeTab === "Sincronizzazione" && <div className="sync-settings"><div className="sync-status-grid"><article><span>Ponte push-pull</span><b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b><small>{sync?.mode || "local-first"}</small></article><article><span>Cache fatture locale</span><b>{centralSync?.count ?? "—"}</b><small>{centralSync?.state || "mai aggiornata"}</small></article><article><span>Ultimo aggiornamento</span><b>{centralSync?.last_sync_at ? new Date(centralSync.last_sync_at).toLocaleString("it-IT") : "Mai"}</b><small>Supabase → locale</small></article></div><p>{centralSync?.configured ? "La cache locale può essere aggiornata manualmente. Le fatture importate vengono inviate al centrale quando il collegamento è disponibile." : "Supabase centrale non configurato: l'app continua a lavorare offline in locale."}</p>{syncError&&<div className="error">{syncError}</div>}<div className="form-actions"><button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}><RefreshCw size={15}/>Aggiorna stato</button><button className="primary-btn" onClick={refreshCentralCache} disabled={syncBusy || !centralSync?.configured}><RefreshCw size={15}/>{syncBusy ? "Sincronizzo…" : "Aggiorna cache locale"}</button></div></div>}
+          {activeTab === "Backup" && <><p>Crea una copia locale del database e delle configurazioni correnti.</p><button className="secondary-btn" onClick={backup}><DatabaseBackup />Crea backup ora</button></>}
+          {activeTab === "Sicurezza" && <Empty title="Accesso locale" text="Gli utenti accedono con PIN locale. Sviluppatore e Supremo hanno attualmente lo stesso livello operativo." />}
+        </section>
+      </div>
+    </>
+  );
+}
+
+export function SystemPage() {
+  const user = currentUser();
+  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const [logs, setLogs] = useState<any[]>();
+  const [update, setUpdate] = useState<any>();
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateError, setUpdateError] = useState("");
+  async function checkForUpdate() {
+    setUpdateBusy(true); setUpdateError("");
+    try { setUpdate(await eyeApi<any>("/updates/check")); }
+    catch (error: any) { setUpdateError(error.message || "Controllo aggiornamenti non riuscito"); }
+    finally { setUpdateBusy(false); }
+  }
+  async function downloadUpdate() {
+    setUpdateBusy(true); setUpdateError("");
+    try {
+      const response = await fetch("/api/eye/updates/download", { headers: { "X-Eye-Session": currentSession() } });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = url; link.download = update?.asset_name || "EyeSupremo-Setup.exe"; link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) { setUpdateError(error.message || "Download aggiornamento non riuscito"); }
+    finally { setUpdateBusy(false); }
+  }
+  useEffect(() => {
+    if (canManage) api<any[]>("/logs").then(setLogs);
+    checkForUpdate();
+  }, []);
+  const updatePanel = <section className="panel update-panel"><div className="panel-title"><h2>Aggiornamenti</h2><button className="secondary-btn" onClick={checkForUpdate} disabled={updateBusy}><RefreshCw size={15}/> Controlla</button></div>{updateError&&<div className="error">{updateError}</div>}{update?.update_available?<><p>È disponibile Eye Supremo {update.latest_version} (versione installata {update.current_version}).</p><button className="primary-btn" onClick={downloadUpdate} disabled={updateBusy}><Download size={16}/> Scarica installer aggiornato</button></>:<p>{updateBusy?"Controllo la GitHub Release…":update?`Eye Supremo è aggiornato alla versione ${update.current_version}.`:"Controllo versione non ancora eseguito."}</p>}</section>;
+  if (!canManage)
+    return (<><PageHeader title="Sistema" subtitle="Stato applicazione e aggiornamenti" />{updatePanel}<section className="panel"><Empty title="Accesso riservato" text="I log di sistema sono disponibili solo allo Sviluppatore." /></section></>);
+  return (
+    <>
+      <PageHeader
+        title="Sistema"
+        subtitle="Stato applicazione e registro attività"
+      />
+      {updatePanel}
+      <section className="panel list-panel">
+        {logs?.length ? (
+          <div className="log-list">
+            {logs.map((l) => (
+              <div className="log" key={l.id}>
+                <Status tone={l.severity === "error" ? "danger" : "ok"}>
+                  {l.event_type}
+                </Status>
+                <span>{l.message}</span>
+                <time>{new Date(l.created_at).toLocaleString("it-IT")}</time>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="Nessun evento"
+            text="Le operazioni importanti verranno registrate qui."
+          />
+        )}
+      </section>
+    </>
+  );
+}

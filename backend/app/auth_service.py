@@ -4,28 +4,12 @@ import secrets
 from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from .auth_models import ROLES, LocalCredential, LocalSession, UserProfile
+from .auth_models import LocalCredential, LocalSession
+from .models import UserProfile
 
 PBKDF2_ITERATIONS = 310_000
 SESSION_HOURS = 12
-
-DEFAULT_USERS = (
-    ("sviluppatore", "Sviluppatore", "developer", True),
-    ("supremo", "Supremo", "supremo", False),
-    ("livello1", "Utente Livello 1", "level1", False),
-    ("livello2", "Utente Livello 2", "level2", False),
-    ("livello3", "Utente Livello 3", "level3", False),
-    ("caricatore", "Caricatore fatture", "uploader", False),
-)
-
-
-def seed_users(db: Session) -> None:
-    for username, display, role, manage in DEFAULT_USERS:
-        existing = db.scalar(select(UserProfile).where(UserProfile.username == username))
-        if existing:
-            continue
-        db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=manage))
-    db.commit()
+DEFAULT_PIN = "000000"
 
 
 def auth_configured(db: Session) -> bool:
@@ -83,9 +67,7 @@ def session_user(db: Session, raw_token: str | None) -> UserProfile | None:
     if not session:
         return None
     if session.expires_at < datetime.now():
-        db.delete(session)
-        db.commit()
-        return None
+        db.delete(session); db.commit(); return None
     return db.get(UserProfile, session.user_id)
 
 
@@ -95,23 +77,4 @@ def revoke_session(db: Session, raw_token: str | None) -> None:
     digest = hashlib.sha256(raw_token.encode()).hexdigest()
     session = db.get(LocalSession, digest)
     if session:
-        db.delete(session)
-        db.commit()
-
-
-def serialize_user(user: UserProfile) -> dict:
-    return {
-        "id": user.id,
-        "username": user.username,
-        "display_name": user.display_name,
-        "role_name": user.role_name,
-        "can_manage_config": user.can_manage_config,
-        "is_uploader": user.role_name == "uploader",
-    }
-
-
-def require_role(user: UserProfile, allowed: set[str]) -> None:
-    if user.role_name not in allowed and user.role_name not in ROLES:
-        raise PermissionError("Ruolo non valido")
-    if user.role_name not in allowed:
-        raise PermissionError("Permesso negato per questo ruolo")
+        db.delete(session); db.commit()

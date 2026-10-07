@@ -1,60 +1,41 @@
-const SESSION_KEY = 'eye-supremo.session';
-const USER_KEY = 'eye-supremo.user';
-const LEGACY_SESSION_KEY = 'randfatture.session';
-const LEGACY_USER_KEY = 'randfatture.user';
+export const currentUser = () => {
+  try{return JSON.parse(localStorage.getItem('eye-supremo.user')||'null')}catch{return null}
+};
+export const currentRole = () => currentUser()?.role_name || 'developer';
+export const currentSession = () => localStorage.getItem('eye-supremo.session') || '';
 
-export type AuthUser = {
-  id: number;
-  username: string;
-  display_name: string;
-  role_name: string;
-  can_manage_config?: boolean;
-  is_uploader?: boolean;
+const securedHeaders = (initial?:HeadersInit) => {
+  const headers = new Headers(initial || {});
+  headers.set('X-Eye-Role', currentRole());
+  const session=currentSession();
+  if(session)headers.set('X-Eye-Session',session);
+  return headers;
 };
 
-export function saveAuth(payload: {session: string; user: AuthUser}) {
-  localStorage.setItem(SESSION_KEY, payload.session);
-  localStorage.setItem(USER_KEY, JSON.stringify(payload.user));
-  localStorage.removeItem(LEGACY_SESSION_KEY);
-  localStorage.removeItem(LEGACY_USER_KEY);
-}
-
-export function clearAuth() {
-  localStorage.removeItem(SESSION_KEY);
-  localStorage.removeItem(USER_KEY);
-  localStorage.removeItem(LEGACY_SESSION_KEY);
-  localStorage.removeItem(LEGACY_USER_KEY);
-}
-
-export function currentSession() {
-  return localStorage.getItem(SESSION_KEY) || localStorage.getItem(LEGACY_SESSION_KEY);
-}
-
-export function currentUser(): AuthUser | null {
-  const raw = localStorage.getItem(USER_KEY) || localStorage.getItem(LEGACY_USER_KEY);
-  if (!raw) return null;
+export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
   try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    const response = await fetch(`/api${path}`, {...options, headers:securedHeaders(options?.headers)});
+    if(!response.ok) throw new Error(await response.text());
+    return response.json();
+  } catch(error) {
+    if(error instanceof TypeError) throw new Error('Backend locale non raggiungibile. Avvia Eye Supremo e riprova.');
+    throw error;
   }
-}
-
-export const api = async <T>(path: string, options?: RequestInit): Promise<T> => {
-  const headers = new Headers(options?.headers || {});
-  const session = currentSession();
-  if (session) headers.set('X-Eye-Session', session);
-  const response = await fetch(`/api${path}`, {...options, headers});
-  if (response.status === 401) {
-    clearAuth();
-    window.dispatchEvent(new Event('eye-auth-expired'));
-  }
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
 };
 
-export const euro = (value: number | null | undefined) =>
-  new Intl.NumberFormat('it-IT', {style: 'currency', currency: 'EUR'}).format(value || 0);
+export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
+  try {
+    const response = await fetch(`/api/eye${path}`, {...options, headers:securedHeaders(options?.headers)});
+    if(response.status===401){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
+    if(!response.ok) throw new Error(await response.text());
+    return response.json();
+  } catch(error) {
+    if(error instanceof TypeError) throw new Error('Backend locale non raggiungibile. Avvia Eye Supremo e riprova.');
+    throw error;
+  }
+};
 
-export const shortDate = (value: string) =>
-  new Intl.DateTimeFormat('it-IT').format(new Date(value));
+export const saveAuth=(payload:any)=>{localStorage.setItem('eye-supremo.session',payload.session);localStorage.setItem('eye-supremo.user',JSON.stringify(payload.user))};
+export const clearAuth=()=>{localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user')};
+export const euro = (value:number|null|undefined) => new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(value || 0);
+export const shortDate = (value:string) => new Intl.DateTimeFormat('it-IT').format(new Date(value));

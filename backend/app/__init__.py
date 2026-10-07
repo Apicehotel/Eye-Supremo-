@@ -1,1 +1,1 @@
-"""Eye Supremo backend."""
+"""RandFatture backend."""
