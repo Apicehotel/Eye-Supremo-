@@ -287,11 +287,12 @@ async def ask(payload: dict, db: Session = Depends(get_db)):
     question = str(payload.get("question", "")).strip()
     if not question: raise HTTPException(422, "Domanda vuota")
     records = search_records(db, question, 20)
-    return await answer_with_ollama(question, records)
+    return await answer_with_ollama(question, records, db)
 
 
 @router.get("/ollama/status")
-async def ollama(): return await ollama_status()
+async def ollama(db: Session = Depends(get_db)):
+    return await ollama_status(db)
 
 
 def detect_anomalies(db: Session):
@@ -337,14 +338,24 @@ def logs(limit: int = Query(100, le=500), db: Session = Depends(get_db)): return
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
     stored = {x.key: x.value for x in db.scalars(select(AppSetting)).all()}
-    return {"ollama_url": stored.get("ollama_url", settings.ollama_url), "chat_model": stored.get("chat_model", settings.chat_model), "embedding_model": stored.get("embedding_model", settings.embedding_model), "max_upload_mb": settings.max_upload_mb}
+    return {
+        "ollama_url": stored.get("ollama_url", settings.ollama_url),
+        "chat_model_fast": stored.get("chat_model_fast", settings.chat_model_fast),
+        "chat_model": stored.get("chat_model", settings.chat_model),
+        "embedding_model": stored.get("embedding_model", settings.embedding_model),
+        "ai_layer_policy": stored.get("ai_layer_policy", settings.ai_layer_policy),
+        "max_upload_mb": settings.max_upload_mb,
+    }
 
 
 @router.put("/settings")
 def put_settings(payload: dict, db: Session = Depends(get_db)):
-    allowed = {"ollama_url", "chat_model", "embedding_model", "theme"}
+    allowed = {"ollama_url", "chat_model_fast", "chat_model", "embedding_model", "ai_layer_policy", "theme"}
     for key, value in payload.items():
-        if key in allowed: db.merge(AppSetting(key=key, value=str(value)))
+        if key in allowed:
+            if key == "ai_layer_policy" and str(value) not in {"fast_first", "fast_only", "quality"}:
+                raise HTTPException(422, "Policy IA non valida")
+            db.merge(AppSetting(key=key, value=str(value)))
     audit(db, "settings.updated", "Impostazioni aggiornate"); db.commit(); return {"ok": True}
 
 

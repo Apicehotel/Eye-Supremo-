@@ -8,7 +8,7 @@ Eye Supremo è un monolite modulare **local-first** con API FastAPI, UI React e 
 2. **API locale** — FastAPI su loopback (`127.0.0.1`).
 3. **Dominio** — fatture, hotel, recensioni, camere, ranking, ruoli, alert, sync.
 4. **Ricerca** — SQLite FTS5 + prefix index + SQL + RapidFuzz.
-5. **IA** — Ollama/Qwen, utilizzato dopo il retrieval locale.
+5. **IA** — layer mirror Ollama: modello veloce di default, qualità in escalation; usato dopo il retrieval locale.
 6. **Persistenza** — SQLite WAL in `%LOCALAPPDATA%\EyeSupremo` nel pacchetto Windows.
 7. **Bridge remoto opzionale** — Supabase JWT + Edge Function + oggetti sincronizzati per hotel.
 

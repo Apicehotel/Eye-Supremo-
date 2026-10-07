@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 from ..ai_service import eye_ai_answer
 from ..config import settings
 from ..central_service import central_invoice_detail, central_invoice_search, central_product_detail, central_supplier_detail, central_supplier_page, configured as central_configured
-from ..central_cache import cache_status, cached_search, refresh_central_cache
+from ..central_cache import cache_status, cached_row_search, cached_search, refresh_central_cache
 from ..central_service import central_review_upsert
-from ..review_cache import refresh_review_cache, review_cache_status
+from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
 from ..database import SessionLocal, get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
@@ -184,20 +184,51 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
     if q:
         stmt = stmt.where(Review.text.ilike(f"%{q}%"))
     ordered = stmt.order_by(Review.date.desc())
-    items = db.scalars(ordered.limit(limit) if limit is not None else ordered).unique().all()
+    fetch_limit = limit if limit is not None else 500
+    items = db.scalars(ordered.limit(fetch_limit)).unique().all()
     result = [{
         "id": r.id, "hotel": r.hotel.name, "hotel_code": r.hotel.code, "room": r.room.code if r.room else None,
         "author": r.author, "source": r.source, "rating": float(r.rating) if r.rating is not None else None,
         "date": r.date.isoformat(), "text": r.text,
         "tags": [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in r.tags],
+        "origin": "local",
     } for r in items]
-    cached = db.scalars(select(CentralReviewCache)).all()
-    if not cached and background_tasks is not None and central_configured():
+    status = review_cache_status(db)
+    # Cache PC first; sync Supabase solo in background.
+    if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_review_cache)
-    local_ids = {r.sync_uuid for r in items}
-    for c in cached:
-        p = json.loads(c.payload_json)
-        if c.sync_uuid not in local_ids and (not hotel_code or c.hotel_code == hotel_code) and (not q or q.lower() in c.text.lower()): result.append({"id": f"remote:{c.sync_uuid}", "hotel": c.hotel_code, "hotel_code": c.hotel_code, "room": c.room_code, "author": c.author, "source": c.source, "rating": float(c.rating) if c.rating is not None else None, "date": c.review_date.isoformat(), "text": c.text, "tags": []})
+    if status["count"] and len(result) < fetch_limit:
+        local_ids = {r.sync_uuid for r in items if r.sync_uuid}
+        allowed_codes = None
+        if hotel_code:
+            allowed_codes = {hotel_code}
+        else:
+            allowed = allowed_hotel_ids(db, role, username)
+            if allowed is not None:
+                allowed_codes = {h.code for h in db.scalars(select(Hotel).where(Hotel.id.in_(allowed))).all()} if allowed else set()
+        cached_items = cached_review_search(
+            db,
+            q,
+            hotel_code=hotel_code,
+            limit=fetch_limit - len(result),
+            exclude_sync_uuids=local_ids,
+        )
+        for item in cached_items:
+            if allowed_codes is not None and item.get("hotel_code") not in allowed_codes:
+                continue
+            result.append({
+                "id": f"cache:{item['sync_uuid']}",
+                "hotel": item.get("hotel") or item.get("hotel_code"),
+                "hotel_code": item.get("hotel_code"),
+                "room": item.get("room"),
+                "author": item.get("author"),
+                "source": item.get("source"),
+                "rating": item.get("rating"),
+                "date": item.get("date"),
+                "text": item.get("text"),
+                "tags": [],
+                "origin": "sqlite-cache",
+            })
     return result[:limit] if limit is not None else result
 
 
@@ -302,19 +333,30 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), of
     try:
         status = cache_status(db)
         if status["count"]:
+            # Cache PC first: più veloce di Supabase; sync solo in background.
+            if background_tasks is not None and central_configured():
+                background_tasks.add_task(refresh_central_cache)
+            if q.strip():
+                row_items = cached_row_search(db, q, limit)
+                if row_items:
+                    return {
+                        "enabled": True,
+                        "local": True,
+                        "items": row_items,
+                        "count": len(row_items),
+                        "source": "sqlite-cache",
+                        "sync": status,
+                    }
             cached = cached_search(db, q, limit, offset)
-            # The central indexed view contains the invoice rows needed for
-            # product/family searches. Query it first so a cache hit on the
-            # invoice header cannot hide the matching purchased item.
-            if not q.strip() and cached["items"]:
-                return cached | {"source": "sqlite-cache", "sync": status}
-    finally: db.close()
-    if background_tasks is not None:
+            return cached | {"source": "sqlite-cache", "sync": status}
+    finally:
+        db.close()
+    # Cache vuota: unica occasione in cui Ask/liste battono Supabase.
+    if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_central_cache)
     central = await central_invoice_search(q, limit)
     if central.get("items") or not central.get("message"):
-        return central
-    # Supabase can be unavailable while the local SQLite cache is still valid.
+        return central | {"source": "supabase"}
     db = SessionLocal()
     try:
         cached = cached_search(db, q, limit, offset)
