@@ -205,6 +205,16 @@ def test_product_catalog_merges_same_content_for_non_water_products():
     assert any("cioccolato" in row["nome_canonico"] for row in rows)
 
 
+def test_product_catalog_merges_equivalent_packs_for_same_product():
+    rows = merge_product_catalog([
+        {"id": 1, "nome_canonico": "bev pago ace 24x200 ml", "purchases": 1, "avg_price": 16.9},
+        {"id": 2, "nome_canonico": "pago ace cl 20 x 24", "purchases": 2, "avg_price": 15.4},
+    ])
+    assert len(rows) == 1
+    assert rows[0]["purchases"] == 3
+    assert len(rows[0]["canonical_names"]) == 2
+
+
 def test_max_invoice_context_chooses_highest_between_local_and_central(db):
     supplier = Supplier(ragione_sociale="Locale Test"); db.add(supplier); db.flush()
     db.add(Invoice(supplier_id=supplier.id, numero="LOCAL-1", data=date(2026, 1, 1), imponibile=900, iva=198, totale=1098))

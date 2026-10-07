@@ -183,6 +183,10 @@ def product_content_group(item: dict) -> tuple[str, str] | None:
     family = re.sub(r"\b\d+(?:[.,]\d+|\s+\d+)?\s*(?:kg|kili|chili|chilo|kilo|grammi|grammo|gr|g|hg|etti|etto|litri|litro|ltr|lt|l|ml|cl|cc|dl|pezzi|pezzo|pcs|pc|pz|n|nr|num)\b", " ", family)
     family = re.sub(r"\b(?:kg|kili|chili|chilo|kilo|grammi|grammo|gr|g|hg|etti|etto|litri|litro|ltr|lt|l|ml|cl|cc|dl)\s*\d+(?:[.,]\d+|\s+\d+)?\b", " ", family)
     family = re.sub(r"\b(?:conf|confez|confezione|confezioni)\s+(?:da\s+)?\d+\b", " ", family)
+    # Suppliers alternate between ``20 cl x 24`` and ``24 x 200 ml``.
+    # Remove the complete package marker from the identity; the normalized
+    # content remains the grouping key.
+    family = re.sub(r"\b\d+\s*x\s*\d+(?:[.,]\d+)?\s*(?:kg|g|gr|l|lt|ml|cl)\b", " ", family)
     family = re.sub(r"\b\d+\s*(?:pz|pezzi|pcs|pc|n|nr|num)\b|\bx\s*\d+\b", " ", family)
     family = re.sub(r"\b(?:pz|pcs|pc|n|nr|num)\s*\d+\b|\bx\b", " ", family)
     family = re.sub(r"\b(?:conf|confez|confezione|confezioni|da|in)\b", " ", family)
@@ -258,13 +262,13 @@ def merge_product_catalog(items: list[dict], collapse_family: str | None = None)
     # ``biscotti marca-a`` and ``biscotti marca-b`` are one comparison row.
     ignored_family_tokens = {
         "acqua", "bottiglia", "confezione", "confezioni", "naturale", "frizzante",
-        "gassata", "gas", "nat", "pet", "pezzo", "pezzi", "prodotto", "tipo",
+        "gassata", "gas", "nat", "pet", "pezzo", "pezzi", "prodotto", "tipo", "bev", "beve", "bevanda", "bevande",
     }
 
     def family_tokens(family: str) -> set[str]:
         return {
             token for token in family.split()
-            if len(token) >= 5 and token not in ignored_family_tokens and not token.isdigit()
+            if len(token) >= 3 and token not in ignored_family_tokens and not token.isdigit()
         }
 
     group_keys = list(groups)
