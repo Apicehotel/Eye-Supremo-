@@ -1,10 +1,17 @@
+import asyncio
+import json
+from datetime import date
+from decimal import Decimal
+
 from app.agent_orchestrator import (
     AGENTS,
     _compact_for_llm,
     _deterministic_answer,
     _needs_price_history,
+    _product_context,
     classify_intent,
 )
+from app.models import CentralInvoiceCache
 
 
 def test_router_sends_price_question_to_product_price_and_verifier():
@@ -68,3 +75,35 @@ def test_deterministic_short_circuit_for_max_invoice():
 def test_price_history_gate_skips_heavy_report_for_plain_lookup():
     assert _needs_price_history("Chi mi vende meglio i bomboloni?") is True
     assert _needs_price_history("mostra solo il codice fattura XYZ") is False
+
+
+def test_product_context_uses_local_cache_not_supabase(db, monkeypatch):
+    payload = {
+        "rows": [{
+            "original_description": "ACQUA NATURALE 1.5L",
+            "normalized_description": "acqua naturale 1.5l",
+            "quantity": 10,
+            "unit_price": 0.4,
+            "line_total": 4.0,
+            "analysis_status": "product",
+        }]
+    }
+    db.add(CentralInvoiceCache(
+        source_hash="cache-acqua",
+        invoice_number="A-1",
+        invoice_date=date(2026, 2, 1),
+        supplier_name="Acqua Spa",
+        total=Decimal("4"),
+        search_text="A-1 Acqua Spa ACQUA NATURALE 1.5L",
+        payload_json=json.dumps(payload),
+    ))
+    db.commit()
+
+    async def boom(*_a, **_k):
+        raise AssertionError("Ask non deve chiamare Supabase se la cache locale ha dati")
+
+    monkeypatch.setattr("app.central_service.central_invoice_search", boom)
+    context = asyncio.run(_product_context("acqua naturale", "developer"))
+    assert context["invoice_rows"]
+    assert context["invoice_rows"][0]["source"] == "sqlite-cache"
+    assert "ACQUA" in str(context["invoice_rows"][0]["description"]).upper()

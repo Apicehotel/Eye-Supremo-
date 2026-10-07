@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..ai_service import eye_ai_answer
 from ..config import settings
 from ..central_service import central_invoice_detail, central_invoice_search, central_product_detail, central_supplier_detail, central_supplier_page, configured as central_configured
-from ..central_cache import cache_status, cached_search, refresh_central_cache
+from ..central_cache import cache_status, cached_row_search, cached_search, refresh_central_cache
 from ..central_service import central_review_upsert
 from ..review_cache import refresh_review_cache, review_cache_status
 from ..database import SessionLocal, get_db
@@ -302,19 +302,30 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), of
     try:
         status = cache_status(db)
         if status["count"]:
+            # Cache PC first: più veloce di Supabase; sync solo in background.
+            if background_tasks is not None and central_configured():
+                background_tasks.add_task(refresh_central_cache)
+            if q.strip():
+                row_items = cached_row_search(db, q, limit)
+                if row_items:
+                    return {
+                        "enabled": True,
+                        "local": True,
+                        "items": row_items,
+                        "count": len(row_items),
+                        "source": "sqlite-cache",
+                        "sync": status,
+                    }
             cached = cached_search(db, q, limit, offset)
-            # The central indexed view contains the invoice rows needed for
-            # product/family searches. Query it first so a cache hit on the
-            # invoice header cannot hide the matching purchased item.
-            if not q.strip() and cached["items"]:
-                return cached | {"source": "sqlite-cache", "sync": status}
-    finally: db.close()
-    if background_tasks is not None:
+            return cached | {"source": "sqlite-cache", "sync": status}
+    finally:
+        db.close()
+    # Cache vuota: unica occasione in cui Ask/liste battono Supabase.
+    if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_central_cache)
     central = await central_invoice_search(q, limit)
     if central.get("items") or not central.get("message"):
-        return central
-    # Supabase can be unavailable while the local SQLite cache is still valid.
+        return central | {"source": "supabase"}
     db = SessionLocal()
     try:
         cached = cached_search(db, q, limit, offset)

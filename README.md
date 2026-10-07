@@ -163,6 +163,10 @@ Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
 
 Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
 
+**Ask performante:** contesto ridotto (max ~12 righe), report storico solo se serve, risposte fattuali (es. fattura più alta / spese semplici) senza Ollama, generazione corta su modello veloce con `keep_alive` e cache dei modelli installati.
+
+**Cache PC prima di Supabase:** Ask e le liste fatture centrali leggono la cache SQLite locale (`central_invoice_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
+
 Modelli inclusi nel completamento automatico:
 
 ```text

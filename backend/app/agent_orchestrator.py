@@ -9,8 +9,8 @@ from typing import Any, Awaitable
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from .central_cache import cached_row_search
 from .database import SessionLocal
-from .central_service import central_invoice_search
 from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
@@ -261,23 +261,10 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         lowered_question = question.lower()
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        # Le fatture centrali possono essere sincronizzate localmente per testata
-        # senza caricare subito tutte le righe. In quel caso l'agente usa la
-        # ricerca deterministica centrale, mantenendo Qwen fuori dal database.
+        # Preferisci la cache SQLite locale (già sincronizzata) rispetto a Supabase:
+        # sul PC ufficio è molto più veloce e funziona anche offline.
         if not rows:
-            words = [x for x in re.findall(r"[a-zàèéìòù0-9]+", question.lower())
-                     if len(x) >= 5 and x not in {"quanto", "quale", "quali", "vende", "meglio", "fammi", "mostra", "classifica"}]
-            candidates = []
-            if words:
-                term = words[-1]
-                candidates.append(term)
-                if term.endswith(("i", "e")) and len(term) > 5:
-                    candidates.append(term[:-1])
-            central = {"items": [], "count": 0}
-            for term in candidates or [question]:
-                central = await central_invoice_search(term, limit=ASK_ROW_LIMIT)
-                if central.get("items"):
-                    break
+            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
             rows = [{
                 "row_id": item.get("id"),
                 "invoice_id": item.get("source_hash") or item.get("id"),
@@ -291,7 +278,8 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 "normalized_price": None,
                 "unit": None,
                 "analysis_status": item.get("analysis_status") or "product",
-            } for item in central.get("items", [])]
+                "source": "sqlite-cache",
+            } for item in cached_items]
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
 
