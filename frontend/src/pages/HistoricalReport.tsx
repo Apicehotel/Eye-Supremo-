@@ -9,10 +9,11 @@ type SupplierBlock={supplier_id:number;supplier:string;unit:string;manufacturer:
 type Report={query:string;summary:any;suppliers:SupplierBlock[];dates:string[];units:string[];comparison_note:string;matches?:Array<{canonical_name:string;canonical_names?:string[];brand?:string|null;purchases?:number;avg_price?:number|null}>};
 
 type Suggestion={nome_canonico:string;canonical_names?:string[];purchases?:number;avg_price?:number|null;marca?:string|null;unita_base?:string|null};
-function HistorySearch({value,onChange,onSearch,disabled,placeholder}:{value:string;onChange:(value:string)=>void;onSearch:(value?:string)=>void;disabled?:boolean;placeholder:string}){
+function HistorySearch({value,onChange,onSearch,disabled,closeSignal,placeholder}:{value:string;onChange:(value:string)=>void;onSearch:(value?:string)=>void;disabled?:boolean;closeSignal?:number;placeholder:string}){
  const [items,setItems]=useState<Suggestion[]>([]),[open,setOpen]=useState(false);
  useEffect(()=>{if(disabled)setOpen(false)},[disabled]);
- useEffect(()=>{let active=true;const query=value.trim();if(query.length<2){setItems([]);return}const timer=window.setTimeout(async()=>{try{const result=await api<Suggestion[]>(`/products?q=${encodeURIComponent(query)}&limit=8`);if(active){setItems(result.slice(0,8));setOpen(true)}}catch{if(active)setItems([])}},220);return()=>{active=false;window.clearTimeout(timer)}},[value]);
+ useEffect(()=>{setOpen(false)},[closeSignal]);
+ useEffect(()=>{let active=true;const query=value.trim();if(query.length<2){setItems([]);return}const timer=window.setTimeout(async()=>{try{const result=await api<Suggestion[]>(`/products?q=${encodeURIComponent(query)}&limit=8`);if(active&&!disabled){setItems(result.slice(0,8));setOpen(true)}}catch{if(active)setItems([])}},220);return()=>{active=false;window.clearTimeout(timer)}},[value,disabled]);
  return <div className="hist-autocomplete"><SearchBox value={value} onChange={v=>{onChange(v);setOpen(true)}} onEnter={()=>{setOpen(false);onSearch()}} placeholder={placeholder}/>{open&&value.trim().length>=2&&items.length>0&&<div className="hist-suggestions" role="listbox" aria-label="Suggerimenti prodotto">{items.map(item=>{const searchValue=item.nome_canonico.toLowerCase()==='acqua'?'acqua':item.canonical_names?.[0]||item.nome_canonico;return <button type="button" role="option" key={item.nome_canonico} onMouseDown={e=>e.preventDefault()} onClick={()=>{setOpen(false);onChange(item.nome_canonico);onSearch(searchValue)}}><b>{item.nome_canonico}</b><small>{item.marca||'Prodotto'}{item.purchases!=null?` · ${item.purchases} acquisti`:''}{item.avg_price!=null?` · media normalizzata ${euro(Number(item.avg_price))}${item.unita_base?`/${item.unita_base}`:''}`:''}</small></button>})}</div>}</div>
 }
 
