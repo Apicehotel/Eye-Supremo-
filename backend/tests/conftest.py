@@ -3,6 +3,8 @@ from pathlib import Path
 
 TEST_DIR = Path(tempfile.mkdtemp(prefix="eye-supremo-tests-"))
 os.environ["EYESUPREMO_DATA_DIR"] = str(TEST_DIR)
+# Evita download rete durante i test automatici.
+os.environ["EYESUPREMO_CACHE_BOOTSTRAP_ON_START"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient

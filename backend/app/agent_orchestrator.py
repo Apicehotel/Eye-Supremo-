@@ -6,17 +6,24 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable
 
-import httpx
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from .config import settings
+from .central_cache import cached_row_search
 from .database import SessionLocal
-from .central_service import central_invoice_search
 from .eye_services import invoice_search_summary, review_rankings
+from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
+from .review_cache import cached_review_search
 from .search_index import invoice_search
+
+# Limiti snelli per Ask: meno token, meno SQL, risposta più rapida sui PC ufficio.
+ASK_ROW_LIMIT = 12
+ASK_REVIEW_LIMIT = 8
+ASK_HISTORY_LIMIT = 180
+ASK_NUM_PREDICT = 260
+ASK_NUM_CTX = 3072
 
 
 @dataclass(frozen=True)
@@ -31,7 +38,7 @@ AGENTS: dict[str, AgentSpec] = {
     "products": AgentSpec("products", "Trova prodotti, alias e corrispondenze pulite", ("invoice_search", "historical_product_report")),
     "classifier": AgentSpec("classifier", "Classifica Food & Beverage / Non Food e sottocategorie", ("structured_qwen",)),
     "invoices": AgentSpec("invoices", "Interpreta dati fattura e fornitori", ("invoice_search",)),
-    "prices": AgentSpec("prices", "Calcola storico, medie, minimi e variazioni", ("historical_product_report",)),
+    "prices": AgentSpec("prices", "Calcola storico, medie, minimi e variazioni", ("historical_product_report")),
     "reviews": AgentSpec("reviews", "Analizza recensioni, camere, servizi e ranking", ("reviews", "rankings")),
     "verifier": AgentSpec("verifier", "Controlla coerenza, unità e falsi positivi", ("deterministic_checks",)),
     "answer": AgentSpec("answer", "Produce una risposta breve e verificabile", ("structured_qwen",)),
@@ -39,9 +46,15 @@ AGENTS: dict[str, AgentSpec] = {
 
 # Usiamo radici lessicali, non parole intere, così singolare/plurale e piccole
 # variazioni italiane non mandano la domanda allo specialista sbagliato.
-PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "meglio", "storic", "medi", "minim", "massim")
-REVIEW_HINTS = ("recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking")
+PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "storic", "fattur", "acquist", "spes")
+PRODUCT_SOFT_HINTS = ("meglio", "medi", "minim", "massim", "confront")
+REVIEW_HINTS = (
+    "recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking",
+    "sentiment", "ospit", "booking", "tripadvisor", "google", "rumor", "wifi", "wi-fi",
+    "check-in", "checkin", "parchegg", "piscina", "bagno", "letto", "cuscino",
+)
 CLASSIFY_HINTS = ("categor", "classific", "food", "beverage", "non food", "tipologi")
+PRICE_HISTORY_HINTS = ("prezz", "storic", "medi", "minim", "massim", "aument", "confront", "variaz", "meglio", "cost", "quanto")
 
 
 def _asks_for_max_invoice(question: str) -> bool:
@@ -60,6 +73,22 @@ def _asks_for_max_invoice(question: str) -> bool:
             "piu costosa",
         )
     )
+
+
+def _needs_price_history(question: str) -> bool:
+    q = question.lower()
+    return any(x in q for x in PRICE_HISTORY_HINTS)
+
+
+def _is_simple_spend_question(question: str) -> bool:
+    """Somme/conteggi chiari: risposta SQLite senza passare da Ollama."""
+    q = question.lower()
+    spend = any(x in q for x in ("quanto", "spes", "somma", "quante ", "totale speso", "ho speso"))
+    complex_ = any(
+        x in q
+        for x in ("meglio", "confront", "aument", "storic", "classific", "perché", "perche", "analizz", "ranking", "sentiment")
+    )
+    return spend and not complex_
 
 
 def _max_invoice_context(db: Session) -> dict[str, Any] | None:
@@ -109,23 +138,118 @@ def _max_invoice_context(db: Session) -> dict[str, Any] | None:
     return max(candidates, key=lambda item: item["total"]) if candidates else None
 
 
-def classify_intent(question: str) -> list[str]:
+def classify_intent(question: str, *, area: str = "all") -> list[str]:
+    """Sceglie gli specialisti. `area`: all | invoices | reviews."""
     q = question.lower()
+    mode = (area or "all").strip().lower()
+    if mode not in {"all", "invoices", "reviews"}:
+        mode = "all"
+
+    review_hit = any(x in q for x in REVIEW_HINTS)
+    hard_product = any(x in q for x in PRODUCT_HINTS) or any(x in q for x in CLASSIFY_HINTS)
+    soft_product = any(x in q for x in PRODUCT_SOFT_HINTS)
+    # "camere migliori": review_hit vince su soft product; "vende meglio" resta prodotti.
+    product_hit = hard_product or (soft_product and not review_hit)
+
     agents: list[str] = []
-    if any(x in q for x in REVIEW_HINTS):
+    if mode == "reviews":
         agents.append("reviews")
-    if any(x in q for x in PRODUCT_HINTS):
-        agents.extend(["products", "prices"])
-    if any(x in q for x in CLASSIFY_HINTS):
-        agents.append("classifier")
-    if not agents:
-        agents.append("products")
+        if hard_product:
+            agents.extend(["products", "prices"])
+    elif mode == "invoices":
+        if product_hit or not review_hit:
+            agents.extend(["products", "prices"])
+        if review_hit:
+            agents.append("reviews")
+        if any(x in q for x in CLASSIFY_HINTS):
+            agents.append("classifier")
+    else:
+        # Ask unificato: consulta pure le recensioni, non solo le fatture.
+        if review_hit:
+            agents.append("reviews")
+        if product_hit:
+            agents.extend(["products", "prices"])
+        if any(x in q for x in CLASSIFY_HINTS):
+            agents.append("classifier")
+        if not agents:
+            agents.extend(["products", "reviews"])
+
     ordered: list[str] = []
     for name in agents:
         if name not in ordered:
             ordered.append(name)
     ordered.extend(["verifier", "answer"])
     return ordered
+
+
+def _slim_invoice_rows(rows: list[dict[str, Any]], limit: int = ASK_ROW_LIMIT) -> list[dict[str, Any]]:
+    slim: list[dict[str, Any]] = []
+    for row in rows[:limit]:
+        slim.append({
+            "invoice": row.get("invoice"),
+            "date": row.get("date"),
+            "supplier": row.get("supplier"),
+            "description": str(row.get("description") or "")[:140],
+            "quantity": row.get("quantity"),
+            "unit_price": row.get("unit_price"),
+            "normalized_price": row.get("normalized_price"),
+            "unit": row.get("unit"),
+            "row_total": row.get("row_total"),
+        })
+    return slim
+
+
+def _slim_historical(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not report or not report.get("summary"):
+        return None
+    suppliers = []
+    for block in (report.get("suppliers") or [])[:4]:
+        suppliers.append({
+            "supplier": block.get("supplier"),
+            "unit": block.get("unit"),
+            "average_price": block.get("average_price"),
+            "best_price": block.get("best_price"),
+            "latest_price": block.get("latest_price"),
+            "latest_date": block.get("latest_date"),
+            "observations": block.get("observations"),
+        })
+    return {
+        "summary": report.get("summary"),
+        "suppliers": suppliers,
+        "units": report.get("units") or [],
+        "comparison_note": report.get("comparison_note"),
+    }
+
+
+def _compact_for_llm(context: dict[str, Any]) -> dict[str, Any]:
+    """Contesto ridotto: meno token → generazione molto più veloce."""
+    compact: dict[str, Any] = {}
+    if context.get("invoice_summary"):
+        compact["invoice_summary"] = context["invoice_summary"]
+    if context.get("invoice_rows"):
+        compact["invoice_rows"] = _slim_invoice_rows(context["invoice_rows"])
+    hist = _slim_historical(context.get("historical_product"))
+    if hist:
+        compact["historical_product"] = hist
+    if context.get("max_invoice"):
+        compact["max_invoice"] = context["max_invoice"]
+    if context.get("reviews"):
+        compact["reviews"] = [
+            {
+                "hotel": r.get("hotel"),
+                "room": r.get("room"),
+                "date": r.get("date"),
+                "rating": r.get("rating"),
+                "text": str(r.get("text") or "")[:220],
+                "source": r.get("source"),
+            }
+            for r in (context.get("reviews") or [])[:ASK_REVIEW_LIMIT]
+        ]
+    if context.get("rankings"):
+        compact["rankings"] = context["rankings"]
+    if context.get("verification"):
+        compact["verification"] = context["verification"]
+    return compact
 
 
 def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any]:
@@ -137,17 +261,40 @@ def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any
         tokens = [x for x in re.findall(r"\w+", question.lower()) if len(x) >= 4]
         if tokens:
             stmt = stmt.where(Review.text.ilike(f"%{tokens[-1]}%"))
-        rows = db.execute(stmt.order_by(Review.date.desc()).limit(30)).all()
+        rows = db.execute(stmt.order_by(Review.date.desc()).limit(ASK_REVIEW_LIMIT)).all()
+        reviews = [{
+            "review_id": r.id,
+            "hotel": h.name,
+            "room": room.code if room else None,
+            "date": r.date.isoformat(),
+            "rating": float(r.rating) if r.rating is not None else None,
+            "text": r.text[:280],
+            "source": r.source,
+            "source_origin": "local",
+        } for r, h, room in rows]
+        # Cache PC prima di Supabase: integra recensioni già sincronizzate in SQLite.
+        if len(reviews) < ASK_REVIEW_LIMIT:
+            seen = {str(r.sync_uuid) for r, _, _ in rows if getattr(r, "sync_uuid", None)}
+            cached = cached_review_search(
+                db,
+                question,
+                hotel_id=hotel_id,
+                limit=ASK_REVIEW_LIMIT - len(reviews),
+                exclude_sync_uuids=seen,
+            )
+            for item in cached:
+                reviews.append({
+                    "review_id": item["review_id"],
+                    "hotel": item.get("hotel"),
+                    "room": item.get("room"),
+                    "date": item.get("date"),
+                    "rating": item.get("rating"),
+                    "text": item.get("text"),
+                    "source": item.get("source"),
+                    "source_origin": "sqlite-cache",
+                })
         return {
-            "reviews": [{
-                "review_id": r.id,
-                "hotel": h.name,
-                "room": room.code if room else None,
-                "date": r.date.isoformat(),
-                "rating": float(r.rating) if r.rating is not None else None,
-                "text": r.text[:1200],
-                "source": r.source,
-            } for r, h, room in rows],
+            "reviews": reviews[:ASK_REVIEW_LIMIT],
             "rankings": review_rankings(db, hotel_id=hotel_id, limit=5),
         }
     finally:
@@ -158,29 +305,20 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
     db = SessionLocal()
     try:
         max_invoice = _max_invoice_context(db) if _asks_for_max_invoice(question) else None
-        rows = invoice_search(db, question, role_name=role_name, limit=40)
+        # Domande "fattura più alta": basta la query dedicata, niente ricerca/report pesanti.
+        if max_invoice and _asks_for_max_invoice(question):
+            return {"max_invoice": max_invoice, "invoice_rows": [], "invoice_summary": invoice_search_summary([])}
+
+        rows = invoice_search(db, question, role_name=role_name, limit=ASK_ROW_LIMIT)
         # Keep the bakery product family separate from similarly spelled
         # technical items such as bombole/bombole per pulizia.
         lowered_question = question.lower()
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        # Le fatture centrali possono essere sincronizzate localmente per testata
-        # senza caricare subito tutte le righe. In quel caso l'agente usa la
-        # ricerca deterministica centrale, mantenendo Qwen fuori dal database.
+        # Preferisci la cache SQLite locale (già sincronizzata) rispetto a Supabase:
+        # sul PC ufficio è molto più veloce e funziona anche offline.
         if not rows:
-            words = [x for x in re.findall(r"[a-zàèéìòù0-9]+", question.lower())
-                     if len(x) >= 5 and x not in {"quanto", "quale", "quali", "vende", "meglio", "fammi", "mostra", "classifica"}]
-            candidates = []
-            if words:
-                term = words[-1]
-                candidates.append(term)
-                if term.endswith(("i", "e")) and len(term) > 5:
-                    candidates.append(term[:-1])
-            central = {"items": [], "count": 0}
-            for term in candidates or [question]:
-                central = await central_invoice_search(term, limit=40)
-                if central.get("items"):
-                    break
+            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
             rows = [{
                 "row_id": item.get("id"),
                 "invoice_id": item.get("source_hash") or item.get("id"),
@@ -194,13 +332,17 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 "normalized_price": None,
                 "unit": None,
                 "analysis_status": item.get("analysis_status") or "product",
-            } for item in central.get("items", [])]
+                "source": "sqlite-cache",
+            } for item in cached_items]
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        try:
-            report = historical_product_report(db, question)
-        except Exception:
-            report = None
+
+        report = None
+        if _needs_price_history(question):
+            try:
+                report = historical_product_report(db, question, limit=ASK_HISTORY_LIMIT)
+            except Exception:
+                report = None
         return {
             "invoice_rows": rows,
             "invoice_summary": invoice_search_summary(rows),
@@ -215,6 +357,8 @@ def _verify(context: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
     hist = context.get("historical_product") or {}
     units = {str(x.get("unit")) for x in hist.get("timeline", []) if x.get("unit")}
+    if not units:
+        units = {str(x.get("unit")) for x in (hist.get("suppliers") or []) if x.get("unit")}
     if len(units) > 1:
         warnings.append("Sono presenti unità diverse: confrontare solo prezzi normalizzati compatibili.")
     rows = context.get("invoice_rows") or []
@@ -229,41 +373,124 @@ ANSWER_SCHEMA = {
     "type": "object",
     "properties": {
         "answer": {"type": "string"},
-        "facts": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+        "facts": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
     },
     "required": ["answer", "facts", "confidence"],
 }
 
 
-async def _qwen_structured(question: str, context: dict[str, Any]) -> dict[str, Any]:
+def _deterministic_answer(
+    question: str,
+    context: dict[str, Any],
+    verification: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Risposte fattuali immediate senza Ollama (PC ufficio / latenza bassa)."""
+    max_invoice = context.get("max_invoice")
+    if max_invoice and _asks_for_max_invoice(question):
+        return {
+            "answer": (
+                f"La fattura con il totale più alto è la n. {max_invoice['invoice_number']} "
+                f"di {max_invoice['supplier_name']}, del {max_invoice['invoice_date']}, "
+                f"per € {max_invoice['total']:.2f}."
+            ),
+            "facts": [
+                f"Fattura {max_invoice['invoice_number']}",
+                f"Fornitore {max_invoice['supplier_name']}",
+                f"Totale € {max_invoice['total']:.2f}",
+            ],
+            "confidence": "high",
+        }
+
+    summary = context.get("invoice_summary") or {}
+    rows = context.get("invoice_rows") or []
+    reviews = context.get("reviews") or []
+    hist = context.get("historical_product") or {}
+    hist_summary = hist.get("summary") if isinstance(hist, dict) else None
+
+    if not rows and not reviews and not hist_summary and not max_invoice:
+        return {
+            "answer": "Non ho trovato dati pertinenti nell'archivio locale.",
+            "facts": [],
+            "confidence": "high" if verification.get("ok", True) else "medium",
+        }
+
+    # Solo spese/conteggi espliciti: niente LLM se il summary basta.
+    if (
+        _is_simple_spend_question(question)
+        and rows
+        and summary.get("rows")
+        and not hist_summary
+        and not reviews
+    ):
+        return {
+            "answer": (
+                f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, "
+                f"per € {summary['row_total']:.2f} sulle sole righe trovate."
+            ),
+            "facts": [
+                f"{summary['rows']} righe",
+                f"{summary['invoices']} fatture",
+                f"Totale righe € {summary['row_total']:.2f}",
+            ],
+            "confidence": "high" if verification.get("ok", True) else "medium",
+        }
+    return None
+
+
+async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRuntime) -> dict[str, Any]:
+    compact = _compact_for_llm(context)
     prompt = (
-        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
-        "Non inventare dati. Mantieni separati prodotti con significato diverso anche se simili nel testo. "
-        "Per prezzi usa solo unità confrontabili. Rispondi in italiano, breve e chiaro.\n"
-        f"DOMANDA: {question}\nCONTESTO: {json.dumps(context, ensure_ascii=False, default=str)}"
+        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto. "
+        "Non inventare dati. Italiano, max 3 frasi. "
+        "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
+        "Prezzi solo su unità confrontabili.\n"
+        f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"
     )
-    async with httpx.AsyncClient(timeout=2) as client:
-        status = await client.get(f"{settings.ollama_url}/api/tags")
-        status.raise_for_status()
-    async with httpx.AsyncClient(timeout=60) as client:
-        res = await client.post(f"{settings.ollama_url}/api/generate", json={
-            "model": settings.chat_model,
-            "prompt": prompt,
-            "stream": False,
-            "format": ANSWER_SCHEMA,
-            "options": {"temperature": 0.0, "num_predict": 650},
-        })
-        res.raise_for_status()
-        return json.loads(res.json().get("response", "{}"))
+    return await generate_with_layers(
+        prompt=prompt,
+        runtime=runtime,
+        response_format=ANSWER_SCHEMA,
+        temperature=0.0,
+        num_predict=ASK_NUM_PREDICT,
+        num_ctx=ASK_NUM_CTX,
+        request_timeout=35.0,
+        escalate_on_low_confidence=False,
+    )
 
 
-async def run_orchestrated_query(db: Session, question: str, role_name: str = "developer", hotel_id: int | None = None) -> dict[str, Any]:
-    # `db` resta nella firma perché l'autorizzazione viene risolta dal caller.
-    # Ogni worker parallelo apre una sessione SQLAlchemy separata per SQLite.
+def _public_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Payload UI leggero: niente timeline storiche enormi."""
+    public = {
+        "invoice_summary": context.get("invoice_summary"),
+        "invoice_rows": _slim_invoice_rows(context.get("invoice_rows") or []),
+        "verification": context.get("verification"),
+    }
+    if context.get("max_invoice"):
+        public["max_invoice"] = context["max_invoice"]
+    if context.get("reviews"):
+        public["reviews"] = context["reviews"][:ASK_REVIEW_LIMIT]
+    if context.get("rankings"):
+        public["rankings"] = context["rankings"]
+    hist = _slim_historical(context.get("historical_product"))
+    if hist:
+        public["historical_product"] = hist
+    return public
+
+
+async def run_orchestrated_query(
+    db: Session,
+    question: str,
+    role_name: str = "developer",
+    hotel_id: int | None = None,
+    *,
+    area: str = "all",
+) -> dict[str, Any]:
+    # Runtime IA letto subito: i worker paralleli aprono sessioni SQLite separate.
+    runtime = resolve_ai_runtime(db)
     del db
-    plan = classify_intent(question)
-    context: dict[str, Any] = {}
+    plan = classify_intent(question, area=area)
+    context: dict[str, Any] = {"ask_area": area}
     workers: list[Awaitable[tuple[str, dict[str, Any]]]] = []
 
     async def product_worker():
@@ -284,35 +511,41 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
     verification = _verify(context)
     context["verification"] = verification
 
+    deterministic = _deterministic_answer(question, context, verification)
+    if deterministic:
+        return {
+            "mode": "orchestrated-deterministic",
+            "plan": plan,
+            "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
+            "answer": deterministic["answer"],
+            "facts": deterministic.get("facts", []),
+            "confidence": deterministic.get("confidence", "high"),
+            "verification": verification,
+            "context": _public_context(context),
+            "ai_layer": "deterministic",
+            "ai_model": None,
+            "ai_policy": runtime.policy,
+        }
+
     try:
-        structured = await _qwen_structured(question, context)
+        structured = await _qwen_structured(question, context, runtime)
         answer = str(structured.get("answer", "")).strip()
         if not answer:
             raise ValueError("Risposta vuota")
-        mode = "orchestrated-ollama"
-        confidence = structured.get("confidence", "medium")
-        facts = structured.get("facts", [])
+        return {
+            "mode": "orchestrated-ollama",
+            "plan": plan,
+            "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
+            "answer": answer,
+            "facts": structured.get("facts", []),
+            "confidence": structured.get("confidence", "medium"),
+            "verification": verification,
+            "context": _public_context(context),
+            "ai_layer": structured.get("_layer"),
+            "ai_model": structured.get("_model"),
+            "ai_policy": runtime.policy,
+        }
     except Exception:
-        max_invoice = context.get("max_invoice")
-        if max_invoice:
-            answer = (
-                f"La fattura con il totale più alto è la n. {max_invoice['invoice_number']} "
-                f"di {max_invoice['supplier_name']}, del {max_invoice['invoice_date']}, "
-                f"per € {max_invoice['total']:.2f}."
-            )
-            mode = "orchestrated-deterministic"
-            confidence = "high"
-            facts = []
-            return {
-                "mode": mode,
-                "plan": plan,
-                "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
-                "answer": answer,
-                "facts": facts,
-                "confidence": confidence,
-                "verification": verification,
-                "context": context,
-            }
         summary = context.get("invoice_summary") or {"rows": 0, "invoices": 0, "row_total": 0}
         if summary.get("rows"):
             answer = f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, per € {summary['row_total']:.2f}."
@@ -320,17 +553,16 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
             answer = f"Ho trovato {len(context['reviews'])} recensioni pertinenti nell'archivio locale."
         else:
             answer = "Non ho trovato dati pertinenti nell'archivio locale."
-        mode = "orchestrated-deterministic"
-        confidence = "high" if verification["ok"] else "medium"
-        facts = []
-
-    return {
-        "mode": mode,
-        "plan": plan,
-        "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
-        "answer": answer,
-        "facts": facts,
-        "confidence": confidence,
-        "verification": verification,
-        "context": context,
-    }
+        return {
+            "mode": "orchestrated-deterministic",
+            "plan": plan,
+            "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
+            "answer": answer,
+            "facts": [],
+            "confidence": "high" if verification["ok"] else "medium",
+            "verification": verification,
+            "context": _public_context(context),
+            "ai_layer": "deterministic",
+            "ai_model": None,
+            "ai_policy": runtime.policy,
+        }

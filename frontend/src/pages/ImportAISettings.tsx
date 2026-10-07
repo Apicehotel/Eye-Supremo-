@@ -323,21 +323,42 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     [busy, setBusy] = useState(false),
     [hotel, setHotel] = useState(""),
     [hotels, setHotels] = useState<Hotel[]>([]);
+  const askAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     eyeApi<Hotel[]>("/hotels").then(setHotels);
+    return () => askAbort.current?.abort();
   }, []);
   async function ask() {
-    if (!q.trim()) return;
+    if (!q.trim() || busy) return;
+    askAbort.current?.abort();
+    const controller = new AbortController();
+    askAbort.current = controller;
     setBusy(true);
     try {
       setAnswer(
         await eyeApi("/agents/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q, hotel_code: hotel || undefined }),
+          body: JSON.stringify({
+            question: q,
+            hotel_code: hotel || undefined,
+            // Ask consulta fatture e recensioni; in area recensioni forza solo quelle.
+            area: reviewOnly ? "reviews" : "all",
+            include_reviews: true,
+            review_only: reviewOnly,
+          }),
+          signal: controller.signal,
         }),
       );
+    } catch (error: any) {
+      if (error?.name === "AbortError") return;
+      setAnswer({
+        mode: "orchestrated-deterministic",
+        answer: error?.message || "Richiesta non riuscita",
+        ai_layer: "deterministic",
+      });
     } finally {
+      if (askAbort.current === controller) askAbort.current = null;
       setBusy(false);
     }
   }
@@ -351,30 +372,29 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     : [
         "Qual è la fattura con il totale più alto?",
         "Chi mi vende meglio i bomboloni?",
-        "Quanto è aumentata l’acqua naturale?",
-        "Confronta il prezzo di un prodotto tra i fornitori",
+        "Quali camere hanno più lamentele?",
+        "Confronta recensioni e prezzi di un prodotto",
       ];
   const invoiceRows = answer?.context?.invoice_rows || [];
+  const reviewRows = answer?.context?.reviews || [];
   return (
     <>
       <PageHeader
-        title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
+        title={reviewOnly ? "Analisi IA recensioni" : "Ask Eye Supremo"}
         subtitle={
           reviewOnly
-            ? "Analisi separata di recensioni, camere, servizi e ranking"
-            : "Cerca fatture, prodotti, fornitori e prezzi nell’archivio locale"
+            ? "Analisi di recensioni, camere, servizi e ranking"
+            : "Consulta fatture, prodotti e anche le recensioni dall’archivio locale"
         }
       >
-        {reviewOnly && (
-          <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
-            <option value="">Tutti gli hotel</option>
-            {hotels.map((h) => (
-              <option key={h.code} value={h.code}>
-                {h.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
+          <option value="">Tutti gli hotel</option>
+          {hotels.map((h) => (
+            <option key={h.code} value={h.code}>
+              {h.name}
+            </option>
+          ))}
+        </select>
       </PageHeader>
       <section className="ai-layout">
         <article className="panel ai-hero">
@@ -393,7 +413,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               placeholder={
                 reviewOnly
                   ? "Es. Quali sono le camere peggiori del Giò?"
-                  : "Es. Qual è la fattura con il totale più alto? Chi mi vende meglio i bomboloni?"
+                  : "Es. Fattura più alta, bomboloni, oppure camere con più lamentele…"
               }
             />
             <button className="primary-btn" onClick={ask}>
@@ -416,7 +436,11 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                 tone={answer.mode === "orchestrated-ollama" ? "ok" : "warn"}
               >
                 {answer.mode === "orchestrated-ollama"
-                  ? "Qwen + agenti"
+                  ? answer.ai_layer === "fast"
+                    ? "Layer veloce"
+                    : answer.ai_layer === "quality"
+                      ? "Layer qualità"
+                      : "IA + agenti"
                   : "Agenti locali"}
               </Status>
             </div>
@@ -424,6 +448,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
             {answer.agents?.length > 0 && (
               <small>
                 Agenti: {answer.agents.map((a: any) => a.name).join(" → ")}
+                {answer.ai_model ? ` · modello ${answer.ai_model}` : ""}
               </small>
             )}
             {answer.verification?.warnings?.map((w: string) => (
@@ -435,11 +460,17 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               <small>
                 Righe pertinenti: {answer.context.invoice_summary.rows} · Totale
                 righe: {euro(answer.context.invoice_summary.row_total)}
+                {reviewRows.length
+                  ? ` · Recensioni usate: ${reviewRows.length}`
+                  : ""}
               </small>
+            )}
+            {!answer.context?.invoice_summary && reviewRows.length > 0 && (
+              <small>Recensioni usate: {reviewRows.length}</small>
             )}
             {invoiceRows.length > 0 && (
               <div className="table-wrap" style={{ marginTop: 16 }}>
-                <h3>Dati verificati</h3>
+                <h3>Dati fatture verificati</h3>
                 <table>
                   <thead>
                     <tr>
@@ -484,6 +515,33 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                 </table>
               </div>
             )}
+            {reviewRows.length > 0 && (
+              <div className="table-wrap" style={{ marginTop: 16 }}>
+                <h3>Recensioni consultate</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Hotel</th>
+                      <th>Camera</th>
+                      <th>Data</th>
+                      <th>Voto</th>
+                      <th>Testo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reviewRows.map((r: any, i: number) => (
+                      <tr key={`${r.review_id || i}`}>
+                        <td>{r.hotel || "—"}</td>
+                        <td>{r.room || "—"}</td>
+                        <td>{r.date || "—"}</td>
+                        <td>{r.rating ?? "—"}</td>
+                        <td>{r.text || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </article>
         )}
       </section>
@@ -498,6 +556,7 @@ export function SettingsPage() {
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
     [centralSync, setCentralSync] = useState<any>(),
+    [bootstrap, setBootstrap] = useState<any>(),
     [syncBusy, setSyncBusy] = useState(false),
     [syncError, setSyncError] = useState(""),
     [hotels, setHotels] = useState<Hotel[]>([]),
@@ -510,6 +569,13 @@ export function SettingsPage() {
       eyeApi<Hotel[]>("/hotels").then(setHotels).catch(() => setHotels([]));
     }
   }, []);
+  useEffect(() => {
+    if (!canManage || !bootstrap?.running) return;
+    const timer = window.setInterval(() => {
+      eyeApi<any>("/cache/bootstrap/status").then(setBootstrap).catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [canManage, bootstrap?.running]);
   if (!canManage)
     return (
       <>
@@ -539,18 +605,47 @@ export function SettingsPage() {
   }
   async function loadSyncStatus() {
     try {
-      const [bridge, central] = await Promise.all([
+      const [bridge, central, boot] = await Promise.all([
         eyeApi<any>("/sync/status"),
         eyeApi<any>("/central/sync/status"),
+        eyeApi<any>("/cache/bootstrap/status"),
       ]);
-      setSync(bridge); setCentralSync(central); setSyncError("");
-    } catch (error: any) { setSyncError(error.message || "Stato sincronizzazione non disponibile"); }
+      setSync(bridge);
+      setCentralSync(central);
+      setBootstrap(boot);
+      setSyncError("");
+    } catch (error: any) {
+      setSyncError(error.message || "Stato sincronizzazione non disponibile");
+    }
   }
   async function refreshCentralCache() {
-    setSyncBusy(true); setSyncError("");
-    try { await eyeApi("/central/sync", { method: "POST" }); await loadSyncStatus(); }
-    catch (error: any) { setSyncError(error.message || "Aggiornamento cache non riuscito"); }
-    finally { setSyncBusy(false); }
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      await eyeApi("/central/sync", { method: "POST" });
+      await loadSyncStatus();
+    } catch (error: any) {
+      setSyncError(error.message || "Aggiornamento cache non riuscito");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+  async function downloadOfflineCache(full = false) {
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const boot = await eyeApi<any>("/cache/bootstrap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ background: true, full }),
+      });
+      setBootstrap(boot);
+      await loadSyncStatus();
+    } catch (error: any) {
+      setSyncError(error.message || "Download cache offline non riuscito");
+    } finally {
+      setSyncBusy(false);
+    }
   }
   const tabs = [
     "Generali",
@@ -611,6 +706,10 @@ export function SettingsPage() {
           )}
           {activeTab === "IA locale" && data && (
             <>
+              <p>
+                Layer mirror: il PC usa prima un modello veloce; la qualità interviene solo se serve.
+                I calcoli restano sempre su SQLite locale.
+              </p>
               <label>
                 URL Ollama
                 <input
@@ -621,12 +720,36 @@ export function SettingsPage() {
                 />
               </label>
               <label>
-                Modello chat
+                Policy layer
+                <select
+                  value={data.ai_layer_policy || "fast_first"}
+                  onChange={(e) =>
+                    setData({ ...data, ai_layer_policy: e.target.value })
+                  }
+                >
+                  <option value="fast_first">Veloce prima (PC ufficio)</option>
+                  <option value="fast_only">Solo veloce</option>
+                  <option value="quality">Solo qualità</option>
+                </select>
+              </label>
+              <label>
+                Modello veloce (mirror)
+                <input
+                  value={data.chat_model_fast || "llama3.2:3b"}
+                  onChange={(e) =>
+                    setData({ ...data, chat_model_fast: e.target.value })
+                  }
+                  placeholder="llama3.2:3b"
+                />
+              </label>
+              <label>
+                Modello qualità
                 <input
                   value={data.chat_model}
                   onChange={(e) =>
                     setData({ ...data, chat_model: e.target.value })
                   }
+                  placeholder="qwen3:8b"
                 />
               </label>
               <label>
@@ -638,6 +761,14 @@ export function SettingsPage() {
                   }
                 />
               </label>
+              {status?.layers && (
+                <p className="settings-message">
+                  Sequenza attiva:{" "}
+                  {(status.layers.active_sequence || [])
+                    .map((x: { layer: string; model: string }) => `${x.layer}→${x.model}`)
+                    .join(" · ") || "nessun modello trovato"}
+                </p>
+              )}
               <div className="form-actions">
                 <button
                   className="secondary-btn"
@@ -653,7 +784,72 @@ export function SettingsPage() {
             </>
           )}
           {activeTab === "Esclusioni fatture" && <Empty title="Esclusioni fatture" text="Le righe di servizio, consegna, carburante e altre spese non prodotto restano ricercabili senza entrare nel catalogo prodotti." />}
-          {activeTab === "Sincronizzazione" && <div className="sync-settings"><div className="sync-status-grid"><article><span>Ponte push-pull</span><b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b><small>{sync?.mode || "local-first"}</small></article><article><span>Cache fatture locale</span><b>{centralSync?.count ?? "—"}</b><small>{centralSync?.state || "mai aggiornata"}</small></article><article><span>Ultimo aggiornamento</span><b>{centralSync?.last_sync_at ? new Date(centralSync.last_sync_at).toLocaleString("it-IT") : "Mai"}</b><small>Supabase → locale</small></article></div><p>{centralSync?.configured ? "La cache locale può essere aggiornata manualmente. Le fatture importate vengono inviate al centrale quando il collegamento è disponibile." : "Supabase centrale non configurato: l'app continua a lavorare offline in locale."}</p>{syncError&&<div className="error">{syncError}</div>}<div className="form-actions"><button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}><RefreshCw size={15}/>Aggiorna stato</button><button className="primary-btn" onClick={refreshCentralCache} disabled={syncBusy || !centralSync?.configured}><RefreshCw size={15}/>{syncBusy ? "Sincronizzo…" : "Aggiorna cache locale"}</button></div></div>}
+          {activeTab === "Sincronizzazione" && (
+            <div className="sync-settings">
+              <div className="sync-status-grid">
+                <article>
+                  <span>Ponte push-pull</span>
+                  <b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b>
+                  <small>{sync?.mode || "local-first"}</small>
+                </article>
+                <article>
+                  <span>Cache fatture</span>
+                  <b>{bootstrap?.invoices?.count ?? centralSync?.count ?? "—"}</b>
+                  <small>{bootstrap?.invoices?.state || centralSync?.state || "mai aggiornata"}</small>
+                </article>
+                <article>
+                  <span>Cache recensioni</span>
+                  <b>{bootstrap?.reviews?.count ?? "—"}</b>
+                  <small>{bootstrap?.reviews?.state || "mai aggiornata"}</small>
+                </article>
+                <article>
+                  <span>Bootstrap offline</span>
+                  <b>
+                    {bootstrap?.running
+                      ? "In corso"
+                      : bootstrap?.ready_offline
+                        ? "Pronta"
+                        : bootstrap?.state || "Mai"}
+                  </b>
+                  <small>
+                    {bootstrap?.completed_at
+                      ? new Date(bootstrap.completed_at).toLocaleString("it-IT")
+                      : "Supabase → PC"}
+                  </small>
+                </article>
+              </div>
+              <p>
+                Alla prima installazione Eye Supremo scarica automaticamente fatture e recensioni
+                nella cache del PC. Offline userà solo questi dati già scaricati.
+              </p>
+              {bootstrap?.detail && <p className="settings-message">{bootstrap.detail}</p>}
+              {syncError && <div className="error">{syncError}</div>}
+              <div className="form-actions">
+                <button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}>
+                  <RefreshCw size={15} />
+                  Aggiorna stato
+                </button>
+                <button
+                  className="secondary-btn"
+                  onClick={refreshCentralCache}
+                  disabled={syncBusy || !centralSync?.configured}
+                >
+                  <RefreshCw size={15} />
+                  Solo fatture
+                </button>
+                <button
+                  className="primary-btn"
+                  onClick={() => downloadOfflineCache(true)}
+                  disabled={syncBusy || !bootstrap?.configured}
+                >
+                  <Download size={15} />
+                  {bootstrap?.running || syncBusy
+                    ? "Download in corso…"
+                    : "Scarica tutto per offline"}
+                </button>
+              </div>
+            </div>
+          )}
           {activeTab === "Backup" && <><p>Crea una copia locale del database e delle configurazioni correnti.</p><button className="secondary-btn" onClick={backup}><DatabaseBackup />Crea backup ora</button></>}
           {activeTab === "Sicurezza" && <Empty title="Accesso locale" text="Gli utenti accedono con PIN locale. Sviluppatore e Supremo hanno attualmente lo stesso livello operativo." />}
         </section>

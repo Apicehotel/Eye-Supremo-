@@ -47,10 +47,21 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
   const [data, setData] = useState<Data>();
   const [ollama, setOllama] = useState(false);
   const [showAnnual, setShowAnnual] = useState(false);
+  const [bootstrap, setBootstrap] = useState<any>();
   useEffect(() => {
     api<Data>("/dashboard").then(setData);
     api<any>("/ollama/status").then((x) => setOllama(x.available));
+    eyeApi<any>("/cache/bootstrap/status")
+      .then(setBootstrap)
+      .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (!bootstrap?.running) return;
+    const timer = window.setInterval(() => {
+      eyeApi<any>("/cache/bootstrap/status").then(setBootstrap).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [bootstrap?.running]);
   if (!data) return <Loading />;
   const period =
     data.period?.from && data.period?.to
@@ -105,6 +116,28 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
           </div>
         </div>
       </PageHeader>
+      {bootstrap && (bootstrap.running || bootstrap.state === "never" || bootstrap.state === "error") && (
+        <section className="panel" style={{ marginBottom: 16 }}>
+          <div className="panel-title">
+            <h2>Cache offline</h2>
+            <Status tone={bootstrap.running ? "warn" : bootstrap.ready_offline ? "ok" : "warn"}>
+              {bootstrap.running
+                ? "Download in corso"
+                : bootstrap.ready_offline
+                  ? "Pronta"
+                  : "Da scaricare"}
+            </Status>
+          </div>
+          <p>
+            {bootstrap.detail ||
+              "Alla prima installazione Eye Supremo scarica fatture e recensioni sul PC per lavorarci anche senza Internet."}
+          </p>
+          <small>
+            Fatture in cache: {bootstrap.invoices?.count ?? 0} · Recensioni in cache:{" "}
+            {bootstrap.reviews?.count ?? 0}
+          </small>
+        </section>
+      )}
       <section className="kpi-grid">
         {cards.map(([Icon, label, value, small]) => (
           <article

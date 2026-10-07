@@ -20,16 +20,18 @@ start "" /b "%OLLAMA_EXE%" serve >nul 2>nul
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; 1..30 | %% { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:11434/api/tags | Out-Null; $ok=$true; break } catch { Start-Sleep -Seconds 1 } }; if(-not $ok){ exit 1 }"
 if errorlevel 1 goto :ollama_failed
 echo.
-echo [1/3] Qwen 3 8B - modello principale...
-"%OLLAMA_EXE%" pull qwen3:8b || goto :failed
+echo Layer mirror IA: veloce su PC ufficio, qualita solo se serve.
 echo.
-echo [2/3] Llama 3.2 3B - fallback veloce...
+echo [1/3] Llama 3.2 3B - layer veloce (mirror, default)...
 "%OLLAMA_EXE%" pull llama3.2:3b || goto :failed
+echo.
+echo [2/3] Qwen 3 8B - layer qualita (escalation)...
+"%OLLAMA_EXE%" pull qwen3:8b || goto :failed
 echo.
 echo [3/3] Qwen3 Embedding 0.6B - indice semantico leggero...
 "%OLLAMA_EXE%" pull qwen3-embedding:0.6b || goto :failed
 echo.
-echo Modelli IA pronti. Eye Supremo si aprira automaticamente.
+echo Modelli IA pronti (fast_first). Eye Supremo si aprira automaticamente.
 if /i not "%1"=="/silent" pause
 exit /b 0
 :ollama_failed
