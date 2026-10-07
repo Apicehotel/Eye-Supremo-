@@ -46,8 +46,13 @@ AGENTS: dict[str, AgentSpec] = {
 
 # Usiamo radici lessicali, non parole intere, così singolare/plurale e piccole
 # variazioni italiane non mandano la domanda allo specialista sbagliato.
-PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "meglio", "storic", "medi", "minim", "massim")
-REVIEW_HINTS = ("recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking")
+PRODUCT_HINTS = ("prodott", "prezz", "cost", "fornitor", "vend", "storic", "fattur", "acquist", "spes")
+PRODUCT_SOFT_HINTS = ("meglio", "medi", "minim", "massim", "confront")
+REVIEW_HINTS = (
+    "recension", "camer", "staff", "pulizi", "colazion", "ristor", "servizi", "ranking",
+    "sentiment", "ospit", "booking", "tripadvisor", "google", "rumor", "wifi", "wi-fi",
+    "check-in", "checkin", "parchegg", "piscina", "bagno", "letto", "cuscino",
+)
 CLASSIFY_HINTS = ("categor", "classific", "food", "beverage", "non food", "tipologi")
 PRICE_HISTORY_HINTS = ("prezz", "storic", "medi", "minim", "massim", "aument", "confront", "variaz", "meglio", "cost", "quanto")
 
@@ -133,17 +138,42 @@ def _max_invoice_context(db: Session) -> dict[str, Any] | None:
     return max(candidates, key=lambda item: item["total"]) if candidates else None
 
 
-def classify_intent(question: str) -> list[str]:
+def classify_intent(question: str, *, area: str = "all") -> list[str]:
+    """Sceglie gli specialisti. `area`: all | invoices | reviews."""
     q = question.lower()
+    mode = (area or "all").strip().lower()
+    if mode not in {"all", "invoices", "reviews"}:
+        mode = "all"
+
+    review_hit = any(x in q for x in REVIEW_HINTS)
+    hard_product = any(x in q for x in PRODUCT_HINTS) or any(x in q for x in CLASSIFY_HINTS)
+    soft_product = any(x in q for x in PRODUCT_SOFT_HINTS)
+    # "camere migliori": review_hit vince su soft product; "vende meglio" resta prodotti.
+    product_hit = hard_product or (soft_product and not review_hit)
+
     agents: list[str] = []
-    if any(x in q for x in REVIEW_HINTS):
+    if mode == "reviews":
         agents.append("reviews")
-    if any(x in q for x in PRODUCT_HINTS):
-        agents.extend(["products", "prices"])
-    if any(x in q for x in CLASSIFY_HINTS):
-        agents.append("classifier")
-    if not agents:
-        agents.append("products")
+        if hard_product:
+            agents.extend(["products", "prices"])
+    elif mode == "invoices":
+        if product_hit or not review_hit:
+            agents.extend(["products", "prices"])
+        if review_hit:
+            agents.append("reviews")
+        if any(x in q for x in CLASSIFY_HINTS):
+            agents.append("classifier")
+    else:
+        # Ask unificato: consulta pure le recensioni, non solo le fatture.
+        if review_hit:
+            agents.append("reviews")
+        if product_hit:
+            agents.extend(["products", "prices"])
+        if any(x in q for x in CLASSIFY_HINTS):
+            agents.append("classifier")
+        if not agents:
+            agents.extend(["products", "reviews"])
+
     ordered: list[str] = []
     for name in agents:
         if name not in ordered:
@@ -413,6 +443,7 @@ async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRu
     prompt = (
         "Sei l'agente risposta di Eye Supremo. Usa solo il contesto. "
         "Non inventare dati. Italiano, max 3 frasi. "
+        "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
         "Prezzi solo su unità confrontabili.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"
     )
@@ -447,12 +478,19 @@ def _public_context(context: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
-async def run_orchestrated_query(db: Session, question: str, role_name: str = "developer", hotel_id: int | None = None) -> dict[str, Any]:
+async def run_orchestrated_query(
+    db: Session,
+    question: str,
+    role_name: str = "developer",
+    hotel_id: int | None = None,
+    *,
+    area: str = "all",
+) -> dict[str, Any]:
     # Runtime IA letto subito: i worker paralleli aprono sessioni SQLite separate.
     runtime = resolve_ai_runtime(db)
     del db
-    plan = classify_intent(question)
-    context: dict[str, Any] = {}
+    plan = classify_intent(question, area=area)
+    context: dict[str, Any] = {"ask_area": area}
     workers: list[Awaitable[tuple[str, dict[str, Any]]]] = []
 
     async def product_worker():

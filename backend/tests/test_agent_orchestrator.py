@@ -27,6 +27,24 @@ def test_router_sends_review_question_to_reviews():
     assert "products" not in plan
 
 
+def test_ask_default_area_includes_reviews_for_ambiguous_questions():
+    plan = classify_intent("Cosa risulta dall'archivio?", area="all")
+    assert "products" in plan
+    assert "reviews" in plan
+
+
+def test_ask_review_area_forces_reviews_agent():
+    plan = classify_intent("Fammi un riepilogo", area="reviews")
+    assert plan[0] == "reviews"
+    assert "products" not in plan
+
+
+def test_better_rooms_do_not_trigger_product_agent():
+    plan = classify_intent("Quali sono le 5 camere migliori?")
+    assert "reviews" in plan
+    assert "products" not in plan
+
+
 def test_agent_registry_is_small_and_specialized():
     assert {"router", "products", "classifier", "invoices", "prices", "reviews", "verifier", "answer"} == set(AGENTS)
     assert all(spec.tools for spec in AGENTS.values())
@@ -38,6 +56,30 @@ def test_agent_registry_endpoint(client):
     payload = response.json()
     assert any(x["name"] == "verifier" for x in payload)
     assert any(x["name"] == "products" for x in payload)
+
+
+def test_ask_endpoint_accepts_reviews_area(client, db):
+    hotel = db.query(Hotel).filter(Hotel.code == "gio").one()
+    db.add(CentralReviewCache(
+        sync_uuid="ask-area-rev",
+        hotel_code="gio",
+        review_date=date(2026, 6, 1),
+        source="Booking",
+        author="Luca",
+        rating=Decimal("7.5"),
+        room_code="12",
+        text="Colazione scarsa ma staff gentile",
+        payload_json="{}",
+    ))
+    db.commit()
+    response = client.post(
+        "/api/eye/agents/ask",
+        json={"question": "Come è la colazione?", "area": "reviews", "hotel_code": "gio"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "reviews" in payload.get("plan", [])
+    assert payload.get("context", {}).get("reviews")
 
 
 def test_compact_context_limits_rows_and_text():

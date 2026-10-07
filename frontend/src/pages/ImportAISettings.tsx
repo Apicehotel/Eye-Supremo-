@@ -339,7 +339,14 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
         await eyeApi("/agents/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q, hotel_code: hotel || undefined }),
+          body: JSON.stringify({
+            question: q,
+            hotel_code: hotel || undefined,
+            // Ask consulta fatture e recensioni; in area recensioni forza solo quelle.
+            area: reviewOnly ? "reviews" : "all",
+            include_reviews: true,
+            review_only: reviewOnly,
+          }),
           signal: controller.signal,
         }),
       );
@@ -365,30 +372,29 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     : [
         "Qual è la fattura con il totale più alto?",
         "Chi mi vende meglio i bomboloni?",
-        "Quanto è aumentata l’acqua naturale?",
-        "Confronta il prezzo di un prodotto tra i fornitori",
+        "Quali camere hanno più lamentele?",
+        "Confronta recensioni e prezzi di un prodotto",
       ];
   const invoiceRows = answer?.context?.invoice_rows || [];
+  const reviewRows = answer?.context?.reviews || [];
   return (
     <>
       <PageHeader
-        title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
+        title={reviewOnly ? "Analisi IA recensioni" : "Ask Eye Supremo"}
         subtitle={
           reviewOnly
-            ? "Analisi separata di recensioni, camere, servizi e ranking"
-            : "Cerca fatture, prodotti, fornitori e prezzi nell’archivio locale"
+            ? "Analisi di recensioni, camere, servizi e ranking"
+            : "Consulta fatture, prodotti e anche le recensioni dall’archivio locale"
         }
       >
-        {reviewOnly && (
-          <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
-            <option value="">Tutti gli hotel</option>
-            {hotels.map((h) => (
-              <option key={h.code} value={h.code}>
-                {h.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
+          <option value="">Tutti gli hotel</option>
+          {hotels.map((h) => (
+            <option key={h.code} value={h.code}>
+              {h.name}
+            </option>
+          ))}
+        </select>
       </PageHeader>
       <section className="ai-layout">
         <article className="panel ai-hero">
@@ -407,7 +413,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               placeholder={
                 reviewOnly
                   ? "Es. Quali sono le camere peggiori del Giò?"
-                  : "Es. Qual è la fattura con il totale più alto? Chi mi vende meglio i bomboloni?"
+                  : "Es. Fattura più alta, bomboloni, oppure camere con più lamentele…"
               }
             />
             <button className="primary-btn" onClick={ask}>
@@ -454,11 +460,17 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               <small>
                 Righe pertinenti: {answer.context.invoice_summary.rows} · Totale
                 righe: {euro(answer.context.invoice_summary.row_total)}
+                {reviewRows.length
+                  ? ` · Recensioni usate: ${reviewRows.length}`
+                  : ""}
               </small>
+            )}
+            {!answer.context?.invoice_summary && reviewRows.length > 0 && (
+              <small>Recensioni usate: {reviewRows.length}</small>
             )}
             {invoiceRows.length > 0 && (
               <div className="table-wrap" style={{ marginTop: 16 }}>
-                <h3>Dati verificati</h3>
+                <h3>Dati fatture verificati</h3>
                 <table>
                   <thead>
                     <tr>
@@ -497,6 +509,33 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                             ? euro(Number(r.row_total))
                             : "—"}
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {reviewRows.length > 0 && (
+              <div className="table-wrap" style={{ marginTop: 16 }}>
+                <h3>Recensioni consultate</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Hotel</th>
+                      <th>Camera</th>
+                      <th>Data</th>
+                      <th>Voto</th>
+                      <th>Testo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reviewRows.map((r: any, i: number) => (
+                      <tr key={`${r.review_id || i}`}>
+                        <td>{r.hotel || "—"}</td>
+                        <td>{r.room || "—"}</td>
+                        <td>{r.date || "—"}</td>
+                        <td>{r.rating ?? "—"}</td>
+                        <td>{r.text || "—"}</td>
                       </tr>
                     ))}
                   </tbody>

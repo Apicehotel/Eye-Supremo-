@@ -40,6 +40,16 @@ async def ask_agents(payload: dict, role: str = Depends(current_role), username:
     if not question:
         raise HTTPException(422, "Domanda vuota")
 
+    area = str(payload.get("area") or "all").strip().lower()
+    if area not in {"all", "invoices", "reviews"}:
+        # Compatibilità: review_only / include_reviews dal client.
+        if payload.get("review_only") or payload.get("prefer_reviews"):
+            area = "reviews"
+        elif payload.get("include_reviews") is False:
+            area = "invoices"
+        else:
+            area = "all"
+
     hotel_id = None
     hotel_code = str(payload.get("hotel_code") or "").strip().lower()
     if hotel_code:
@@ -54,4 +64,4 @@ async def ask_agents(payload: dict, role: str = Depends(current_role), username:
         allowed = _allowed_hotel_ids(db, role, username)
         hotel_id = next(iter(allowed)) if allowed else None
 
-    return await run_orchestrated_query(db, question, role_name=role, hotel_id=hotel_id)
+    return await run_orchestrated_query(db, question, role_name=role, hotel_id=hotel_id, area=area)
