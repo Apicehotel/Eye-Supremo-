@@ -517,6 +517,7 @@ export function SettingsPage() {
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
     [centralSync, setCentralSync] = useState<any>(),
+    [bootstrap, setBootstrap] = useState<any>(),
     [syncBusy, setSyncBusy] = useState(false),
     [syncError, setSyncError] = useState(""),
     [hotels, setHotels] = useState<Hotel[]>([]),
@@ -529,6 +530,13 @@ export function SettingsPage() {
       eyeApi<Hotel[]>("/hotels").then(setHotels).catch(() => setHotels([]));
     }
   }, []);
+  useEffect(() => {
+    if (!canManage || !bootstrap?.running) return;
+    const timer = window.setInterval(() => {
+      eyeApi<any>("/cache/bootstrap/status").then(setBootstrap).catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [canManage, bootstrap?.running]);
   if (!canManage)
     return (
       <>
@@ -558,18 +566,47 @@ export function SettingsPage() {
   }
   async function loadSyncStatus() {
     try {
-      const [bridge, central] = await Promise.all([
+      const [bridge, central, boot] = await Promise.all([
         eyeApi<any>("/sync/status"),
         eyeApi<any>("/central/sync/status"),
+        eyeApi<any>("/cache/bootstrap/status"),
       ]);
-      setSync(bridge); setCentralSync(central); setSyncError("");
-    } catch (error: any) { setSyncError(error.message || "Stato sincronizzazione non disponibile"); }
+      setSync(bridge);
+      setCentralSync(central);
+      setBootstrap(boot);
+      setSyncError("");
+    } catch (error: any) {
+      setSyncError(error.message || "Stato sincronizzazione non disponibile");
+    }
   }
   async function refreshCentralCache() {
-    setSyncBusy(true); setSyncError("");
-    try { await eyeApi("/central/sync", { method: "POST" }); await loadSyncStatus(); }
-    catch (error: any) { setSyncError(error.message || "Aggiornamento cache non riuscito"); }
-    finally { setSyncBusy(false); }
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      await eyeApi("/central/sync", { method: "POST" });
+      await loadSyncStatus();
+    } catch (error: any) {
+      setSyncError(error.message || "Aggiornamento cache non riuscito");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+  async function downloadOfflineCache(full = false) {
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const boot = await eyeApi<any>("/cache/bootstrap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ background: true, full }),
+      });
+      setBootstrap(boot);
+      await loadSyncStatus();
+    } catch (error: any) {
+      setSyncError(error.message || "Download cache offline non riuscito");
+    } finally {
+      setSyncBusy(false);
+    }
   }
   const tabs = [
     "Generali",
@@ -708,7 +745,72 @@ export function SettingsPage() {
             </>
           )}
           {activeTab === "Esclusioni fatture" && <Empty title="Esclusioni fatture" text="Le righe di servizio, consegna, carburante e altre spese non prodotto restano ricercabili senza entrare nel catalogo prodotti." />}
-          {activeTab === "Sincronizzazione" && <div className="sync-settings"><div className="sync-status-grid"><article><span>Ponte push-pull</span><b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b><small>{sync?.mode || "local-first"}</small></article><article><span>Cache fatture locale</span><b>{centralSync?.count ?? "—"}</b><small>{centralSync?.state || "mai aggiornata"}</small></article><article><span>Ultimo aggiornamento</span><b>{centralSync?.last_sync_at ? new Date(centralSync.last_sync_at).toLocaleString("it-IT") : "Mai"}</b><small>Supabase → locale</small></article></div><p>{centralSync?.configured ? "La cache locale può essere aggiornata manualmente. Le fatture importate vengono inviate al centrale quando il collegamento è disponibile." : "Supabase centrale non configurato: l'app continua a lavorare offline in locale."}</p>{syncError&&<div className="error">{syncError}</div>}<div className="form-actions"><button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}><RefreshCw size={15}/>Aggiorna stato</button><button className="primary-btn" onClick={refreshCentralCache} disabled={syncBusy || !centralSync?.configured}><RefreshCw size={15}/>{syncBusy ? "Sincronizzo…" : "Aggiorna cache locale"}</button></div></div>}
+          {activeTab === "Sincronizzazione" && (
+            <div className="sync-settings">
+              <div className="sync-status-grid">
+                <article>
+                  <span>Ponte push-pull</span>
+                  <b>{sync?.enabled && sync?.configured ? "Configurato" : "Non configurato"}</b>
+                  <small>{sync?.mode || "local-first"}</small>
+                </article>
+                <article>
+                  <span>Cache fatture</span>
+                  <b>{bootstrap?.invoices?.count ?? centralSync?.count ?? "—"}</b>
+                  <small>{bootstrap?.invoices?.state || centralSync?.state || "mai aggiornata"}</small>
+                </article>
+                <article>
+                  <span>Cache recensioni</span>
+                  <b>{bootstrap?.reviews?.count ?? "—"}</b>
+                  <small>{bootstrap?.reviews?.state || "mai aggiornata"}</small>
+                </article>
+                <article>
+                  <span>Bootstrap offline</span>
+                  <b>
+                    {bootstrap?.running
+                      ? "In corso"
+                      : bootstrap?.ready_offline
+                        ? "Pronta"
+                        : bootstrap?.state || "Mai"}
+                  </b>
+                  <small>
+                    {bootstrap?.completed_at
+                      ? new Date(bootstrap.completed_at).toLocaleString("it-IT")
+                      : "Supabase → PC"}
+                  </small>
+                </article>
+              </div>
+              <p>
+                Alla prima installazione Eye Supremo scarica automaticamente fatture e recensioni
+                nella cache del PC. Offline userà solo questi dati già scaricati.
+              </p>
+              {bootstrap?.detail && <p className="settings-message">{bootstrap.detail}</p>}
+              {syncError && <div className="error">{syncError}</div>}
+              <div className="form-actions">
+                <button className="secondary-btn" onClick={loadSyncStatus} disabled={syncBusy}>
+                  <RefreshCw size={15} />
+                  Aggiorna stato
+                </button>
+                <button
+                  className="secondary-btn"
+                  onClick={refreshCentralCache}
+                  disabled={syncBusy || !centralSync?.configured}
+                >
+                  <RefreshCw size={15} />
+                  Solo fatture
+                </button>
+                <button
+                  className="primary-btn"
+                  onClick={() => downloadOfflineCache(true)}
+                  disabled={syncBusy || !bootstrap?.configured}
+                >
+                  <Download size={15} />
+                  {bootstrap?.running || syncBusy
+                    ? "Download in corso…"
+                    : "Scarica tutto per offline"}
+                </button>
+              </div>
+            </div>
+          )}
           {activeTab === "Backup" && <><p>Crea una copia locale del database e delle configurazioni correnti.</p><button className="secondary-btn" onClick={backup}><DatabaseBackup />Crea backup ora</button></>}
           {activeTab === "Sicurezza" && <Empty title="Accesso locale" text="Gli utenti accedono con PIN locale. Sviluppatore e Supremo hanno attualmente lo stesso livello operativo." />}
         </section>

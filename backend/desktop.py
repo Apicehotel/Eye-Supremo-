@@ -7,6 +7,9 @@ import traceback
 import webbrowser
 from pathlib import Path
 
+# Prima dell'import dell'app: abilita bootstrap cache offline sull'EXE.
+os.environ.setdefault("EYESUPREMO_CACHE_BOOTSTRAP_ON_START", "1")
+
 import uvicorn
 from app.main import app as fastapi_app
 
@@ -64,7 +67,7 @@ def show_fatal_error(message: str) -> None:
 
 
 if __name__ == "__main__":
-    write_log("Avvio Eye Supremo desktop.")
+    write_log("Avvio Eye Supremo desktop (bootstrap cache offline abilitato).")
     threading.Thread(target=wait_and_open_browser, daemon=True).start()
     try:
         uvicorn.run(fastapi_app, host=HOST, port=PORT, log_level="warning")

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from .auth_service import auth_configured, session_user
 from .database import Base, SessionLocal, engine
 from .eye_services import seed_eye_supremo
+from .local_cache_bootstrap import maybe_schedule_on_startup
 from .search_index import ensure_fts5
 from .routers.auth_eye import router as auth_router
 from .routers.search_eye import router as search_router
@@ -29,6 +30,8 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     ensure_fts5(engine)
+    # Primo avvio / installazione: scarica fatture e recensioni in cache PC.
+    maybe_schedule_on_startup()
     yield
 
 
