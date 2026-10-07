@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     central_pin: str = "000000"
     central_function: str = "eye-central-gateway"
     sync_enabled: bool = False
+    # Al primo avvio/installazione scarica fatture+recensioni in cache SQLite.
+    cache_bootstrap_on_start: bool = True
     live_search_debounce_ms: int = 180
     model_config = SettingsConfigDict(env_prefix="EYESUPREMO_", env_file=".env", extra="ignore")
 

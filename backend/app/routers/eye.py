@@ -11,6 +11,7 @@ from ..config import settings
 from ..central_service import central_invoice_detail, central_invoice_search, central_product_detail, central_supplier_detail, central_supplier_page, configured as central_configured
 from ..central_cache import cache_status, cached_row_search, cached_search, refresh_central_cache
 from ..central_service import central_review_upsert
+from ..local_cache_bootstrap import bootstrap_status, run_local_cache_bootstrap, schedule_bootstrap
 from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
 from ..database import SessionLocal, get_db
 from ..eye_services import (
@@ -504,6 +505,26 @@ def central_summary(role: str = Depends(current_role), db: Session = Depends(get
     totals = sum(((r.total if isinstance(r, CentralInvoiceCache) else r.totale) or Decimal("0")) for r in records)
     dates = [r.invoice_date if isinstance(r, CentralInvoiceCache) else r.data for r in records]
     return {"offline": offline, "kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": min(dates).isoformat() if dates else None, "to": max(dates).isoformat() if dates else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
+
+
+@router.get("/cache/bootstrap/status")
+def cache_bootstrap_status(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    return bootstrap_status(db)
+
+
+@router.post("/cache/bootstrap")
+async def cache_bootstrap(payload: dict | None = None, role: str = Depends(current_role)):
+    """Scarica fatture e recensioni nella cache SQLite per uso offline."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    body = payload or {}
+    background = bool(body.get("background", True))
+    full = bool(body.get("full", False))
+    if background:
+        return schedule_bootstrap(force=True, full=full)
+    return await run_local_cache_bootstrap(force=True, full=full)
 
 
 @router.post("/central/sync")
