@@ -14,10 +14,12 @@ python -m pip install pyinstaller==6.16.0
 
 $sep = ';'
 python -m PyInstaller --noconfirm --clean --onefile --name EyeSupremo `
+  --windowed `
   --paths backend `
   --add-data "frontend/dist${sep}frontend_dist" `
   --collect-all pydantic `
   --collect-all pydantic_settings `
+  --collect-all webview `
   backend/desktop.py
 
 Write-Host 'Executable: dist/EyeSupremo.exe'

@@ -1,5 +1,6 @@
 fastapi==0.115.8
 uvicorn[standard]==0.34.0
+pywebview==5.4
 sqlalchemy==2.0.38
 pydantic-settings==2.7.1
 python-multipart==0.0.20

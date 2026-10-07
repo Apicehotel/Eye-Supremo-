@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 from .config import settings
 
 GITHUB_LATEST_URL = "https://api.github.com/repos/Apicehotel/Eye-Supremo-/releases/latest"
-CURRENT_VERSION = "2.0.0"
+CURRENT_VERSION = "2.0.1"
 
 
 def _version(value: str) -> tuple[int, ...]:
