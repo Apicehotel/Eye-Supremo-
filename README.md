@@ -15,8 +15,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 ## Stato del progetto
 
 **Versione applicativa:** `2.0.0`
-**Branch di lavoro:** `feat/eye-supremo-foundations`
-**Ultimo aggiornamento:** 6 ottobre 2026
+**Branch di lavoro:** `integrate/main-align`
+**Ultimo aggiornamento:** 7 ottobre 2026
 
 ### Completato
 
@@ -32,16 +32,22 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
 - controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
+- ricerca dello storico prodotti con suggerimenti, selezione delle varianti e layout responsive a due colonne;
+- gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
+- parsing XML FatturaPA dei riepiloghi fiscali tramite `DatiRiepilogo`, con imponibile, IVA e totale coerenti;
+- autenticazione centrale Supabase verificata per gli utenti `supremo` e `sviluppatore`; i PIN locali e centrali restano sistemi distinti.
 
 ### Verificato
 
-- backend: `50 passed`;
+- backend: `70 passed`;
 - build frontend Vite: riuscita;
-- installer Windows: workflow e smoke test configurati;
-- branch locale e remoto allineati dopo il commit `3865ee0`.
+- ricerca reale verificata con prodotti `pago` e `limoncello`;
+- RPC Supabase del catalogo centrale verificata con risposta dati;
+- build Windows locale pronta tramite `scripts\\build_windows.ps1`.
 
 ### Da completare
 
+- creare e verificare il nuovo `dist/EyeSupremo.exe`;
 - pubblicare una GitHub Release `v2.0.0` coerente con la versione dell'installer;
 - verificare il percorso completo su un PC pulito: installazione, primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
