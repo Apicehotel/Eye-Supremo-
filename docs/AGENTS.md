@@ -20,6 +20,15 @@ Gli specialisti dati possono lavorare in parallelo ma ogni worker apre una sessi
 - `verifier`: unità compatibili, collisioni semantiche e warning.
 - `answer`: risposta finale JSON strutturata.
 
+## Layer mirror IA
+
+`SQLite (deterministico) → llama3.2:3b (veloce) → qwen3:8b (qualità)`
+
+- Policy default `fast_first`: il mirror veloce risponde sui PC ufficio; la qualità scala solo se serve.
+- `fast_only` evita del tutto il modello 8B.
+- `quality` forza il modello qualità quando disponibile.
+- I calcoli restano sempre deterministici; i layer LLM sintetizzano solo il contesto già recuperato.
+
 ## Regole
 
 - Nessun agente modifica direttamente fatture o prodotti tramite il canale di risposta.

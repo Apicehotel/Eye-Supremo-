@@ -6,14 +6,13 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable
 
-import httpx
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from .config import settings
 from .database import SessionLocal
 from .central_service import central_invoice_search
 from .eye_services import invoice_search_summary, review_rankings
+from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .search_index import invoice_search
@@ -236,35 +235,31 @@ ANSWER_SCHEMA = {
 }
 
 
-async def _qwen_structured(question: str, context: dict[str, Any]) -> dict[str, Any]:
+async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRuntime) -> dict[str, Any]:
     prompt = (
         "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
         "Non inventare dati. Mantieni separati prodotti con significato diverso anche se simili nel testo. "
         "Per prezzi usa solo unità confrontabili. Rispondi in italiano, breve e chiaro.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(context, ensure_ascii=False, default=str)}"
     )
-    async with httpx.AsyncClient(timeout=2) as client:
-        status = await client.get(f"{settings.ollama_url}/api/tags")
-        status.raise_for_status()
-    async with httpx.AsyncClient(timeout=60) as client:
-        res = await client.post(f"{settings.ollama_url}/api/generate", json={
-            "model": settings.chat_model,
-            "prompt": prompt,
-            "stream": False,
-            "format": ANSWER_SCHEMA,
-            "options": {"temperature": 0.0, "num_predict": 650},
-        })
-        res.raise_for_status()
-        return json.loads(res.json().get("response", "{}"))
+    return await generate_with_layers(
+        prompt=prompt,
+        runtime=runtime,
+        response_format=ANSWER_SCHEMA,
+        temperature=0.0,
+        num_predict=650,
+    )
 
 
 async def run_orchestrated_query(db: Session, question: str, role_name: str = "developer", hotel_id: int | None = None) -> dict[str, Any]:
-    # `db` resta nella firma perché l'autorizzazione viene risolta dal caller.
-    # Ogni worker parallelo apre una sessione SQLAlchemy separata per SQLite.
+    # Runtime IA letto subito: i worker paralleli aprono sessioni SQLite separate.
+    runtime = resolve_ai_runtime(db)
     del db
     plan = classify_intent(question)
     context: dict[str, Any] = {}
     workers: list[Awaitable[tuple[str, dict[str, Any]]]] = []
+    ai_layer: str | None = None
+    ai_model: str | None = None
 
     async def product_worker():
         return "product", await _product_context(question, role_name)
@@ -285,13 +280,15 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
     context["verification"] = verification
 
     try:
-        structured = await _qwen_structured(question, context)
+        structured = await _qwen_structured(question, context, runtime)
         answer = str(structured.get("answer", "")).strip()
         if not answer:
             raise ValueError("Risposta vuota")
         mode = "orchestrated-ollama"
         confidence = structured.get("confidence", "medium")
         facts = structured.get("facts", [])
+        ai_layer = structured.get("_layer")
+        ai_model = structured.get("_model")
     except Exception:
         max_invoice = context.get("max_invoice")
         if max_invoice:
@@ -312,6 +309,9 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
                 "confidence": confidence,
                 "verification": verification,
                 "context": context,
+                "ai_layer": "deterministic",
+                "ai_model": None,
+                "ai_policy": runtime.policy,
             }
         summary = context.get("invoice_summary") or {"rows": 0, "invoices": 0, "row_total": 0}
         if summary.get("rows"):
@@ -323,6 +323,8 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
         mode = "orchestrated-deterministic"
         confidence = "high" if verification["ok"] else "medium"
         facts = []
+        ai_layer = "deterministic"
+        ai_model = None
 
     return {
         "mode": mode,
@@ -333,4 +335,7 @@ async def run_orchestrated_query(db: Session, question: str, role_name: str = "d
         "confidence": confidence,
         "verification": verification,
         "context": context,
+        "ai_layer": ai_layer,
+        "ai_model": ai_model,
+        "ai_policy": runtime.policy,
     }

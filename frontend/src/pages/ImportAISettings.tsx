@@ -416,7 +416,11 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                 tone={answer.mode === "orchestrated-ollama" ? "ok" : "warn"}
               >
                 {answer.mode === "orchestrated-ollama"
-                  ? "Qwen + agenti"
+                  ? answer.ai_layer === "fast"
+                    ? "Layer veloce"
+                    : answer.ai_layer === "quality"
+                      ? "Layer qualità"
+                      : "IA + agenti"
                   : "Agenti locali"}
               </Status>
             </div>
@@ -424,6 +428,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
             {answer.agents?.length > 0 && (
               <small>
                 Agenti: {answer.agents.map((a: any) => a.name).join(" → ")}
+                {answer.ai_model ? ` · modello ${answer.ai_model}` : ""}
               </small>
             )}
             {answer.verification?.warnings?.map((w: string) => (
@@ -611,6 +616,10 @@ export function SettingsPage() {
           )}
           {activeTab === "IA locale" && data && (
             <>
+              <p>
+                Layer mirror: il PC usa prima un modello veloce; la qualità interviene solo se serve.
+                I calcoli restano sempre su SQLite locale.
+              </p>
               <label>
                 URL Ollama
                 <input
@@ -621,12 +630,36 @@ export function SettingsPage() {
                 />
               </label>
               <label>
-                Modello chat
+                Policy layer
+                <select
+                  value={data.ai_layer_policy || "fast_first"}
+                  onChange={(e) =>
+                    setData({ ...data, ai_layer_policy: e.target.value })
+                  }
+                >
+                  <option value="fast_first">Veloce prima (PC ufficio)</option>
+                  <option value="fast_only">Solo veloce</option>
+                  <option value="quality">Solo qualità</option>
+                </select>
+              </label>
+              <label>
+                Modello veloce (mirror)
+                <input
+                  value={data.chat_model_fast || "llama3.2:3b"}
+                  onChange={(e) =>
+                    setData({ ...data, chat_model_fast: e.target.value })
+                  }
+                  placeholder="llama3.2:3b"
+                />
+              </label>
+              <label>
+                Modello qualità
                 <input
                   value={data.chat_model}
                   onChange={(e) =>
                     setData({ ...data, chat_model: e.target.value })
                   }
+                  placeholder="qwen3:8b"
                 />
               </label>
               <label>
@@ -638,6 +671,14 @@ export function SettingsPage() {
                   }
                 />
               </label>
+              {status?.layers && (
+                <p className="settings-message">
+                  Sequenza attiva:{" "}
+                  {(status.layers.active_sequence || [])
+                    .map((x: { layer: string; model: string }) => `${x.layer}→${x.model}`)
+                    .join(" · ") || "nessun modello trovato"}
+                </p>
+              )}
               <div className="form-actions">
                 <button
                   className="secondary-btn"

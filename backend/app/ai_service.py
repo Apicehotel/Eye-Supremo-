@@ -1,10 +1,9 @@
 import json
 import re
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from .config import settings
 from .eye_services import invoice_search_summary, review_rankings
+from .model_layers import generate_with_layers, resolve_ai_runtime
 from .search_index import invoice_search
 from .models import Hotel, Review, Room
 
@@ -41,9 +40,7 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
         "rankings": rankings,
     }
     try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            status = await client.get(f"{settings.ollama_url}/api/tags")
-            status.raise_for_status()
+        runtime = resolve_ai_runtime(db)
         prompt = (
             "Sei Eye Supremo, assistente gestionale hotel. Rispondi in italiano usando ESCLUSIVAMENTE il JSON fornito. "
             "Non inventare importi, camere, ranking, produttori, fornitori o recensioni. Per domande di spesa usa invoice_summary.row_total, "
@@ -51,26 +48,25 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
             "Nel campo facts inserisci solo fatti verificabili presenti nel contesto.\n"
             f"DOMANDA: {question}\nCONTESTO:\n{json.dumps(context, ensure_ascii=False, default=str)}"
         )
-        async with httpx.AsyncClient(timeout=60) as client:
-            res = await client.post(f"{settings.ollama_url}/api/generate", json={
-                "model": settings.chat_model,
-                "prompt": prompt,
-                "stream": False,
-                "format": ANSWER_SCHEMA,
-                "options": {"temperature": 0.0, "num_predict": 650},
-            })
-            res.raise_for_status()
-            raw = res.json().get("response", "{}")
-            structured = json.loads(raw)
-            answer = str(structured.get("answer", "")).strip()
-            if not answer:
-                raise ValueError("Risposta strutturata vuota")
+        structured = await generate_with_layers(
+            prompt=prompt,
+            runtime=runtime,
+            response_format=ANSWER_SCHEMA,
+            temperature=0.0,
+            num_predict=650,
+        )
+        answer = str(structured.get("answer", "")).strip()
+        if not answer:
+            raise ValueError("Risposta strutturata vuota")
         return {
             "mode": "ollama",
             "answer": answer,
             "facts": structured.get("facts", []),
             "confidence": structured.get("confidence", "medium"),
             "context": context,
+            "ai_layer": structured.get("_layer"),
+            "ai_model": structured.get("_model"),
+            "ai_policy": runtime.policy,
         }
     except Exception:
         summary = context["invoice_summary"]
@@ -80,4 +76,12 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
             answer = f"Ho trovato {len(review_records)} recensioni pertinenti. Ollama non è disponibile: mostro i dati locali senza generazione IA."
         else:
             answer = "Non ho trovato dati pertinenti nell'archivio locale."
-        return {"mode": "deterministic", "answer": answer, "facts": [], "confidence": "high", "context": context}
+        return {
+            "mode": "deterministic",
+            "answer": answer,
+            "facts": [],
+            "confidence": "high",
+            "context": context,
+            "ai_layer": "deterministic",
+            "ai_model": None,
+        }

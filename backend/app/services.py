@@ -76,29 +76,55 @@ def search_records(db: Session, query: str, limit=20):
     return [{"row_id": r.id, "descrizione": r.descrizione_originale, "quantita": float(r.quantita), "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unita": r.unita_normalizzata, "fattura_id": i.id, "fattura": i.numero, "data": i.data.isoformat(), "fornitore": s.ragione_sociale, "totale_fattura": float(i.totale)} for r, i, s in rows[:limit]]
 
 
-async def ollama_status():
+async def ollama_status(db=None):
+    from .model_layers import fetch_installed_models, layer_status_payload, resolve_ai_runtime
+    runtime = resolve_ai_runtime(db)
     try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            response = await client.get(f"{settings.ollama_url}/api/tags"); response.raise_for_status()
-            return {"available": True, "models": [m["name"] for m in response.json().get("models", [])]}
+        models = await fetch_installed_models(runtime.ollama_url)
+        layers = layer_status_payload(models, runtime)
+        return {"available": True, "models": models, "layers": layers}
     except Exception:
-        return {"available": False, "models": [], "message": "IA locale non disponibile"}
+        return {
+            "available": False,
+            "models": [],
+            "message": "IA locale non disponibile",
+            "layers": layer_status_payload([], runtime),
+        }
 
 
-async def answer_with_ollama(question: str, records: list[dict]):
-    status = await ollama_status()
+async def answer_with_ollama(question: str, records: list[dict], db=None):
+    from .model_layers import generate_with_layers, resolve_ai_runtime
+    runtime = resolve_ai_runtime(db)
+    status = await ollama_status(db)
     if not status["available"]:
         total = sum({r["fattura_id"]: r["totale_fattura"] for r in records}.values())
         year = re.search(r"\b(19|20)\d{2}\b", question)
         detail = f" per il {year.group(0)}" if year else ""
         formatted_total = f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         answer = f"Ho trovato {len(records)} righe pertinenti{detail}, relative a {len(set(r['fattura_id'] for r in records))} fatture, per un totale documenti di € {formatted_total}."
-        return {"mode": "deterministic", "answer": answer + " Ollama non è disponibile: il risultato è calcolato direttamente dall'archivio.", "sources": records}
+        return {
+            "mode": "deterministic",
+            "answer": answer + " Ollama non è disponibile: il risultato è calcolato direttamente dall'archivio.",
+            "sources": records,
+            "ai_layer": "deterministic",
+            "ai_model": None,
+            "ai_policy": runtime.policy,
+        }
     prompt = "Rispondi in italiano usando esclusivamente i dati JSON forniti. Non inventare valori. Cita fattura, data e fornitore.\nDOMANDA: " + question + "\nDATI:\n" + json.dumps(records, ensure_ascii=False)
-    async with httpx.AsyncClient(timeout=60) as client:
-        res = await client.post(f"{settings.ollama_url}/api/generate", json={"model": settings.chat_model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1}})
-        res.raise_for_status()
-        return {"mode": "ollama", "answer": res.json().get("response", ""), "sources": records}
+    result = await generate_with_layers(
+        prompt=prompt,
+        runtime=runtime,
+        temperature=0.1,
+        num_predict=650,
+    )
+    return {
+        "mode": "ollama",
+        "answer": result.get("answer", ""),
+        "sources": records,
+        "ai_layer": result.get("_layer"),
+        "ai_model": result.get("_model"),
+        "ai_policy": runtime.policy,
+    }
 
 
 def create_backup() -> Path:

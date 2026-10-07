@@ -153,11 +153,21 @@ La chiamata Ollama usa **structured output JSON Schema** (`answer`, `facts`, `co
 
 Durante l'installazione Windows lo script incluso installa Ollama se necessario e scarica automaticamente i modelli. Sono necessari Internet e spazio disco locale; i modelli non vengono committati nel repository né incorporati nell'EXE per le loro dimensioni.
 
+### Layer mirror IA (PC ufficio)
+
+Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
+
+1. **Deterministico** — SQLite calcola e recupera i dati;
+2. **Veloce** (`llama3.2:3b`) — sintesi di default, adatta ai PC ufficio;
+3. **Qualità** (`qwen3:8b`) — escalation solo se il veloce fallisce o ha confidenza bassa.
+
+Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
+
 Modelli inclusi nel completamento automatico:
 
 ```text
-qwen3:8b
-llama3.2:3b
+llama3.2:3b          # layer veloce (mirror)
+qwen3:8b             # layer qualità
 qwen3-embedding:0.6b
 ```
 
