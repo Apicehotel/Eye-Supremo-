@@ -15,6 +15,7 @@ from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
+from .review_cache import cached_review_search
 from .search_index import invoice_search
 
 # Limiti snelli per Ask: meno token, meno SQL, risposta più rapida sui PC ufficio.
@@ -231,16 +232,39 @@ def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any
         if tokens:
             stmt = stmt.where(Review.text.ilike(f"%{tokens[-1]}%"))
         rows = db.execute(stmt.order_by(Review.date.desc()).limit(ASK_REVIEW_LIMIT)).all()
+        reviews = [{
+            "review_id": r.id,
+            "hotel": h.name,
+            "room": room.code if room else None,
+            "date": r.date.isoformat(),
+            "rating": float(r.rating) if r.rating is not None else None,
+            "text": r.text[:280],
+            "source": r.source,
+            "source_origin": "local",
+        } for r, h, room in rows]
+        # Cache PC prima di Supabase: integra recensioni già sincronizzate in SQLite.
+        if len(reviews) < ASK_REVIEW_LIMIT:
+            seen = {str(r.sync_uuid) for r, _, _ in rows if getattr(r, "sync_uuid", None)}
+            cached = cached_review_search(
+                db,
+                question,
+                hotel_id=hotel_id,
+                limit=ASK_REVIEW_LIMIT - len(reviews),
+                exclude_sync_uuids=seen,
+            )
+            for item in cached:
+                reviews.append({
+                    "review_id": item["review_id"],
+                    "hotel": item.get("hotel"),
+                    "room": item.get("room"),
+                    "date": item.get("date"),
+                    "rating": item.get("rating"),
+                    "text": item.get("text"),
+                    "source": item.get("source"),
+                    "source_origin": "sqlite-cache",
+                })
         return {
-            "reviews": [{
-                "review_id": r.id,
-                "hotel": h.name,
-                "room": room.code if room else None,
-                "date": r.date.isoformat(),
-                "rating": float(r.rating) if r.rating is not None else None,
-                "text": r.text[:280],
-                "source": r.source,
-            } for r, h, room in rows],
+            "reviews": reviews[:ASK_REVIEW_LIMIT],
             "rankings": review_rankings(db, hotel_id=hotel_id, limit=5),
         }
     finally:

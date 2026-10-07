@@ -9,9 +9,10 @@ from app.agent_orchestrator import (
     _deterministic_answer,
     _needs_price_history,
     _product_context,
+    _review_context,
     classify_intent,
 )
-from app.models import CentralInvoiceCache
+from app.models import CentralInvoiceCache, CentralReviewCache, Hotel
 
 
 def test_router_sends_price_question_to_product_price_and_verifier():
@@ -107,3 +108,28 @@ def test_product_context_uses_local_cache_not_supabase(db, monkeypatch):
     assert context["invoice_rows"]
     assert context["invoice_rows"][0]["source"] == "sqlite-cache"
     assert "ACQUA" in str(context["invoice_rows"][0]["description"]).upper()
+
+
+def test_review_context_uses_local_review_cache(db, monkeypatch):
+    hotel = db.query(Hotel).filter(Hotel.code == "choco").one()
+    db.add(CentralReviewCache(
+        sync_uuid="ask-rev-1",
+        hotel_code="choco",
+        review_date=date(2026, 5, 1),
+        source="Google",
+        author="Anna",
+        rating=Decimal("4.0"),
+        room_code="205",
+        text="Staff gentile ma pulizia insufficiente",
+        payload_json="{}",
+    ))
+    db.commit()
+
+    async def boom(*_a, **_k):
+        raise AssertionError("Ask recensioni non deve chiamare Supabase")
+
+    monkeypatch.setattr("app.central_service.central_review_page", boom)
+    context = _review_context("pulizia staff", hotel_id=hotel.id)
+    assert context["reviews"]
+    assert context["reviews"][0]["source_origin"] == "sqlite-cache"
+    assert "pulizia" in context["reviews"][0]["text"].lower()

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from .agent_orchestrator import ASK_NUM_CTX, ASK_NUM_PREDICT, ASK_REVIEW_LIMIT, ASK_ROW_LIMIT, _compact_for_llm
 from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import generate_with_layers, resolve_ai_runtime
+from .review_cache import cached_review_search
 from .search_index import invoice_search
 from .models import Hotel, Review, Room
 
@@ -31,8 +32,27 @@ async def eye_ai_answer(db: Session, question: str, role_name: str = "developer"
     review_records = [{
         "review_id": r.id, "hotel": h.name, "room": room.code if room else None,
         "date": r.date.isoformat(), "rating": float(r.rating) if r.rating is not None else None,
-        "text": r.text[:280], "source": r.source,
+        "text": r.text[:280], "source": r.source, "source_origin": "local",
     } for r, h, room in reviews]
+    if len(review_records) < ASK_REVIEW_LIMIT:
+        seen = {str(r.sync_uuid) for r, _, _ in reviews if getattr(r, "sync_uuid", None)}
+        for item in cached_review_search(
+            db,
+            question,
+            hotel_id=hotel_id,
+            limit=ASK_REVIEW_LIMIT - len(review_records),
+            exclude_sync_uuids=seen,
+        ):
+            review_records.append({
+                "review_id": item["review_id"],
+                "hotel": item.get("hotel"),
+                "room": item.get("room"),
+                "date": item.get("date"),
+                "rating": item.get("rating"),
+                "text": item.get("text"),
+                "source": item.get("source"),
+                "source_origin": "sqlite-cache",
+            })
     rankings = review_rankings(db, hotel_id=hotel_id, limit=5)
     context = {
         "invoice_summary": invoice_search_summary(invoice_records),
