@@ -8,6 +8,8 @@ Dividere il lavoro di Qwen in specialisti piccoli, verificabili e con strumenti 
 
 `router → specialisti necessari → verifier → answer`
 
+Ask unificato (`area=all`) può attivare insieme prodotti/prezzi e recensioni. Con `area=reviews` il router forza lo specialista recensioni.
+
 Gli specialisti dati possono lavorare in parallelo ma ogni worker apre una sessione SQLAlchemy/SQLite indipendente.
 
 ## Agenti
