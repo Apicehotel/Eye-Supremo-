@@ -323,11 +323,16 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     [busy, setBusy] = useState(false),
     [hotel, setHotel] = useState(""),
     [hotels, setHotels] = useState<Hotel[]>([]);
+  const askAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     eyeApi<Hotel[]>("/hotels").then(setHotels);
+    return () => askAbort.current?.abort();
   }, []);
   async function ask() {
-    if (!q.trim()) return;
+    if (!q.trim() || busy) return;
+    askAbort.current?.abort();
+    const controller = new AbortController();
+    askAbort.current = controller;
     setBusy(true);
     try {
       setAnswer(
@@ -335,9 +340,18 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ question: q, hotel_code: hotel || undefined }),
+          signal: controller.signal,
         }),
       );
+    } catch (error: any) {
+      if (error?.name === "AbortError") return;
+      setAnswer({
+        mode: "orchestrated-deterministic",
+        answer: error?.message || "Richiesta non riuscita",
+        ai_layer: "deterministic",
+      });
     } finally {
+      if (askAbort.current === controller) askAbort.current = null;
       setBusy(false);
     }
   }

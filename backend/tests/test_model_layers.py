@@ -43,9 +43,18 @@ def test_degrades_when_preferred_missing():
     assert pick_model_sequence(_runtime("quality"), ["llama3.2:3b"]) == [("fast", "llama3.2:3b")]
 
 
-def test_escalate_only_on_low_confidence_with_more_layers():
+def test_escalate_defaults_to_empty_answer_only_for_speed():
     assert should_escalate({"answer": "ok", "confidence": "high"}, has_more=True, policy="fast_first") is False
-    assert should_escalate({"answer": "ok", "confidence": "low"}, has_more=True, policy="fast_first") is True
+    assert should_escalate({"answer": "ok", "confidence": "low"}, has_more=True, policy="fast_first") is False
     assert should_escalate({"answer": "", "confidence": "medium"}, has_more=True, policy="fast_first") is True
     assert should_escalate({"answer": "", "confidence": "low"}, has_more=False, policy="fast_first") is False
     assert should_escalate({"answer": "ok", "confidence": "low"}, has_more=True, policy="fast_only") is False
+
+
+def test_escalate_on_low_confidence_when_explicitly_enabled():
+    assert should_escalate(
+        {"answer": "ok", "confidence": "low"},
+        has_more=True,
+        policy="fast_first",
+        escalate_on_low_confidence=True,
+    ) is True

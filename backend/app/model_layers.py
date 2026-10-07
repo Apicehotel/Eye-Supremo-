@@ -13,6 +13,7 @@ Policy:
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -24,6 +25,8 @@ from .config import settings
 from .models import AppSetting
 
 POLICIES = ("fast_first", "fast_only", "quality")
+_MODEL_CACHE: dict[str, tuple[float, list[str]]] = {}
+_MODEL_CACHE_TTL_S = 60.0
 
 
 @dataclass(frozen=True)
@@ -104,19 +107,40 @@ def pick_model_sequence(runtime: AiRuntime, installed: Iterable[str]) -> list[tu
     return seq
 
 
-def should_escalate(structured: dict[str, Any], *, has_more: bool, policy: str) -> bool:
+def should_escalate(
+    structured: dict[str, Any],
+    *,
+    has_more: bool,
+    policy: str,
+    escalate_on_low_confidence: bool = False,
+) -> bool:
     if not has_more or policy != "fast_first":
         return False
     answer = str(structured.get("answer", "")).strip()
+    if not answer:
+        return True
+    if not escalate_on_low_confidence:
+        return False
     confidence = str(structured.get("confidence", "medium")).lower()
-    return (not answer) or confidence == "low"
+    return confidence == "low"
 
 
-async def fetch_installed_models(ollama_url: str, timeout: float = 2.0) -> list[str]:
+def clear_model_cache() -> None:
+    _MODEL_CACHE.clear()
+
+
+async def fetch_installed_models(ollama_url: str, timeout: float = 1.5, *, use_cache: bool = True) -> list[str]:
+    now = time.monotonic()
+    if use_cache:
+        cached = _MODEL_CACHE.get(ollama_url)
+        if cached and now - cached[0] < _MODEL_CACHE_TTL_S:
+            return list(cached[1])
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.get(f"{ollama_url}/api/tags")
         response.raise_for_status()
-        return [m.get("name", "") for m in response.json().get("models", []) if m.get("name")]
+        models = [m.get("name", "") for m in response.json().get("models", []) if m.get("name")]
+    _MODEL_CACHE[ollama_url] = (now, models)
+    return list(models)
 
 
 async def generate_with_layers(
@@ -125,8 +149,11 @@ async def generate_with_layers(
     runtime: AiRuntime,
     response_format: dict[str, Any] | None = None,
     temperature: float = 0.0,
-    num_predict: int = 650,
-    request_timeout: float = 60.0,
+    num_predict: int = 280,
+    num_ctx: int = 3072,
+    keep_alive: str = "10m",
+    request_timeout: float = 35.0,
+    escalate_on_low_confidence: bool = False,
 ) -> dict[str, Any]:
     """Chiama Ollama rispettando i layer. Restituisce JSON + meta _layer/_model."""
     installed = await fetch_installed_models(runtime.ollama_url)
@@ -135,42 +162,54 @@ async def generate_with_layers(
         raise RuntimeError("Nessun modello chat disponibile in Ollama")
 
     last_error: Exception | None = None
-    for index, (layer, model) in enumerate(sequence):
-        has_more = index < len(sequence) - 1
-        predict = 420 if layer == "fast" else num_predict
-        payload: dict[str, Any] = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": predict},
-        }
-        if response_format is not None:
-            payload["format"] = response_format
-        try:
-            async with httpx.AsyncClient(timeout=request_timeout) as client:
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
+        for index, (layer, model) in enumerate(sequence):
+            has_more = index < len(sequence) - 1
+            # Layer veloce: risposte corte; qualità: un po' più di budget.
+            predict = min(220, num_predict) if layer == "fast" else num_predict
+            ctx = min(2048, num_ctx) if layer == "fast" else num_ctx
+            payload: dict[str, Any] = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "keep_alive": keep_alive,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": predict,
+                    "num_ctx": ctx,
+                },
+            }
+            if response_format is not None:
+                payload["format"] = response_format
+            try:
                 res = await client.post(f"{runtime.ollama_url}/api/generate", json=payload)
                 res.raise_for_status()
                 raw = res.json().get("response", "")
-            if response_format is not None:
-                structured = json.loads(raw or "{}")
-                if not isinstance(structured, dict):
-                    raise ValueError("Risposta non oggetto JSON")
-                if should_escalate(structured, has_more=has_more, policy=runtime.policy):
-                    last_error = ValueError("Confidenza bassa sul layer veloce")
+                if response_format is not None:
+                    structured = json.loads(raw or "{}")
+                    if not isinstance(structured, dict):
+                        raise ValueError("Risposta non oggetto JSON")
+                    if should_escalate(
+                        structured,
+                        has_more=has_more,
+                        policy=runtime.policy,
+                        escalate_on_low_confidence=escalate_on_low_confidence,
+                    ):
+                        last_error = ValueError("Risposta insufficiente sul layer veloce")
+                        continue
+                    structured["_layer"] = layer
+                    structured["_model"] = model
+                    return structured
+                text = str(raw or "").strip()
+                if not text and has_more:
+                    last_error = ValueError("Risposta vuota sul layer veloce")
                     continue
-                structured["_layer"] = layer
-                structured["_model"] = model
-                return structured
-            text = str(raw or "").strip()
-            if not text and has_more:
-                last_error = ValueError("Risposta vuota sul layer veloce")
+                return {"answer": text, "_layer": layer, "_model": model}
+            except Exception as exc:  # noqa: BLE001 — fallback controllato ai layer successivi
+                last_error = exc
+                if not has_more:
+                    break
                 continue
-            return {"answer": text, "_layer": layer, "_model": model}
-        except Exception as exc:  # noqa: BLE001 — fallback controllato ai layer successivi
-            last_error = exc
-            if not has_more:
-                break
-            continue
     raise last_error or RuntimeError("Generazione IA fallita")
 
 

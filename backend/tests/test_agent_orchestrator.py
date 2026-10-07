@@ -1,4 +1,10 @@
-from app.agent_orchestrator import AGENTS, classify_intent
+from app.agent_orchestrator import (
+    AGENTS,
+    _compact_for_llm,
+    _deterministic_answer,
+    _needs_price_history,
+    classify_intent,
+)
 
 
 def test_router_sends_price_question_to_product_price_and_verifier():
@@ -24,3 +30,41 @@ def test_agent_registry_endpoint(client):
     payload = response.json()
     assert any(x["name"] == "verifier" for x in payload)
     assert any(x["name"] == "products" for x in payload)
+
+
+def test_compact_context_limits_rows_and_text():
+    compact = _compact_for_llm({
+        "invoice_rows": [
+            {"description": "x" * 400, "supplier": "A", "unit_price": 1, "invoice": "1", "date": "2024-01-01"}
+            for _ in range(30)
+        ],
+        "invoice_summary": {"rows": 30, "invoices": 3, "row_total": 10},
+        "reviews": [{"text": "y" * 500, "hotel": "Giò"} for _ in range(20)],
+    })
+    assert len(compact["invoice_rows"]) <= 12
+    assert len(compact["invoice_rows"][0]["description"]) <= 140
+    assert len(compact["reviews"]) <= 8
+    assert len(compact["reviews"][0]["text"]) <= 220
+
+
+def test_deterministic_short_circuit_for_max_invoice():
+    result = _deterministic_answer(
+        "Qual è la fattura con il totale più alto?",
+        {
+            "max_invoice": {
+                "invoice_number": "42",
+                "supplier_name": "Acme",
+                "invoice_date": "2024-05-01",
+                "total": 999.5,
+            }
+        },
+        {"ok": True, "warnings": []},
+    )
+    assert result is not None
+    assert "42" in result["answer"]
+    assert result["confidence"] == "high"
+
+
+def test_price_history_gate_skips_heavy_report_for_plain_lookup():
+    assert _needs_price_history("Chi mi vende meglio i bomboloni?") is True
+    assert _needs_price_history("mostra solo il codice fattura XYZ") is False
