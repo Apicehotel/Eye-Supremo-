@@ -56,7 +56,7 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 ## Accesso e ruoli
 
-Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con PIN iniziale `000000`: lo Sviluppatore deve sostituirlo dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
+Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con un PIN iniziale temporaneo (non riportato qui): lo Sviluppatore deve sostituirlo al primo accesso dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
 
 - **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
 - **Supremo**: visibilità globale operativa sui tre hotel.
@@ -193,7 +193,7 @@ EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
 EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 ```
 
-La replica centrale è disponibile con le credenziali Eye (`supremo`/`000000` iniziali). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
+La replica centrale è disponibile con le credenziali Eye dell'utente centrale (non riportate qui; vanno impostate in locale tramite variabili d'ambiente). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
 
 ## Avvio sviluppo
 
