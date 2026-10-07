@@ -183,6 +183,10 @@ Il file `scarica-modelli-ia.bat` resta disponibile nella cartella dell'app per r
 
 Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture può generare alert quando il prezzo corrente supera in modo rilevante lo storico. Le righe contabili escluse non generano alert prodotto.
 
+## Spazio dati separato
+
+Eye Supremo condivide temporaneamente l'infrastruttura Supabase di MultiHotel per evitare un secondo progetto/costo, ma ha un confine applicativo dedicato: schema logico `eye_supremo` + bucket privato `eye-invoices`. Le tabelle legacy `public.eye_central_*` restano disponibili durante il cutover per non rompere installazioni esistenti. HotelGio è fuori scope e non viene modificato. Vedi [docs/SUPABASE_SPACE.md](docs/SUPABASE_SPACE.md).
+
 ## Ponte Supabase
 
 Sul progetto **Apice MultiHotel** sono presenti:
