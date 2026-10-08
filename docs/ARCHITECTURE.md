@@ -76,9 +76,9 @@ La Edge Function `eye-supremo-sync` ha `verify_jwt=true`; usa la membership per 
 
 ## Packaging Windows
 
-La UI viene compilata in `frontend/dist` e incorporata con PyInstaller nel backend. `desktop.py` avvia Uvicorn su `127.0.0.1:8765` e apre il browser. Inno Setup produce l'installer finale.
+La UI viene compilata in `frontend/dist` e incorporata con PyInstaller nel backend. `desktop.py` avvia Uvicorn su `127.0.0.1:8765` **solo come motore interno** e apre una **finestra applicazione nativa** tramite pywebview + Microsoft Edge WebView2. Non apre Chrome/Edge come sito web e non mostra una console CMD (`--windowed`). Inno Setup produce `EyeSupremo-Setup.exe` e avvisa se manca il runtime WebView2.
 
-La macchina finale non richiede Python o Node. I dati sono persistenti in LocalAppData, separati dall'eseguibile.
+La macchina finale non richiede Python o Node. I dati sono persistenti in LocalAppData, separati dall'eseguibile. `start.bat` resta solo per lo sviluppo (Vite + browser).
 
 ## Evoluzione senza parti zombie
 

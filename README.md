@@ -43,13 +43,13 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
-- build Windows locale pronta tramite `scripts\\build_windows.ps1`.
+- build Windows locale pronta tramite `scripts\\build_windows.ps1`;
+- `EyeSupremo.exe` come app a finestra nativa (WebView2), senza aprire il browser.
 
 ### Da completare
 
-- creare e verificare il nuovo `dist/EyeSupremo.exe`;
-- pubblicare una GitHub Release `v2.0.0` coerente con la versione dell'installer;
-- verificare il percorso completo su un PC pulito: installazione, primo login, import XML e aggiornamento;
+- pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
+- verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
 
 GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla le release da GitHub e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
@@ -233,17 +233,22 @@ start.bat
 API: `http://127.0.0.1:8000/api/docs`
 UI dev: `http://127.0.0.1:5173`
 
-## Installer Windows
+## Installer Windows (app nativa)
 
-Il PC finale **non deve avere Python o Node**.
+Il PC finale **non deve avere Python o Node**. L'eseguibile è un'**app Windows a finestra** (WebView2), non una pagina aperta nel browser.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller e incorpora la UI nel backend. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
+Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller (`--windowed` + pywebview) e incorpora la UI. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
 
-I dati vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
+- Doppio clic su Eye Supremo → si apre **solo la finestra dell'app** (icona taskbar, senza barra indirizzi).
+- Nessuna console CMD e nessun Chrome/Edge con URL `http://127.0.0.1:8765`.
+- Serve il runtime **Microsoft Edge WebView2** (già presente su Windows 10/11 aggiornati).
+- I dati restano in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
+
+`start.bat` resta solo per lo sviluppo (Vite + browser).
 
 ## Test e CI
 
