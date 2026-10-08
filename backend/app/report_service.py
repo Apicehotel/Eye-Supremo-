@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .models import Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import extract_content, normalize_text, normalize_unit
-from .product_taxonomy import extract_product_query, search_terms
+from .product_taxonomy import extract_product_query, product_stem, search_terms
 
 
 def _money(value) -> float:
@@ -42,6 +42,12 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         # abbreviations such as "c igienica" and descriptions with extra
         # package/brand text between the words.
         semantic_clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in text_fields]) for token in tokens]))
+    stem = product_stem(q)
+    if stem and len(stem) >= 6:
+        # Cattura «MINIBOMBOLONI» come unica parola, senza aprire a bombola.
+        semantic_clauses.append(or_(*[field.ilike(f"%{stem}%") for field in text_fields]))
+    if not semantic_clauses:
+        return {"query": query, "summary": None, "suppliers": [], "dates": [], "units": []}
     stmt = (
         select(InvoiceRow, Invoice, Supplier, Product, InvoiceRowPolicy)
         .join(Invoice, Invoice.id == InvoiceRow.invoice_id)

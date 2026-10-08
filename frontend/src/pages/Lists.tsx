@@ -149,9 +149,16 @@ export function Invoices() {
               {live?.summary && (
                 <Status tone="ok">
                   {(live.total ?? live.summary.rows)} risultati in archivio · {euro(live.summary.row_total)}
+                  {live.supplier_count != null ? ` · ${live.supplier_count} fornitori` : ""}
                 </Status>
               )}
             </div>
+            {live?.suppliers?.length > 1 && (
+              <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+                Fornitori: {live.suppliers.slice(0, 8).map((s: any) => `${s.supplier} (${s.rows})`).join(" · ")}
+                {live.suppliers.length > 8 ? ` · +${live.suppliers.length - 8} altri` : ""}
+              </p>
+            )}
             {!live ? (
               <Loading />
             ) : live.results?.length ? (
@@ -200,11 +207,20 @@ export function Invoices() {
             <div className="panel-title">
               <h2>Risultati cache / centrale</h2>
               {remote?.total != null ? (
-                <Status tone="ok">{remote.total} risultati</Status>
+                <Status tone="ok">
+                  {remote.total} risultati
+                  {remote.supplier_count != null ? ` · ${remote.supplier_count} fornitori` : ""}
+                </Status>
               ) : remote?.count != null ? (
                 <Status tone="ok">{remote.count} righe</Status>
               ) : null}
             </div>
+            {remote?.suppliers?.length > 1 && (
+              <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+                Fornitori: {remote.suppliers.slice(0, 8).map((s: any) => `${s.supplier} (${s.rows})`).join(" · ")}
+                {remote.suppliers.length > 8 ? ` · +${remote.suppliers.length - 8} altri` : ""}
+              </p>
+            )}
             {remote?.items?.length ? (
               <div className="table-wrap">
                 <table>

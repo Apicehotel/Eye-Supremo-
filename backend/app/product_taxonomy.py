@@ -24,8 +24,23 @@ PRODUCT_FAMILY_ALIASES = {
     "c igienica": ("carta igienica", "c igienica"),
     "carta igienica": ("carta igienica", "c igienica"),
     "c ig": ("carta igienica", "c ig"),
-    "bomboloni": ("bomboloni", "bombolino", "bombolini", "bombolone"),
-    "bombolone": ("bomboloni", "bombolino", "bombolini", "bombolone"),
+    # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
+    "bomboloni": (
+        "bomboloni", "bombolino", "bombolini", "bombolone",
+        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
+        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
+    ),
+    "bombolone": (
+        "bomboloni", "bombolino", "bombolini", "bombolone",
+        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
+        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
+    ),
+}
+
+# Stem sicuri per match substring (es. minibomboloni). Mai "bombol": matcherebbe bombola.
+PRODUCT_FAMILY_STEMS = {
+    "bomboloni": "bombolon",
+    "bombolone": "bombolon",
 }
 
 # These are invoice line items, not products. Keep them available to the
@@ -110,6 +125,73 @@ def search_terms(query: str) -> tuple[str, ...]:
     if not normalized:
         return (query.strip(),) if query.strip() else ()
     return PRODUCT_FAMILY_ALIASES.get(normalized, (needle.strip(),))
+
+
+def product_stem(query: str) -> str | None:
+    """Stem famiglia per match substring (minibomboloni) senza collidere con bombola."""
+    needle = normalize_text(extract_product_query(query) or query).strip()
+    if not needle:
+        return None
+    if needle in PRODUCT_FAMILY_STEMS:
+        return PRODUCT_FAMILY_STEMS[needle]
+    for key, stem in PRODUCT_FAMILY_STEMS.items():
+        if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
+            return stem
+    return None
+
+
+def description_matches_product(description: str, query: str) -> bool:
+    """True se la descrizione appartiene alla famiglia prodotto cercata."""
+    text = normalize_text(description)
+    if not text:
+        return False
+    stem = product_stem(query)
+    if stem and stem in text.replace(" ", ""):
+        return True
+    if stem and stem in text:
+        return True
+    needle = normalize_text(extract_product_query(query) or query)
+    for term in search_terms(needle):
+        if normalize_text(term) in text:
+            return True
+    return False
+
+
+def diversify_by_supplier(
+    records: list[dict],
+    *,
+    supplier_key: str = "supplier",
+    limit: int | None = None,
+) -> list[dict]:
+    """Interleave per fornitore: la prima pagina non è monopolizzata da un solo vendor."""
+    buckets: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for row in records:
+        key = str(row.get(supplier_key) or "—")
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(row)
+    out: list[dict] = []
+    while any(buckets.values()):
+        for key in order:
+            if buckets.get(key):
+                out.append(buckets[key].pop(0))
+                if limit is not None and len(out) >= limit:
+                    return out
+    return out
+
+
+def supplier_breakdown(records: list[dict], *, supplier_key: str = "supplier") -> list[dict]:
+    """Conteggio fornitori sul match set completo (per UI/Ask)."""
+    counts: dict[str, int] = {}
+    for row in records:
+        key = str(row.get(supplier_key) or "—")
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        {"supplier": name, "rows": count}
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
 
 
 def is_family_match(description: str, query: str) -> bool:
