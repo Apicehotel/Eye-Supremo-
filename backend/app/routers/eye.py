@@ -16,17 +16,77 @@ from ..review_cache import cached_review_search, refresh_review_cache, review_ca
 from ..database import SessionLocal, get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
-    review_rankings, seed_eye_supremo,
+    review_rankings, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
     Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
-from ..review_importers import parse_review_document
+from ..review_importers import clean_review_text, parse_review_document, split_review_blocks
 from ..sync_service import push_to_supabase, sync_configuration
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
+
+
+def _review_payload(review: Review, *, review_id=None, text: str | None = None, date_value: str | None = None,
+                    room_code: str | None = None, author: str | None = None, source: str | None = None,
+                    rating: float | None = None, tags: list[dict] | None = None) -> dict:
+    return {
+        "id": review.id if review_id is None else review_id,
+        "hotel": review.hotel.name,
+        "hotel_code": review.hotel.code,
+        "room": room_code if room_code is not None else (review.room.code if review.room else None),
+        "author": author if author is not None else review.author,
+        "source": source if source is not None else review.source,
+        "rating": rating if rating is not None else (float(review.rating) if review.rating is not None else None),
+        "date": date_value or review.date.isoformat(),
+        "text": clean_review_text(text if text is not None else review.text),
+        "tags": tags if tags is not None else [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in review.tags],
+    }
+
+
+def _expanded_review_payloads(review: Review) -> list[dict]:
+    """Expose legacy digest emails as separate review rows without losing originals."""
+    blocks = split_review_blocks(review.text, review.date.isoformat(), review.source or "email", review.author, review.raw_file or "")
+    if len(blocks) <= 1:
+        block = blocks[0] if blocks else {}
+        try:
+            block_rating = float(str(block["rating"]).replace(",", ".")) if block.get("rating") is not None else None
+        except (TypeError, ValueError):
+            block_rating = None
+        payload = _review_payload(
+            review,
+            room_code=block.get("room_code"),
+            author=block.get("author"),
+            source=block.get("source"),
+            rating=block_rating,
+            date_value=block.get("date") or review.date.isoformat(),
+        )
+        payload["rating"] = block_rating
+        return [payload]
+    expanded = []
+    for index, block in enumerate(blocks, start=1):
+        try:
+            block_rating = float(str(block["rating"]).replace(",", ".")) if block.get("rating") is not None else None
+        except (TypeError, ValueError):
+            block_rating = None
+        payload = _review_payload(
+            review,
+            review_id=f"{review.id}:part:{index}",
+            text=block.get("text") or "",
+            date_value=block.get("date") or review.date.isoformat(),
+            room_code=block.get("room_code"),
+            author=block.get("author"),
+            source=block.get("source"),
+            rating=block_rating,
+            tags=[],
+        )
+        # ``None`` means the individual block has no recognized score; do not
+        # inherit the digest-level score from the parent email.
+        payload["rating"] = block_rating
+        expanded.append(payload)
+    return expanded
 
 
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
@@ -185,17 +245,30 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
     if q:
         stmt = stmt.where(Review.text.ilike(f"%{q}%"))
     ordered = stmt.order_by(Review.date.desc())
+    # Do not apply the database limit before expansion: one legacy email can
+    # contain many reviews and would otherwise hide them from the archive.
+    items = db.scalars(ordered).unique().all()
+    result = []
+    for review in items:
+        for payload in _expanded_review_payloads(review):
+            # Legacy archives may not have persisted ReviewTag rows yet. Keep
+            # the historical view useful by applying the same deterministic
+            # classifier to the cleaned review text on read.
+            if not payload.get("tags") and payload.get("text"):
+                payload["tags"] = [
+                    {"category": tag["category"], "polarity": tag["polarity"], "confidence": float(tag["confidence"])}
+                    for tag in classify_review_text(db, payload["text"], review.hotel_id)
+                ]
+            if q:
+                haystack = f"{payload['text']} {payload.get('room') or ''} {payload['hotel']}".lower()
+                if q.lower() not in haystack:
+                    continue
+            result.append(payload)
+    cached = db.scalars(select(CentralReviewCache)).all()
     fetch_limit = limit if limit is not None else 500
-    items = db.scalars(ordered.limit(fetch_limit)).unique().all()
-    result = [{
-        "id": r.id, "hotel": r.hotel.name, "hotel_code": r.hotel.code, "room": r.room.code if r.room else None,
-        "author": r.author, "source": r.source, "rating": float(r.rating) if r.rating is not None else None,
-        "date": r.date.isoformat(), "text": r.text,
-        "tags": [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in r.tags],
-        "origin": "local",
-    } for r in items]
     status = review_cache_status(db)
-    # Cache PC first; sync Supabase solo in background.
+    # Cache PC first; sync Supabase solo in background. Legacy digest emails
+    # are expanded before the limit so individual reviews are not hidden.
     if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_review_cache)
     if status["count"] and len(result) < fetch_limit:

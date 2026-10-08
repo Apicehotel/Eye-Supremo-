@@ -139,11 +139,19 @@ async def central_product_page(query: str = "", limit: int = 200) -> dict:
         return {"enabled": False, "items": [], "total": 0, "message": "Supabase centrale non configurato"}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_product_page"
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_query": query, "p_limit": max(1, min(limit, 2000))}
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
-        data = response.json()
-    return {"enabled": True, **(data if isinstance(data, dict) else {})}
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
+            response.raise_for_status()
+            data = response.json()
+        return {"enabled": True, **(data if isinstance(data, dict) else {})}
+    except httpx.HTTPStatusError as exc:
+        # A stale/missing RPC in Supabase must not turn a local report into a
+        # 500. The caller can continue with the local archive and surface the
+        # remote diagnostic separately.
+        return {"enabled": True, "items": [], "total": 0, "message": f"Catalogo centrale non disponibile ({exc.response.status_code})"}
+    except httpx.HTTPError as exc:
+        return {"enabled": True, "items": [], "total": 0, "message": f"Catalogo centrale non raggiungibile: {exc}"}
 
 
 async def central_product_detail(canonical_name: str) -> dict:

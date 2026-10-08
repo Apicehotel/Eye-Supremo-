@@ -23,6 +23,7 @@ import {
   TrendingUp,
   Trophy,
   MessageSquareWarning,
+  Globe2,
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
 export type Page =
@@ -85,7 +86,7 @@ export function Shell({
 }) {
   const user = currentUser();
   const isFullAccess = user?.role_name === "developer" || user?.role_name === "supremo";
-  const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews">("overview");
+  const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history">("overview");
   const visibleNav = nav.filter(
     ([id]) => isFullAccess || !["settings", "system"].includes(id),
   );
@@ -196,6 +197,44 @@ export function Shell({
               <span>Recensioni</span>
             </button>
             <button
+              aria-label="Recensioni anonime"
+              className={reviewPage === "reviews" && reviewView === "anonymous" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("anonymous");
+                window.dispatchEvent(
+                  new CustomEvent("eye-review-view", { detail: "anonymous" }),
+                );
+              }}
+            >
+              <MessageSquareWarning size={19} />
+              <span>Recensioni anonime</span>
+            </button>
+            <button
+              aria-label="Ranking segnalazioni anonime"
+              className={reviewPage === "reviews" && reviewView === "anonymous-ranking" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("anonymous-ranking");
+                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "anonymous-ranking" }));
+              }}
+            >
+              <TriangleAlert size={17} />
+              <span>Ranking anonime</span>
+            </button>
+            <button
+              aria-label="Recensioni online"
+              className={reviewPage === "reviews" && reviewView === "online" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("online");
+                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "online" }));
+              }}
+            >
+              <Globe2 size={17} />
+              <span>Recensioni online</span>
+            </button>
+            <button
               aria-label="Analisi IA"
               className={reviewPage === "ai" ? "active" : ""}
               onClick={() => setReviewPage("ai")}
@@ -210,6 +249,18 @@ export function Shell({
             >
               <MessageSquareWarning size={19} />
               <span>Feedback</span>
+            </button>
+            <button
+              aria-label="Storico recensioni"
+              className={reviewPage === "reviews" && reviewView === "history" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("history");
+                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "history" }));
+              }}
+            >
+              <History size={19} />
+              <span>Storico recensioni</span>
             </button>
             {isFullAccess && (
               <button

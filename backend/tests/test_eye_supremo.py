@@ -6,7 +6,7 @@ from app.search_index import invoice_search
 from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Supplier, UserProfile
 from app.agent_orchestrator import _max_invoice_context
 from app.report_service import historical_product_report
-from app.review_importers import _author, _room, split_review_blocks
+from app.review_importers import _author, _rating, _room, clean_review_text, split_review_blocks
 from app.product_taxonomy import is_family_match, is_product_search_match, normalize_product_display_name, search_terms
 from app.normalization import extract_content, normalized_price_with_content
 from app.product_taxonomy import is_catalog_product, merge_product_catalog, product_content_group, product_family_similarity
@@ -333,11 +333,71 @@ def test_review_digest_splits_multiple_rooms():
     assert items[0]["source"] == "Booking"
 
 
+def test_review_digest_splits_inline_room_markers_and_keeps_scores():
+    text = """Booking.com recensioni
+10
+Mario Rossi in 01/03 out 02/03 camera 1104
+Ottima camera e colazione
+7,0
+Luigi Bianchi in 02/03 out 03/03 cam:2209
+Camera da rimodernare"""
+    items = split_review_blocks(text, "2026-03-04", "Outlook MSG", None, "sample.msg")
+    assert len(items) == 2
+    assert [item["room_code"] for item in items] == ["1104", "2209"]
+    assert [item["rating"] for item in items] == ["10", "7,0"]
+
+
 def test_review_import_extracts_google_author_and_rejects_freeform_room():
     digest = "Google nessuna recensione Valter Hotel Gio Wine e Jazz Area reception@hotelgio.it"
     assert _author(digest, "reception@hotelgio.it") == "Valter"
     assert _room("Camera ok, letto e lenzuola rigide.") is None
     assert _room("CAM: 2219") == "2219"
+    assert _room("camera\n10") is None
+
+
+def test_tripadvisor_category_scores_count_as_review_vote():
+    assert _rating("TripAdvisor Camere3,0 Servizio3,0 Posizione3,0") == "3.0"
+    assert _rating("Camere5,0 Servizio5,0 Posizione5,0 Nessuna recensione Tripadvisor michele") == "5.0"
+    assert _rating("Categorie base Staff 10 Pulizia 10 Posizione 7,5 Voto 9,0") == "9.0"
+    assert _rating("Categorie base Staff 10\n9,0 Luca, it Luca Merlo") == "9.0"
+
+
+def test_clean_review_text_removes_booking_metadata_and_keeps_guest_text():
+    text = """cam. 2215
+    Numero di prenotazione 123456
+    __________________________________
+    Categorie base
+    Staff
+    10
+    Pulizia
+    7,5
+    __________________________________
+    Quasi tutto!
+    La moquette nella stanza
+    <https://admin.booking.com/example>
+    """
+    assert clean_review_text(text) == "Quasi tutto!\nLa moquette nella stanza"
+    assert clean_review_text("Ottimo soggiorno\nEugenio, it in 03/04/24 out 05/04/24") == "Ottimo soggiorno"
+
+
+def test_review_digest_supports_cam_dot_without_inventing_room_numbers():
+    text = """Recensioni Hotel
+    7,0
+    Gina, it
+    Gina Fiorino in 09/07 out 10/07 cam. 325
+    Commento della recensione
+    9,0
+    Jordi, es
+    Jordi in 24/04 out 25/04 cam. 3308
+    Commento della seconda recensione
+    9,0
+    Leon, nl
+    Leon in 07/07 out 09/07 cam. 1108
+    Altro commento
+    """
+    blocks = split_review_blocks(text, "2026-07-15", "Booking", None, "archive.msg")
+    assert [block["room_code"] for block in blocks] == ["325", "3308", "1108"]
+    assert all(block["room_code"] != "10" for block in blocks)
 
 
 def test_review_classifier_keeps_mixed_aspects_separate(db):
@@ -349,6 +409,116 @@ def test_review_classifier_keeps_mixed_aspects_separate(db):
     assert ("Colazione", "positive") in pairs
     assert ("Ristorante", "negative") in pairs
     assert ("Colazione", "negative") in pairs
+
+
+def test_review_classifier_interprets_comfort_words_and_negation_by_category(db):
+    text = "Letto comodo, parcheggio scomodo, camera confortevole ma cuscino non comodo."
+    tags = classify_review_text(db, text)
+    pairs = {(tag["category"], tag["polarity"]) for tag in tags}
+    assert ("Letti", "positive") in pairs
+    assert ("Parcheggio", "negative") in pairs
+    assert ("Camere / Arredi", "positive") in pairs
+    assert ("Cuscini", "negative") in pairs
+
+
+def test_review_classifier_separates_positive_breakfast_from_restaurant_criticism(db):
+    text = "Colazione stratosferica eccellente, unico neo: nel ristorante non avevano molte proposte senza glutine nonostante a colazione ci fosse grande varietà."
+    pairs = {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+    assert ("Colazione", "positive") in pairs
+    assert ("Ristorante", "negative") in pairs
+
+
+def test_review_classifier_uses_smile_markers_for_following_aspects(db):
+    text = "😊 Ristorante. La colazione. Cocktail. Massaggio per sedie in camera. ☹ Le camere sono un po' datate."
+    pairs = {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+    assert ("Ristorante", "positive") in pairs
+    assert ("Colazione", "positive") in pairs
+    assert ("Camere / Arredi", "negative") in pairs
+
+
+def test_review_classifier_keeps_positive_outcome_after_but_clause(db):
+    text = "☹ Mi aspettavo la cioccolata a colazione, comunque c'era molta scelta dolce e salata."
+    pairs = {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+    assert ("Colazione", "negative") in pairs
+    assert ("Colazione", "positive") in pairs
+
+
+def test_review_classifier_treats_negated_distance_as_positive(db):
+    tags = classify_review_text(db, "La posizione non è lontana dal centro.")
+    assert ("Posizione", "positive") in {(tag["category"], tag["polarity"]) for tag in tags}
+
+
+def test_review_classifier_does_not_mark_negated_problems_as_negative(db):
+    tags = classify_review_text(db, "La camera non ha avuto problemi durante il soggiorno.")
+    assert ("Camere / Arredi", "negative") not in {(tag["category"], tag["polarity"]) for tag in tags}
+
+
+def test_review_classifier_uses_distance_context_and_phrase_meaning(db):
+    positive = classify_review_text(db, "La posizione non è lontana e si raggiunge in pochi passi.")
+    negative = classify_review_text(db, "La posizione è lontana e serve molto tempo per arrivarci.")
+    assert ("Posizione", "positive") in {(tag["category"], tag["polarity"]) for tag in positive}
+    assert ("Posizione", "negative") in {(tag["category"], tag["polarity"]) for tag in negative}
+
+
+def test_booking_digest_is_split_into_each_room_review(db):
+    from app.review_importers import clean_review_text, split_review_blocks
+
+    digest = """Recensioni Hotel Gio 15/08/26
+9,0
+jean-philippe
+IN : 06/08/2026 OUT : 10/08/2026 CAM: 4411 Numero di prenotazione 5970610863
+Tradotto dal francese da - Vedi l'originale
+Benvenuto. Camera confortevole e pulita.
+    10
+    Darick
+12/08/2026 - 13/08/2026 Matrimoniale Superior Jazz 4410 Numero di prenotazione 5716813973
+Bellissimo hotel vicino al centro.
+    9,0
+    Matthias
+10/08/2026 - 14/08/2026 Matrimoniale Superior Jazz 2208 Numero di prenotazione 5466683128
+Hotel eccellente, colazione ricca.
+    8,0
+    Arturo
+12/08/2026 - 14/08/2026 Matrimoniale Superior Jazz 4407 Numero di prenotazione 5987525889
+Stanze grandi e comode."""
+    blocks = split_review_blocks(digest, "2026-08-16", "Booking", None, "booking.txt")
+    assert [block["room_code"] for block in blocks] == ["4411", "4410", "2208", "4407"]
+    assert [block["rating"] for block in blocks] == ["9,0", "10", "9,0", "8,0"]
+    texts = [clean_review_text(block["text"]) for block in blocks]
+    assert "Camera confortevole" in texts[0]
+    assert "Bellissimo hotel" in texts[1]
+    assert all("Numero di prenotazione" not in text for text in texts)
+    assert all("michele" not in text.lower() and "tel 075" not in text.lower() for text in texts)
+
+
+def test_booking_digest_splits_even_when_one_room_code_is_invalid():
+    text = """Booking recensioni
+9,0
+Paula, it in 03/05 out 05/05 camera ??? (non c'è nella lista clienti)
+Numero di prenotazione 5012792605
+Categorie base Staff 10
+8,0
+Marco, it in 04/05 out 05/05 camera 405
+Numero di prenotazione 6234904895
+Categorie base Staff 7,5"""
+    blocks = split_review_blocks(text, "2026-05-08", "Booking", None, "booking.txt")
+    assert len(blocks) == 2
+    assert [block["rating"] for block in blocks] == ["9,0", "8,0"]
+
+
+def test_booking_digest_splits_review_without_room_metadata():
+    text = """Booking recensioni
+9,0
+Michele, it no name?
+Numero di prenotazione 5266253512
+Categorie base Staff 10
+6,0
+Filippo, it Filippo Birritella in 16/06 out 18/06 camera 404
+Numero di prenotazione 6262516395
+Categorie base Staff 10"""
+    blocks = split_review_blocks(text, "2026-06-19", "Booking", None, "booking.txt")
+    assert len(blocks) == 2
+    assert [block["rating"] for block in blocks] == ["9,0", "6,0"]
 
 
 def test_review_ranking_best_and_worst(db):

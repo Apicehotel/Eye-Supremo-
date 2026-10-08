@@ -35,18 +35,19 @@ ACCOUNTING_EXCLUSION_KEYWORDS = {
     "contributo conai", "ritenuta", "acconto",
 }
 CATEGORY_KEYWORDS = {
-    "Camere / Arredi": ["camera", "arredo", "mobili", "mobilio", "armadio", "comodino"],
-    "Ristorante": ["ristorante", "cena", "pranzo", "menu", "menù", "cucina"],
+    "Camere / Arredi": ["camera", "camere", "stanza", "stanze", "albergo", "hotel", "struttura", "strutture", "bagno", "sedia", "sedie", "arredo", "mobili", "mobilio", "armadio", "comodino"],
+    "Ristorante": ["ristorante", "cena", "pranzo", "menu", "menù", "cucina", "cocktail"],
     "Colazione": ["colazione", "breakfast", "buffet", "cornetto", "croissant", "caffè", "caffe", "cappuccino", "salato", "frutta"],
-    "Staff": ["staff", "personale", "reception", "receptionist", "gentile", "cortese"],
+    "Staff": ["staff", "personale", "reception", "receptionist", "servizio", "servizi", "massaggio", "massaggi", "gentile", "gentilissimo", "gentilissima", "cordiale", "cordialissimo", "cordialissima", "disponibile", "cortese"],
     "Letti": ["letto", "letti", "materasso", "materassi"],
-    "Pulizia": ["pulizia", "pulito", "pulita", "sporco", "sporca", "igiene"],
+    "Pulizia": ["pulizia", "pulito", "pulita", "pulitissimo", "pulitissima", "pulitissimi", "pulitissime", "sporco", "sporca", "igiene"],
     "Parcheggio": ["parcheggio", "garage", "posto auto"],
     "Posizione": ["posizione", "zona", "centro", "vicino", "distanza"],
     "Cuscini": ["cuscino", "cuscini"],
 }
-POSITIVE_WORDS = {"ottimo", "ottima", "eccellente", "pulito", "pulita", "gentile", "comodo", "comoda", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica", "super", "ricca", "ricco", "abbondante", "abbondanti", "accettabile", "ok"}
-NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rotto", "rotta", "scomodo", "scomoda", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi"}
+POSITIVE_WORDS = {"ottimo", "ottima", "ottimi", "ottime", "eccellente", "pulito", "pulita", "pulitissimo", "pulitissima", "pulitissimi", "pulitissime", "gentile", "gentilissimo", "gentilissima", "comodo", "comoda", "confortevole", "confortevoli", "agevole", "agevoli", "funzionale", "funzionali", "spazioso", "spaziosa", "silenzioso", "silenziosa", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica", "fantastiche", "super", "ricca", "ricco", "abbondante", "abbondanti", "accettabile", "cordiale", "cordialissimo", "cordialissima", "disponibile", "accogliente", "divina", "bello", "bella", "belle", "bravo", "bravissimi", "onesto", "onestissimo", "ampio", "ampia", "ampi", "ampie", "vicino", "vicina", "vicini", "innovativa", "garantiti", "molta", "molte", "scelta", "varietà", "varieta", "ok"}
+NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rumorosa", "rotto", "rotta", "scomodo", "scomoda", "disagio", "disagevole", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi", "stretto", "stretta", "vecchio", "vecchia", "datato", "datata", "datate", "distante", "lontano", "lontana", "pochi", "poche", "poco", "poca", "limitato", "limitata", "limitate", "deludente", "neo"}
+NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza"}
 
 
 def seed_eye_supremo(db: Session) -> None:
@@ -181,28 +182,73 @@ def invoice_search_summary(records: list[dict]) -> dict:
 def classify_review_text(db: Session, text: str, hotel_id: int | None = None) -> list[dict]:
     matches = []
     raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()] or [text]
+    emoji_context: str | None = None
     for raw_sentence in raw_sentences:
         # A single review sentence can contain independent judgements joined by
         # commas (e.g. "colazione ottima, croissant da migliorare"). Analyse
         # those clauses independently so one positive aspect cannot mask a
         # negative aspect in the same sentence.
-        clauses = [s.strip() for s in re.split(r"\s*[,;]\s*", raw_sentence) if s.strip()] or [raw_sentence]
+        clauses = [s.strip() for s in re.split(r"\s*(?:[,;]|\bma\b|\bperò\b|\bnonostante\b|\btuttavia\b|\bunico\s+neo\b|(?=\bcomunque\b))\s*", raw_sentence, flags=re.I) if s.strip()] or [raw_sentence]
+        active_categories: set[str] = set()
         for clause in clauses:
+            if re.match(r"comunque\b", clause, re.I):
+                emoji_context = None
             sentence = normalize_text(clause)
             tokens = set(re.findall(r"[a-zà-ÿ]+", sentence))
-            positive = len(tokens & POSITIVE_WORDS)
-            negative = len(tokens & NEGATIVE_WORDS)
-            if re.search(r"\bnon\s+(?:è\s+)?(?:buon|ottim|comodo|perfett|super)", sentence): negative += 1
+            positive = 0
+            negative = 0
+            ordered_tokens = re.findall(r"[a-zà-ÿ]+", sentence)
+            for index, token in enumerate(ordered_tokens):
+                window = ordered_tokens[max(0, index - 3):index]
+                inverted = any(negation in window for negation in NEGATIONS)
+                if token in POSITIVE_WORDS:
+                    negative += 1 if inverted else 0
+                    positive += 0 if inverted else 1
+                elif token in NEGATIVE_WORDS:
+                    positive += 1 if inverted else 0
+                    negative += 0 if inverted else 1
+            # The meaning belongs to the phrase, not to an isolated token:
+            # ``pochi passi`` means close/convenient, while ``pochi`` alone
+            # can still indicate scarcity.
+            if re.search(r"\bpochi\s+passi\b", sentence):
+                negative = max(0, negative - 1)
+                positive += 1
+            if re.search(r"\bnon\b[^.!?\n]{0,60}\b(?:molti|molte|molto|molta|aveva|avevano|c['’]era|c['’]erano)\b", sentence):
+                negative += 1
+            if re.search(r"\b(?:al|sotto)\s+di\s+sotto\b|\bsotto\s+le\s+aspettative\b", sentence):
+                negative += 1
+            if any(symbol in clause for symbol in ("😊", "🙂", "😃")):
+                emoji_context = "positive"
+                positive += 1
+            if any(symbol in clause for symbol in ("☹", "🙁", "😞", "😡")):
+                emoji_context = "negative"
+                negative += 1
+            if emoji_context == "positive" and not positive and not negative:
+                positive += 1
+            elif emoji_context == "negative" and not positive and not negative:
+                negative += 1
             polarity = "negative" if negative > positive else "positive" if positive > negative else "neutral"
             if polarity == "neutral":
                 continue
             for category, keywords in CATEGORY_KEYWORDS.items():
                 hits = [k for k in keywords if normalize_text(k) in sentence]
                 if hits:
+                    active_categories.add(category)
+                if not hits and category in active_categories:
+                    hits = ["contesto"]
+                if hits:
                     cat = db.scalar(select(ReviewCategory).where(ReviewCategory.name == category))
                     if cat:
                         matches.append({"category_id": cat.id, "category": cat.name, "polarity": polarity, "confidence": min(1.0, .65 + .08 * len(hits)), "excerpt": clause[:240]})
-    return matches
+    # A review can mention the same aspect in several clauses; expose one
+    # category/polarity tag per review instead of producing duplicate rows.
+    unique: dict[tuple[int, str], dict] = {}
+    for match in matches:
+        key = (match["category_id"], match["polarity"])
+        previous = unique.get(key)
+        if previous is None or match["confidence"] > previous["confidence"]:
+            unique[key] = match
+    return list(unique.values())
 
 
 def register_emerging_theme(db: Session, hotel_id: int | None, name: str) -> EmergingTheme:

@@ -4,13 +4,13 @@ import socket
 import threading
 import time
 import traceback
-import webbrowser
 from pathlib import Path
 
 # Prima dell'import dell'app: abilita bootstrap cache offline sull'EXE.
 os.environ.setdefault("EYESUPREMO_CACHE_BOOTSTRAP_ON_START", "1")
 
 import uvicorn
+import webview
 from app.main import app as fastapi_app
 
 HOST = "127.0.0.1"
@@ -36,20 +36,17 @@ def write_log(message: str) -> None:
         handle.write(f"[{stamp}] {message}\n")
 
 
-def wait_and_open_browser(timeout: float = 30.0) -> None:
+def wait_for_server(timeout: float = 30.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             with socket.create_connection((HOST, PORT), timeout=0.5):
-                if os.environ.get("EYE_SUPREMO_NO_BROWSER") == "1":
-                    write_log(f"Server pronto su {URL}; apertura browser soppressa dal test.")
-                    return
-                write_log(f"Server pronto su {URL}; apro il browser.")
-                webbrowser.open(URL)
-                return
+                write_log(f"Server pronto su {URL}.")
+                return True
         except OSError:
             time.sleep(0.25)
     write_log(f"Timeout: server non raggiungibile su {URL} dopo {timeout:.0f}s.")
+    return False
 
 
 def show_fatal_error(message: str) -> None:
@@ -68,9 +65,30 @@ def show_fatal_error(message: str) -> None:
 
 if __name__ == "__main__":
     write_log("Avvio Eye Supremo desktop (bootstrap cache offline abilitato).")
-    threading.Thread(target=wait_and_open_browser, daemon=True).start()
+    server_thread = threading.Thread(
+        target=lambda: uvicorn.run(fastapi_app, host=HOST, port=PORT, log_level="warning"),
+        daemon=True,
+    )
+    server_thread.start()
     try:
-        uvicorn.run(fastapi_app, host=HOST, port=PORT, log_level="warning")
+        if not wait_for_server():
+            raise RuntimeError(f"server non raggiungibile su {URL}")
+
+        # La smoke test CI deve poter interrogare l'API senza aprire una finestra.
+        if os.environ.get("EYE_SUPREMO_NO_BROWSER") == "1":
+            server_thread.join()
+        else:
+            # pywebview usa WebView2 su Windows: l'app resta una finestra desktop
+            # autonoma e non passa più dal browser esterno dell'utente.
+            webview.create_window(
+                "Eye Supremo",
+                URL,
+                width=1440,
+                height=920,
+                min_size=(1100, 700),
+                text_select=True,
+            )
+            webview.start(debug=False)
     except Exception as exc:
         detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         write_log("Errore fatale durante l'avvio:\n" + detail)

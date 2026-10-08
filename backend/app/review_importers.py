@@ -21,6 +21,12 @@ def _parse_date(value: str | None, fallback: str) -> str:
 
 
 def _rating(text: str):
+    # TripAdvisor often omits the overall score and writes only category
+    # scores compacted in the digest (for example ``Camere3,0 Servizio3,0``).
+    # Treat those values as real votes and use their average as the review
+    # score, while the category text remains available for classification.
+    category_pattern = r"(?:camere?|servizio|posizione|pulizia|comfort|staff|letti?|ristorante|colazione|rapporto[ \t]+qualità/prezzo)[ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?)"
+    # An explicit overall score always has priority over category scores.
     patterns = (
         r"(?:voto|rating|score|valutazione)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)",
         r"\b(\d+(?:[.,]\d+)?)\s*/\s*10\b",
@@ -30,6 +36,25 @@ def _rating(text: str):
         match = re.search(pattern, text, re.I)
         if match:
             return match.group(1).replace(",", ".")
+    # Booking exports may put the overall score on the line immediately
+    # before the guest name (``9,0 Luca, it``) without a label.
+    standalone_author_score = re.search(
+        r"(?m)^\s*(10(?:[.,]0)?|[0-9](?:[.,][0-9])?)\s+(?=[A-ZÀ-ÿ][^\n]{1,80})",
+        text,
+    )
+    if standalone_author_score:
+        return standalone_author_score.group(1).replace(",", ".")
+    category_scores = [
+        float(value.replace(",", "."))
+        for value in re.findall(
+            category_pattern,
+            text,
+            re.I,
+        )
+    ]
+    category_scores = [value for value in category_scores if 0 <= value <= 10]
+    if category_scores:
+        return f"{sum(category_scores) / len(category_scores):.1f}"
     return None
 
 
@@ -63,9 +88,69 @@ def _review_date(text: str, fallback: str) -> str:
 
 
 def _room(text: str):
-    match = re.search(r"(?:\bCAM\b|camera|room)\s*[:#\-]?\s*([A-Z0-9-]{1,12})", text, re.I)
+    match = re.search(r"(?:\bCAM\b|camera|room)[ \t]*[:#.\-]?[ \t]*([A-Z0-9-]{1,12})", text, re.I)
     value = match.group(1) if match else None
-    return value if value and re.fullmatch(r"\d{1,4}[A-Z]?", value, re.I) else None
+    if value and re.fullmatch(r"\d{1,4}[A-Z]?", value, re.I):
+        return value
+    # Booking digests often put the room number after the room type, e.g.
+    # ``Matrimoniale Superior Jazz 4410 Numero di prenotazione ...``.
+    booking_match = re.search(
+        r"(?:matrimoniale|suite|tripla|quadrupla|doppia|singola|junior|deluxe|superior|standard)[^\n]{0,80}?\b(\d{3,4}[A-Z]?)\b(?=\s+numero di prenotazione)",
+        text,
+        re.I,
+    )
+    return booking_match.group(1) if booking_match else None
+
+
+def clean_review_text(text: str) -> str:
+    """Keep only the guest-written review text, removing email/platform metadata."""
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = re.sub(r"<https?://[^>]+>|<mailto:[^>]+>|https?://\S+", " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    google_mode = bool(re.search(r"\bgoogle\b", cleaned, re.I))
+    sections = re.split(r"(?im)^\s*_{10,}\s*$", cleaned)
+    if len(sections) > 1:
+        cleaned = sections[-1]
+    # Inline Booking separators often put the guest text after the
+    # translation/footer marker on the same line.
+    cleaned = re.sub(r"(?is)^.*?tradotto .*?vedi l['’]originale\s*", "", cleaned)
+    technical = re.compile(
+        r"^(?:numero di prenotazione\b|categorie\s+(?:base|extra)\b|"
+        r"staff|pulizia|posizione|servizi|comfort|rapporto qualità/prezzo|"
+        r"letti|vista dalla camera|wifi|parcheggio|cuscini|"
+        r"google|tripadvisor|booking(?:\.com)?|"
+        r"(?:vacanza|affari|coppia|famiglia|viaggio)\s*[✦❘|·].*|"
+        r"punti forti dell['’]hotel.*|costo giusto|"
+        r"[^\n]{1,100}\s+ha scritto una recensione.*|\d+\s+contributi.*|"
+        r"recensioni hotel.*|numero di prenotazione.*|\d{1,2}\s+ago\s+\d{4}.*|"
+        r"(?:matrimoniale|suite|tripla|quadrupla|doppia|singola|junior|deluxe|superior|standard)[^\n]{0,100}\d{3,4}\s+numero di prenotazione.*|"
+        r"[A-ZÀ-Ý][^,\n]{1,100},\s*[a-z]{2}\s+[A-ZÀ-Ý][^\n]{1,100}|"
+        r"(?:camere|servizio|posizione)\s*\d+(?:[.,]\d+)?|"
+        r"#[0-9]+|\d{1,2}/\d{1,2}/\d{2,4}\s*-\s*\d{1,2}/\d{1,2}/\d{2,4}|"
+        r"[^\n]{2,80}\s+su google|[^\n]{2,80}\s+google|"
+        r"rispondi|nuovo!|tradotto .*vedi l'originale|"
+        r"nessuna recensione.*|da:|inviato:|a:|oggetto:|"
+        r"hotel gio.*|codice identificativo nazionale.*|cin\s+[A-Z0-9]+|tel\.?\s*\d|"
+        r"novità:.*|reception@.*|www\..*|https?:.*|tel.*|amin|michele|"
+        r"\*?eventuali offerte presenti.*|scopri i nostri suggerimenti.*|"
+        r"reception@.*|www\..*|michele)$",
+        re.I,
+    )
+    guest_metadata = re.compile(r"^[^,\n]{1,100},\s*[a-z]{2}\b.*\b(?:in|out|camera|cam)\b", re.I)
+    lines = []
+    for line in cleaned.splitlines():
+        value = re.sub(r"\s+", " ", line).strip()
+        if not value or technical.match(value) or guest_metadata.match(value) or re.fullmatch(r"\d+(?:[.,]\d+)?(?:\s*/\s*\d+)?", value):
+            continue
+        if google_mode and re.fullmatch(r"[A-ZÀ-Ý][a-zà-ÿ'’-]{2,}(?:\s+[A-ZÀ-Ý][a-zà-ÿ'’-]{2,}){0,3}(?:\s+DJ)?", value):
+            continue
+        if re.match(r"^(?:cam(?:era)?|room)\b", value, re.I) and re.search(r"\b\d{1,4}[A-Z]?\b", value, re.I):
+            continue
+        # Google sometimes concatenates the category label directly to the
+        # guest prose (e.g. ``CamereLa mia camera...``).
+        value = re.sub(r"^(?:Camere|Attività nelle vicinanze|Sicurezza|Percorribilità a piedi|Mangiare e bere|Dettagli importanti)\s*", "", value, flags=re.I)
+        lines.append(value)
+    return "\n".join(lines).strip()
 
 
 def _markitdown_text(path: Path) -> str | None:
@@ -84,7 +169,7 @@ def _looks_like_review(text: str) -> bool:
     low = text.lower()
     platform = any(x in low for x in ("booking", "tripadvisor", "google"))
     review_terms = any(x in low for x in ("recensione", "review", "valutazione", "voto", "positivo", "negativo"))
-    room_terms = bool(re.search(r"(?:\bCAM\b|camera|room)\s*[:#\-]?\s*[A-Z0-9-]{1,12}", text, re.I))
+    room_terms = bool(re.search(r"(?:\bCAM\b|camera|room)[ \t]*[:#.\-]?[ \t]*[A-Z0-9-]{1,12}", text, re.I))
     return (platform and review_terms) or (room_terms and review_terms)
 
 
@@ -93,34 +178,95 @@ def split_review_blocks(text: str, default_date: str, source_hint: str, author_h
     if not cleaned:
         return []
 
-    # Real Hotel Giò messages often contain many Booking reviews and expose each room as CAM: NNN.
-    starts = [m.start() for m in re.finditer(r"(?im)(?:^|\n)\s*(?:CAM|CAMERA|ROOM)\s*[:#\-]?\s*[A-Z0-9-]{1,12}", cleaned)]
+    # Real Hotel Giò messages often contain many Booking reviews. Depending on
+    # the export, the room marker may be on its own line (``CAM: 217``) or in
+    # the guest line (``camera 2219`` / ``cam:2209``).
+    room_pattern = r"(?i)(?<![A-Z0-9])(?:CAM|CAMERA|ROOM)[ \t]*[:#.\-]?[ \t]*\d{1,4}[A-Z]?\b"
+    room_matches = list(re.finditer(room_pattern, cleaned))
+    starts = [m.start() for m in room_matches]
+    if source_hint.lower() == "booking":
+        # Booking digests sometimes mark only the first room with ``CAM:``;
+        # subsequent reviews use the room type followed by the room number
+        # and ``Numero di prenotazione``.
+        booking_room_pattern = r"(?im)(?<![A-Z0-9])(?:CAM|CAMERA|ROOM)[ \t]*[:#.\-]?[ \t]*\d{1,4}[A-Z]?\b|(?<![A-Z0-9])(?:MATRIMONIALE|SUITE|TRIPLA|QUADRUPLA|DOPPIA|SINGOLA|JUNIOR|DELUXE|SUPERIOR|STANDARD)[^\n]{0,80}\b\d{3,4}\b(?=\s+Numero di prenotazione)"
+        starts = sorted({match.start() for match in re.finditer(booking_room_pattern, cleaned)})
+        # Some Booking exports contain an invalid/missing room code (for
+        # example ``camera ???``). Use the metadata line immediately before
+        # each reservation number as an additional review boundary so the
+        # following reservation cannot remain attached to the previous one.
+        reservation_pattern = re.compile(r"(?i)nu\s*mero di prenotazione\b")
+        for reservation in reservation_pattern.finditer(cleaned):
+            window_start = max(0, reservation.start() - 800)
+            prefix = cleaned[window_start:reservation.start()]
+            line_matches = list(re.finditer(r"(?im)^[^\n]*(?:\bcam\b|\bcamera\b|\broom\b|\bmatrimoniale\b|\bsuite\b|\bin\b[^\n]*\bout\b|,\s*[a-z]{2}\b|\banonimo\b)[^\n]*$", prefix))
+            if not line_matches:
+                continue
+            for line in reversed(line_matches):
+                line_text = line.group().strip()
+                if re.search(r"\bin\b.*\bout\b|(?:\bcam\b|\bcamera\b|\broom\b)\s*[:#.-]?\s*(?:\d{1,4}[A-Z]?|\?+)|,\s*[a-z]{2}\b|\banonimo\b", line_text, re.I):
+                    starts.append(window_start + line.start())
+                    break
+        starts = sorted(set(starts))
     blocks: list[str] = []
     if len(starts) >= 2:
-        prefix_start = max(0, starts[0] - 800)
         for idx, start in enumerate(starts):
             end = starts[idx + 1] if idx + 1 < len(starts) else len(cleaned)
-            block = cleaned[start:end].strip()
-            if idx == 0 and prefix_start < start:
-                prefix = cleaned[prefix_start:start]
-                if any(p in prefix.lower() for p in ("booking", "tripadvisor", "google")):
-                    block = prefix + "\n" + block
-            blocks.append(block)
+            blocks.append(cleaned[start:end].strip())
     else:
         # Fallback for Google/TripAdvisor mail digests: split on repeated platform headings when possible.
         parts = re.split(r"(?im)(?=^\s*(?:booking(?:\.com)?|tripadvisor|google)\b)", cleaned)
         blocks = [p.strip() for p in parts if p.strip()] if len(parts) > 1 else [cleaned]
 
-    reviews: list[dict] = []
+    # Some digests append a second review to the same message, introduced by
+    # ``<name> ha scritto una recensione``. Keep those reviews separate even
+    # when only the first one has a room marker.
+    review_marker = re.compile(r"(?im)^\s*[^\n]{1,100}\s+ha scritto una recensione\b")
+    separated: list[str] = []
     for block in blocks:
-        if not _looks_like_review(block):
+        markers = list(review_marker.finditer(block))
+        if not markers:
+            separated.append(block)
             continue
+        separated.append(block[:markers[0].start()].strip())
+        for marker_index, marker in enumerate(markers):
+            end = markers[marker_index + 1].start() if marker_index + 1 < len(markers) else len(block)
+            separated.append(block[marker.start():end].strip())
+    blocks = [block for block in separated if block]
+
+    reviews: list[dict] = []
+    for idx, block in enumerate(blocks):
+        has_room_marker = bool(re.search(room_pattern, block)) or (
+            source_hint.lower() == "booking" and _room(block) is not None
+        )
+        has_booking_boundary = source_hint.lower() == "booking" and bool(re.search(r"(?i)nu\s*mero di prenotazione\b", block))
+        has_review_marker = bool(review_marker.search(block))
+        if not _looks_like_review(block) and not has_room_marker and not has_booking_boundary and not has_review_marker:
+            continue
+        # The score and guest name are commonly immediately before the room
+        # marker. Use a bounded context only for metadata extraction; keep the
+        # visible text limited to the current review block.
+        context = block
+        if starts and idx < len(starts):
+            prefix_start = max(0, starts[idx] - 800)
+            context = cleaned[prefix_start:starts[idx]] + "\n" + block
+        # Prefer the nearest unlabeled Booking score before this room marker;
+        # the bounded context can contain the previous review's score.
+        prefix = cleaned[max(0, starts[idx] - 800):starts[idx]] if starts and idx < len(starts) else ""
+        nearby_scores = re.findall(
+            r"(?m)^\s*(10(?:[.,]0)?|[0-9](?:[.,][0-9])?)\s+(?=[A-ZÀ-ÿ][^\n]{1,80})",
+            prefix,
+        )
+        prefix_line_scores = re.findall(r"(?m)^\s*(10(?:[.,]0)?|[0-9](?:[.,][0-9])?)\s*$", prefix)
+        rating = nearby_scores[-1] if nearby_scores else (prefix_line_scores[-1] if prefix_line_scores else _rating(prefix))
+        if rating is None:
+            standalone = re.findall(r"(?m)^\s*(\d+(?:[.,]\d+)?)\s*$", cleaned[max(0, starts[idx] - 500):starts[idx]]) if starts and idx < len(starts) else []
+            rating = standalone[-1] if standalone else None
         reviews.append({
-            "date": _review_date(block, default_date),
-            "author": _author(block, author_hint),
-            "source": _source(block, source_hint),
+            "date": _review_date(context, default_date),
+            "author": _author(context, author_hint),
+            "source": _source(context, source_hint),
             "text": block,
-            "rating": _rating(block),
+            "rating": rating,
             "room_code": _room(block),
             "raw_file": raw_file,
         })

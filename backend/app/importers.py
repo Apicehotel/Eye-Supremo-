@@ -40,8 +40,14 @@ def parse_xml(path: Path) -> dict:
         })
     raw_date = tag(body, "Data") or date.today().isoformat()
     total = decimal(tag(body, "ImportoTotaleDocumento"), str(sum(decimal(x["totale_riga"]) for x in rows)))
-    taxable = sum(decimal(x["totale_riga"]) for x in rows)
-    return {"supplier": {"ragione_sociale": company or "Fornitore da verificare", "partita_iva": tag(supplier_node, "IdCodice"), "codice_fiscale": tag(supplier_node, "CodiceFiscale")}, "invoice": {"numero": tag(body, "Numero") or "SENZA-NUMERO", "data": raw_date, "imponibile": str(taxable), "iva": str(total-taxable), "totale": str(total), "valuta": tag(body, "Divisa") or "EUR"}, "rows": rows, "confidence": 1.0, "warnings": []}
+    summaries = root.findall(".//{*}DatiRiepilogo")
+    if summaries:
+        taxable = sum((decimal(tag(summary, "ImponibileImporto")) for summary in summaries), Decimal("0"))
+        vat = sum((decimal(tag(summary, "Imposta")) for summary in summaries), Decimal("0"))
+    else:
+        taxable = sum(decimal(x["totale_riga"]) for x in rows)
+        vat = total - taxable
+    return {"supplier": {"ragione_sociale": company or "Fornitore da verificare", "partita_iva": tag(supplier_node, "IdCodice"), "codice_fiscale": tag(supplier_node, "CodiceFiscale")}, "invoice": {"numero": tag(body, "Numero") or "SENZA-NUMERO", "data": raw_date, "imponibile": str(taxable), "iva": str(vat), "totale": str(total), "valuta": tag(body, "Divisa") or "EUR"}, "rows": rows, "confidence": 1.0, "warnings": []}
 
 
 def parse_pdf(path: Path) -> dict:

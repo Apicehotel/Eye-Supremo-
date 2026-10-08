@@ -13,6 +13,13 @@ def test_xml_structured_parser():
     assert result["invoice"]["numero"] == "42/A"
     assert result["rows"][0]["descrizione_normalizzata"] == "lamp led e27 10w"
 
+def test_xml_parser_uses_fiscal_summary_for_taxable_and_vat():
+    result_path = Path(__file__).parent / "fixtures" / "fattura_riepilogo.xml"
+    result = parse_xml(result_path)
+    assert result["invoice"]["imponibile"] == "100.00"
+    assert result["invoice"]["iva"] == "22.00"
+    assert result["invoice"]["totale"] == "122.00"
+
 def test_health_and_empty_search(client):
     assert client.get("/api/health").status_code == 200
     assert client.get("/api/search", params={"q":"lampadina"}).json()["results"] == []
