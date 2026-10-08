@@ -1,7 +1,7 @@
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.0
+AppVersion=2.0.2
 AppPublisher=Apicehotel
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
