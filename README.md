@@ -14,9 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.0`
+**Versione applicativa:** `2.0.2`
 **Branch di lavoro:** `integrate/main-align`
-**Ultimo aggiornamento:** 7 ottobre 2026
+**Ultimo aggiornamento:** 8 ottobre 2026
 
 ### Completato
 
@@ -30,7 +30,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - gestione utenti e PIN riservata al ruolo Sviluppatore;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
-- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve).
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 - ricerca dello storico prodotti con suggerimenti, selezione delle varianti e layout responsive a due colonne;
 - gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
@@ -188,6 +188,10 @@ Il file `scarica-modelli-ia.bat` resta disponibile nella cartella dell'app per r
 ## Alert
 
 Il dominio supporta alert persistenti per prezzo/anomalie. La pipeline fatture può generare alert quando il prezzo corrente supera in modo rilevante lo storico. Le righe contabili escluse non generano alert prodotto.
+
+## Spazio dati separato
+
+Eye Supremo condivide temporaneamente l'infrastruttura Supabase di MultiHotel per evitare un secondo progetto/costo, ma ha un confine applicativo dedicato: schema logico `eye_supremo` + bucket privato `eye-invoices`. Le tabelle legacy `public.eye_central_*` restano disponibili durante il cutover per non rompere installazioni esistenti. HotelGio è fuori scope e non viene modificato. Vedi [docs/SUPABASE_SPACE.md](docs/SUPABASE_SPACE.md).
 
 ## Ponte Supabase
 

@@ -858,6 +858,17 @@ export function SettingsPage() {
   );
 }
 
+function updateErrorMessage(error: any): string {
+  const raw = String(error?.message || error || "Operazione non riuscita");
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch {
+    /* testo libero */
+  }
+  return raw;
+}
+
 export function SystemPage() {
   const user = currentUser();
   const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
@@ -866,30 +877,121 @@ export function SystemPage() {
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateError, setUpdateError] = useState("");
   async function checkForUpdate() {
-    setUpdateBusy(true); setUpdateError("");
-    try { setUpdate(await eyeApi<any>("/updates/check")); }
-    catch (error: any) { setUpdateError(error.message || "Controllo aggiornamenti non riuscito"); }
-    finally { setUpdateBusy(false); }
-  }
-  async function downloadUpdate() {
-    setUpdateBusy(true); setUpdateError("");
+    setUpdateBusy(true);
+    setUpdateError("");
     try {
-      const response = await fetch("/api/eye/updates/download", { headers: { "X-Eye-Session": currentSession() } });
+      setUpdate(await eyeApi<any>("/updates/check"));
+    } catch (error: any) {
+      setUpdateError(updateErrorMessage(error) || "Controllo aggiornamenti non riuscito");
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+  async function downloadUpdate(preferProxy = false) {
+    setUpdateBusy(true);
+    setUpdateError("");
+    try {
+      const info = update || (await eyeApi<any>("/updates/check"));
+      setUpdate(info);
+      if (!info?.download_url && !info?.installer_available) {
+        throw new Error(info?.message || "Installer Windows non disponibile nella release GitHub");
+      }
+      // Download diretto da GitHub: evita timeout locale su file da ~60MB.
+      if (!preferProxy && info?.download_url) {
+        const link = document.createElement("a");
+        link.href = info.download_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.download = info.asset_name || "EyeSupremo-Setup.exe";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return;
+      }
+      const response = await fetch("/api/eye/updates/download?mode=proxy", {
+        headers: {
+          "X-Eye-Session": currentSession(),
+          "X-Eye-Role": currentRole(),
+        },
+      });
       if (!response.ok) throw new Error(await response.text());
       const blob = await response.blob();
+      if (!blob.size) throw new Error("Download vuoto: riprova o usa il link GitHub");
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a"); link.href = url; link.download = update?.asset_name || "EyeSupremo-Setup.exe"; link.click();
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = info?.asset_name || "EyeSupremo-Setup.exe";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
       URL.revokeObjectURL(url);
-    } catch (error: any) { setUpdateError(error.message || "Download aggiornamento non riuscito"); }
-    finally { setUpdateBusy(false); }
+    } catch (error: any) {
+      setUpdateError(updateErrorMessage(error) || "Download aggiornamento non riuscito");
+    } finally {
+      setUpdateBusy(false);
+    }
   }
   useEffect(() => {
     if (canManage) api<any[]>("/logs").then(setLogs);
     checkForUpdate();
   }, []);
-  const updatePanel = <section className="panel update-panel"><div className="panel-title"><h2>Aggiornamenti</h2><button className="secondary-btn" onClick={checkForUpdate} disabled={updateBusy}><RefreshCw size={15}/> Controlla</button></div>{updateError&&<div className="error">{updateError}</div>}{update?.update_available?<><p>È disponibile Eye Supremo {update.latest_version} (versione installata {update.current_version}).</p><button className="primary-btn" onClick={downloadUpdate} disabled={updateBusy}><Download size={16}/> Scarica installer aggiornato</button></>:<p>{updateBusy?"Controllo la GitHub Release…":update?`Eye Supremo è aggiornato alla versione ${update.current_version}.`:"Controllo versione non ancora eseguito."}</p>}</section>;
+  const updatePanel = (
+    <section className="panel update-panel">
+      <div className="panel-title">
+        <h2>Aggiornamenti</h2>
+        <button className="secondary-btn" onClick={checkForUpdate} disabled={updateBusy}>
+          <RefreshCw size={15} /> Controlla
+        </button>
+      </div>
+      {updateError && <div className="error">{updateError}</div>}
+      {update?.update_available ? (
+        <>
+          <p>
+            È disponibile Eye Supremo {update.latest_version} (versione installata{" "}
+            {update.current_version}).
+          </p>
+          <div className="form-actions">
+            <button className="primary-btn" onClick={() => downloadUpdate(false)} disabled={updateBusy}>
+              <Download size={16} />
+              {updateBusy ? "Apertura download…" : "Scarica installer aggiornato"}
+            </button>
+            <button className="secondary-btn" onClick={() => downloadUpdate(true)} disabled={updateBusy}>
+              Download via Eye (fallback)
+            </button>
+          </div>
+          {update.release_url && (
+            <small>
+              Release:{" "}
+              <a href={update.release_url} target="_blank" rel="noreferrer">
+                {update.latest_version}
+              </a>
+              {update.asset_name ? ` · ${update.asset_name}` : ""}
+            </small>
+          )}
+        </>
+      ) : (
+        <p>
+          {updateBusy
+            ? "Controllo la GitHub Release…"
+            : update
+              ? update.installer_available === false
+                ? `Versione ${update.current_version}: release trovata ma senza installer scaricabile.`
+                : `Eye Supremo è aggiornato alla versione ${update.current_version}.`
+              : "Controllo versione non ancora eseguito."}
+        </p>
+      )}
+    </section>
+  );
   if (!canManage)
-    return (<><PageHeader title="Sistema" subtitle="Stato applicazione e aggiornamenti" />{updatePanel}<section className="panel"><Empty title="Accesso riservato" text="I log di sistema sono disponibili solo allo Sviluppatore." /></section></>);
+    return (
+      <>
+        <PageHeader title="Sistema" subtitle="Stato applicazione e aggiornamenti" />
+        {updatePanel}
+        <section className="panel">
+          <Empty title="Accesso riservato" text="I log di sistema sono disponibili solo allo Sviluppatore." />
+        </section>
+      </>
+    );
   return (
     <>
       <PageHeader
