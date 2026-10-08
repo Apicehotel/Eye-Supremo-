@@ -167,9 +167,9 @@ Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
 
 Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
 
-**Ricerca fatture:** estesa a **tutte** le fatture/righe dell’archivio locale e della cache — nessun tetto nascosto (500/2000/ultime N). `limit`/`offset` servono solo a paginare la UI; `total` e i totali economici coprono l’intero match set.
+**Ricerca fatture:** estesa a **tutte** le fatture/righe dell’archivio locale e della cache — nessun tetto nascosto (500/2000/ultime N). Include varianti prodotto (es. `mini bomboloni` / `MINIBOMBOLONI` cercando `bomboloni`) e diversifica i fornitori in pagina così un vendor frequente non monopolizza i primi risultati. `limit`/`offset` paginano solo la UI; `total`, totali economici e conteggio fornitori coprono l’intero match set.
 
-**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → `bomboloni`) e cerca senza limite sull’indice; allo LLM arrivano ~24 righe di contesto, mentre summary e storico prezzi usano tutti i match. Domande tipo fornitore migliore / fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
+**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → `bomboloni`) e cerca senza limite sull’indice (anche mini/composti); allo LLM arrivano ~24 righe **diversificate per fornitore**, mentre summary e storico prezzi usano tutti i match. La risposta sul fornitore migliore elenca anche gli altri. Domande tipo fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 

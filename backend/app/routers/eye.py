@@ -394,6 +394,8 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=5000), o
                         "total": row_page["total"],
                         "offset": row_page["offset"],
                         "limit": row_page["limit"],
+                        "suppliers": row_page.get("suppliers") or [],
+                        "supplier_count": row_page.get("supplier_count") or 0,
                         "source": "sqlite-cache",
                         "scope": "full-cache",
                         "sync": status,

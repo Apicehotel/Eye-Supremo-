@@ -16,7 +16,7 @@ from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .review_cache import cached_review_search
-from .product_taxonomy import extract_product_query
+from .product_taxonomy import diversify_by_supplier, extract_product_query, supplier_breakdown
 from .search_index import invoice_search
 
 # Limiti snelli per Ask: meno token verso l'LLM. La ricerca SQL/FTS invece
@@ -223,7 +223,8 @@ def _slim_historical(report: dict[str, Any] | None) -> dict[str, Any] | None:
     if not report or not report.get("summary"):
         return None
     suppliers = []
-    for block in (report.get("suppliers") or [])[:4]:
+    # Fino a 12 fornitori: Ask non deve collassare su un solo vendor dominante.
+    for block in (report.get("suppliers") or [])[:12]:
         suppliers.append({
             "supplier": block.get("supplier"),
             "unit": block.get("unit"),
@@ -236,6 +237,7 @@ def _slim_historical(report: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "summary": report.get("summary"),
         "suppliers": suppliers,
+        "supplier_count": len(report.get("suppliers") or []),
         "units": report.get("units") or [],
         "comparison_note": report.get("comparison_note"),
     }
@@ -248,6 +250,9 @@ def _compact_for_llm(context: dict[str, Any]) -> dict[str, Any]:
         compact["invoice_summary"] = context["invoice_summary"]
     if context.get("invoice_rows"):
         compact["invoice_rows"] = _slim_invoice_rows(context["invoice_rows"])
+    if context.get("suppliers"):
+        compact["suppliers"] = (context.get("suppliers") or [])[:12]
+        compact["supplier_count"] = context.get("supplier_count") or len(context.get("suppliers") or [])
     hist = _slim_historical(context.get("historical_product"))
     if hist:
         compact["historical_product"] = hist
@@ -335,7 +340,6 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         product_needle = extract_product_query(question)
         if "bombolon" in product_needle or "bobolon" in product_needle:
             all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        rows = all_rows[:ASK_ROW_LIMIT]
         # Cache SQLite: usala se non ci sono hit locali, o per arricchire se i
         # risultati locali sono pochi (tipico su PC appena installati).
         if len(all_rows) < ASK_ROW_LIMIT:
@@ -345,7 +349,7 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                     str(r.get("description") or "")[:80],
                     str(r.get("date") or ""),
                 )
-                for r in rows
+                for r in all_rows
             }
             cached_page = cached_row_search(db, question, limit=None)
             cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
@@ -376,7 +380,9 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 seen_keys.add(key)
         if "bombolon" in product_needle or "bobolon" in product_needle:
             all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        rows = all_rows[:ASK_ROW_LIMIT]
+        # Contesto LLM: sample diversificato per fornitore (non solo il più frequente).
+        rows = diversify_by_supplier(all_rows, supplier_key="supplier", limit=ASK_ROW_LIMIT)
+        suppliers = supplier_breakdown(all_rows, supplier_key="supplier")
 
         report = None
         # Domande prezzo/fornitore: storico su TUTTE le osservazioni dell'archivio.
@@ -389,6 +395,8 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
             "invoice_rows": rows,
             "invoice_summary": invoice_search_summary(all_rows),
             "match_total": len(all_rows),
+            "suppliers": suppliers,
+            "supplier_count": len(suppliers),
             "historical_product": report,
             "product_query": product_needle or None,
             **({"max_invoice": max_invoice} if max_invoice else {}),
@@ -463,9 +471,27 @@ def _deterministic_answer(
             "confidence": "high" if verification.get("ok", True) else "medium",
         }
 
-    # «Chi mi vende meglio i bomboloni?» → risposta diretta dallo storico prezzi.
+    # «Chi mi vende meglio i bomboloni?» → migliore + elenco degli altri fornitori.
     if hist_summary and _asks_best_supplier(question):
         unit = hist_summary.get("unit") or "pz"
+        supplier_blocks = [
+            b for b in (hist.get("suppliers") or [])
+            if (b.get("unit") or unit) == unit
+        ]
+        others = [
+            f"{b.get('supplier')} (media € {float(b.get('average_price') or 0):.4f}/{unit}, "
+            f"{b.get('observations') or 0} oss.)"
+            for b in supplier_blocks
+            if b.get("supplier") and b.get("supplier") != hist_summary.get("best_supplier")
+        ][:8]
+        others_text = ""
+        if others:
+            others_text = " Altri fornitori nello stesso archivio: " + "; ".join(others) + "."
+        elif len(supplier_blocks) <= 1:
+            row_suppliers = context.get("suppliers") or []
+            alt = [s.get("supplier") for s in row_suppliers if s.get("supplier") and s.get("supplier") != hist_summary.get("best_supplier")]
+            if alt:
+                others_text = " Altri fornitori con righe trovate: " + ", ".join(alt[:8]) + "."
         return {
             "answer": (
                 f"Per {hist_summary.get('product') or product_label}, il fornitore migliore "
@@ -474,12 +500,14 @@ def _deterministic_answer(
                 f"su {hist_summary['best_supplier_observations']} osservazioni; "
                 f"miglior prezzo puntuale € {hist_summary['best_price']:.4f}/{unit} "
                 f"il {hist_summary.get('best_date') or 'n/d'})."
+                f"{others_text}"
             ),
             "facts": [
-                f"Fornitore {hist_summary['best_supplier']}",
+                f"Fornitore migliore {hist_summary['best_supplier']}",
                 f"Media € {hist_summary['best_supplier_average']:.4f}/{unit}",
                 f"Miglior prezzo € {hist_summary['best_price']:.4f}/{unit}",
                 f"{hist_summary['best_supplier_observations']} osservazioni",
+                *([f"{len(supplier_blocks)} fornitori confrontati"] if len(supplier_blocks) > 1 else []),
             ],
             "confidence": "high" if verification.get("ok", True) else "medium",
         }
@@ -526,8 +554,10 @@ async def _qwen_structured(
         scope = "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
     prompt = (
         "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
-        "Non inventare dati assenti dal contesto. Italiano, massimo 4 frasi. "
+        "Non inventare dati assenti dal contesto. Italiano, massimo 5 frasi. "
         f"{scope}"
+        "Se ci sono più fornitori nel contesto, elencarli (non citare solo il primo o il più frequente). "
+        "Includi varianti prodotto (es. mini bomboloni) se presenti. "
         "Prezzi solo su unità confrontabili. "
         "Se i dati non bastano, dillo esplicitamente e abbassa confidence a low.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"
@@ -552,6 +582,11 @@ def _public_context(context: dict[str, Any]) -> dict[str, Any]:
         "invoice_rows": _slim_invoice_rows(context.get("invoice_rows") or []),
         "verification": context.get("verification"),
     }
+    if context.get("suppliers"):
+        public["suppliers"] = (context.get("suppliers") or [])[:12]
+        public["supplier_count"] = context.get("supplier_count") or len(context.get("suppliers") or [])
+    if context.get("match_total") is not None:
+        public["match_total"] = context["match_total"]
     if context.get("max_invoice"):
         public["max_invoice"] = context["max_invoice"]
     if context.get("reviews"):

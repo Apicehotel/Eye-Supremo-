@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from .central_service import central_invoice_page
 from .database import SessionLocal
 from .models import AppSetting, CentralInvoiceCache
-from .product_taxonomy import QUESTION_FILLERS, extract_product_query, search_terms
+from .product_taxonomy import (
+    QUESTION_FILLERS,
+    diversify_by_supplier,
+    extract_product_query,
+    product_stem,
+    search_terms,
+    supplier_breakdown,
+)
 
 
 def cache_status(db: Session) -> dict:
@@ -112,6 +119,39 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
             ).all()
         )
 
+    stem = product_stem(query)
+
+    def _row_matches(hay: str, words: list[str]) -> float | None:
+        """Match famiglia prodotto: substring, stem (minibomboloni), fuzzy stretto."""
+        if tokens:
+            if any(t in hay for t in tokens):
+                return 95.0
+            if stem and len(stem) >= 6 and stem in hay.replace(" ", ""):
+                return 94.0
+            # Token contenuto in una parola composta (minibomboloni ← bomboloni).
+            for token in tokens:
+                core = token[:-1] if len(token) >= 7 else token
+                if len(core) >= 6 and any(core in word for word in words):
+                    return 93.0
+            score = max(
+                (
+                    fuzz.ratio(token, word)
+                    for token in tokens
+                    for word in words
+                    if abs(len(token) - len(word)) <= 2
+                ),
+                default=0,
+            )
+            return float(score) if score >= 90 else None
+        if needle:
+            if needle in hay:
+                return 95.0
+            if stem and len(stem) >= 6 and stem in hay.replace(" ", ""):
+                return 94.0
+            score = max((fuzz.ratio(needle, word) for word in words), default=0)
+            return float(score) if score >= 90 else None
+        return 80.0
+
     ranked: list[tuple[float, dict]] = []
     for record in records:
         try:
@@ -122,8 +162,9 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
         invoice_date = record.invoice_date.isoformat() if record.invoice_date else None
         if not rows:
             hay = f"{record.search_text} {record.supplier_name} {record.invoice_number}".lower()
-            score = 100.0 if (not needle or any(t in hay for t in (tokens or [needle]))) else fuzz.WRatio(needle, hay)
-            if score < 70:
+            words = re.findall(r"[a-zàèéìòù0-9]+", hay)
+            score = _row_matches(hay, words)
+            if score is None or score < 70:
                 continue
             ranked.append((float(score), {
                 "id": record.source_hash,
@@ -144,33 +185,11 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
         for idx, row in enumerate(rows):
             desc = str(row.get("original_description") or row.get("normalized_description") or "")
             norm = str(row.get("normalized_description") or desc)
-            hay = f"{desc} {norm} {record.supplier_name}".lower()
+            hay = f"{desc} {norm}".lower()
             words = re.findall(r"[a-zàèéìòù0-9]+", hay)
-            if tokens:
-                if any(t in hay for t in tokens):
-                    score = 95.0
-                else:
-                    # Fuzzy stretto parola-per-parola: evita bomboloni↔bombola.
-                    score = max(
-                        (
-                            fuzz.ratio(token, word)
-                            for token in tokens
-                            for word in words
-                            if abs(len(token) - len(word)) <= 2
-                        ),
-                        default=0,
-                    )
-                    if score < 90:
-                        continue
-            elif needle:
-                if needle in hay:
-                    score = 95.0
-                else:
-                    score = max((fuzz.ratio(needle, word) for word in words), default=0)
-                    if score < 90:
-                        continue
-            else:
-                score = 80.0
+            score = _row_matches(hay, words)
+            if score is None:
+                continue
             ranked.append((float(score), {
                 "id": f"{record.source_hash}:{idx}",
                 "source_hash": record.source_hash,
@@ -188,18 +207,24 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
             }))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
-    total = len(ranked)
+    items = [item for _, item in ranked]
+    # Diversifica i fornitori prima della paginazione UI.
+    items = diversify_by_supplier(items, supplier_key="supplier_name")
+    total = len(items)
+    suppliers = supplier_breakdown(items, supplier_key="supplier_name")
     if unlimited:
-        page = [item for _, item in ranked]
+        page = items
         page_size = total
     else:
-        page = [item for _, item in ranked[offset: offset + page_size]]
+        page = items[offset: offset + page_size]
     return {
         "items": page,
         "count": len(page),
         "total": total,
         "offset": offset,
         "limit": page_size,
+        "suppliers": suppliers,
+        "supplier_count": len(suppliers),
         "local": True,
         "scope": "full-cache-unlimited",
     }
