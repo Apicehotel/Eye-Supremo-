@@ -372,7 +372,7 @@ def central_status():
 
 
 @router.get("/central/invoices")
-async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), background_tasks: BackgroundTasks = None, role: str = Depends(current_role)):
+async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=5000), offset: int = Query(0, ge=0), background_tasks: BackgroundTasks = None, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     from ..database import SessionLocal

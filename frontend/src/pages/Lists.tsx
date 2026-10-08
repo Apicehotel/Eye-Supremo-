@@ -115,7 +115,7 @@ export function Invoices() {
     <>
       <PageHeader
         title="Fatture"
-        subtitle="Ricerca su tutto l’archivio locale/cache (non solo le ultime fatture)"
+        subtitle="Ricerca estesa a tutte le fatture dell’archivio — nessun tetto nascosto"
       >
         <div className="list-header-controls"><div className="list-header-main">
           <SearchBox
@@ -144,7 +144,7 @@ export function Invoices() {
           <section className="panel list-panel">
             <div className="panel-title">
               <h2>
-                <Search size={18} /> Ricerca locale (tutto l’archivio)
+                <Search size={18} /> Ricerca locale (archivio completo, senza limite)
               </h2>
               {live?.summary && (
                 <Status tone="ok">

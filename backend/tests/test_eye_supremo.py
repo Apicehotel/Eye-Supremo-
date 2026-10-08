@@ -253,6 +253,7 @@ def test_live_search_endpoint_uses_row_total(client, db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["engine"] == "fts5+rapidfuzz"
+    assert payload["scope"] == "full-archive-unlimited"
     assert payload["summary"]["row_total"] == 40
     assert payload["results"][0]["description"] == "LAMP LED E27 12W"
 

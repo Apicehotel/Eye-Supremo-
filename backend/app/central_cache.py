@@ -70,9 +70,10 @@ def _query_tokens(query: str) -> list[str]:
     return [t for t in re.findall(r"[a-zàèéìòù0-9]+", (query or "").lower()) if len(t) >= 4 and t not in QUESTION_FILLERS]
 
 
-def cached_row_search(db: Session, query: str, limit: int = 50, offset: int = 0) -> dict:
-    """Cerca righe fattura in tutta la cache SQLite locale (niente rete Supabase)."""
-    limit = max(1, min(int(limit or 50), 500))
+def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: int = 0) -> dict:
+    """Cerca righe fattura in TUTTA la cache SQLite locale (niente tetto nascosto)."""
+    unlimited = limit is None or int(limit) <= 0
+    page_size = None if unlimited else max(1, int(limit))
     offset = max(0, int(offset or 0))
     tokens = _query_tokens(query)
     needle = (extract_product_query(query) or query or "").strip().lower()
@@ -88,7 +89,7 @@ def cached_row_search(db: Session, query: str, limit: int = 50, offset: int = 0)
                     CentralInvoiceCache.invoice_number.ilike(pattern),
                 )
             )
-        # OR tra varianti prodotto: trova tutte le fatture candidate nell'archivio.
+        # OR tra varianti prodotto: tutte le fatture candidate nell'archivio.
         stmt = stmt.where(or_(*clauses))
     elif needle:
         pattern = f"%{needle}%"
@@ -99,8 +100,8 @@ def cached_row_search(db: Session, query: str, limit: int = 50, offset: int = 0)
                 CentralInvoiceCache.invoice_number.ilike(pattern),
             )
         )
-    # Nessun tetto a 400: se il filtro SQL c'è, scandiamo tutti i match (cap di sicurezza alto).
-    records = list(db.scalars(stmt.limit(20000)).all())
+    # Nessun LIMIT sulla query: scandisce tutte le fatture in cache che matchano.
+    records = list(db.scalars(stmt).all())
     if not records and tokens:
         term = tokens[0]
         records = list(
@@ -108,7 +109,6 @@ def cached_row_search(db: Session, query: str, limit: int = 50, offset: int = 0)
                 select(CentralInvoiceCache)
                 .where(CentralInvoiceCache.search_text.ilike(f"%{term}%"))
                 .order_by(CentralInvoiceCache.invoice_date.desc())
-                .limit(20000)
             ).all()
         )
 
@@ -189,15 +189,19 @@ def cached_row_search(db: Session, query: str, limit: int = 50, offset: int = 0)
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     total = len(ranked)
-    page = [item for _, item in ranked[offset: offset + limit]]
+    if unlimited:
+        page = [item for _, item in ranked]
+        page_size = total
+    else:
+        page = [item for _, item in ranked[offset: offset + page_size]]
     return {
         "items": page,
         "count": len(page),
         "total": total,
         "offset": offset,
-        "limit": limit,
+        "limit": page_size,
         "local": True,
-        "scope": "full-cache",
+        "scope": "full-cache-unlimited",
     }
 
 
