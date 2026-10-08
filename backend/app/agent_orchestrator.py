@@ -157,10 +157,8 @@ def classify_intent(question: str, *, area: str = "all") -> list[str]:
         if hard_product:
             agents.extend(["products", "prices"])
     elif mode == "invoices":
-        if product_hit or not review_hit:
-            agents.extend(["products", "prices"])
-        if review_hit:
-            agents.append("reviews")
+        # Ask Fatture: solo archivio fatture/prodotti/prezzi, niente rumore recensioni.
+        agents.extend(["products", "prices", "invoices"])
         if any(x in q for x in CLASSIFY_HINTS):
             agents.append("classifier")
     else:
@@ -315,25 +313,45 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         lowered_question = question.lower()
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        # Preferisci la cache SQLite locale (già sincronizzata) rispetto a Supabase:
-        # sul PC ufficio è molto più veloce e funziona anche offline.
-        if not rows:
+        # Cache SQLite: usala se non ci sono hit locali, o per arricchire se i
+        # risultati locali sono pochi (tipico su PC appena installati).
+        if len(rows) < ASK_ROW_LIMIT:
+            seen_keys = {
+                (
+                    str(r.get("invoice") or ""),
+                    str(r.get("description") or "")[:80],
+                    str(r.get("date") or ""),
+                )
+                for r in rows
+            }
             cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
-            rows = [{
-                "row_id": item.get("id"),
-                "invoice_id": item.get("source_hash") or item.get("id"),
-                "invoice": item.get("invoice_number"),
-                "date": item.get("invoice_date"),
-                "supplier": item.get("supplier_name"),
-                "description": item.get("original_description") or item.get("normalized_description"),
-                "quantity": float(item.get("quantity") or 0),
-                "unit_price": float(item.get("unit_price") or 0),
-                "row_total": float(item.get("line_total") or 0),
-                "normalized_price": None,
-                "unit": None,
-                "analysis_status": item.get("analysis_status") or "product",
-                "source": "sqlite-cache",
-            } for item in cached_items]
+            for item in cached_items:
+                mapped = {
+                    "row_id": item.get("id"),
+                    "invoice_id": item.get("source_hash") or item.get("id"),
+                    "invoice": item.get("invoice_number"),
+                    "date": item.get("invoice_date"),
+                    "supplier": item.get("supplier_name"),
+                    "description": item.get("original_description") or item.get("normalized_description"),
+                    "quantity": float(item.get("quantity") or 0),
+                    "unit_price": float(item.get("unit_price") or 0),
+                    "row_total": float(item.get("line_total") or 0),
+                    "normalized_price": None,
+                    "unit": None,
+                    "analysis_status": item.get("analysis_status") or "product",
+                    "source": "sqlite-cache",
+                }
+                key = (
+                    str(mapped.get("invoice") or ""),
+                    str(mapped.get("description") or "")[:80],
+                    str(mapped.get("date") or ""),
+                )
+                if key in seen_keys:
+                    continue
+                rows.append(mapped)
+                seen_keys.add(key)
+                if len(rows) >= ASK_ROW_LIMIT:
+                    break
         if "bombolon" in lowered_question or "bobolon" in lowered_question:
             rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
 
@@ -438,15 +456,32 @@ def _deterministic_answer(
     return None
 
 
-async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRuntime) -> dict[str, Any]:
+async def _qwen_structured(
+    question: str,
+    context: dict[str, Any],
+    runtime: AiRuntime,
+    *,
+    area: str = "all",
+) -> dict[str, Any]:
     compact = _compact_for_llm(context)
+    if area == "invoices":
+        scope = (
+            "Ambito: solo fatture, prodotti, fornitori e prezzi. "
+            "Ignora recensioni. Cita numeri, fornitori e date dal contesto. "
+        )
+    elif area == "reviews":
+        scope = "Ambito: solo recensioni, camere, servizi e ranking. "
+    else:
+        scope = "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
     prompt = (
-        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto. "
-        "Non inventare dati. Italiano, max 3 frasi. "
-        "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
-        "Prezzi solo su unità confrontabili.\n"
+        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
+        "Non inventare dati assenti dal contesto. Italiano, massimo 4 frasi. "
+        f"{scope}"
+        "Prezzi solo su unità confrontabili. "
+        "Se i dati non bastano, dillo esplicitamente e abbassa confidence a low.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"
     )
+    # Ask Fatture: mirror veloce (llama) poi scala a Qwen 8B se la risposta è vuota o low.
     return await generate_with_layers(
         prompt=prompt,
         runtime=runtime,
@@ -454,8 +489,8 @@ async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRu
         temperature=0.0,
         num_predict=ASK_NUM_PREDICT,
         num_ctx=ASK_NUM_CTX,
-        request_timeout=35.0,
-        escalate_on_low_confidence=False,
+        request_timeout=45.0,
+        escalate_on_low_confidence=True,
     )
 
 
@@ -528,7 +563,7 @@ async def run_orchestrated_query(
         }
 
     try:
-        structured = await _qwen_structured(question, context, runtime)
+        structured = await _qwen_structured(question, context, runtime, area=area)
         answer = str(structured.get("answer", "")).strip()
         if not answer:
             raise ValueError("Risposta vuota")
@@ -545,12 +580,33 @@ async def run_orchestrated_query(
             "ai_model": structured.get("_model"),
             "ai_policy": runtime.policy,
         }
-    except Exception:
+    except Exception as exc:
         summary = context.get("invoice_summary") or {"rows": 0, "invoices": 0, "row_total": 0}
+        detail = str(exc).lower()
+        ollama_hint = any(
+            token in detail
+            for token in ("modello", "ollama", "connect", "timeout", "11434", "nessun modello")
+        )
         if summary.get("rows"):
-            answer = f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, per € {summary['row_total']:.2f}."
+            answer = (
+                f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, "
+                f"per € {summary['row_total']:.2f}."
+            )
+            if ollama_hint:
+                answer += (
+                    " L'IA locale (Ollama/Qwen) non ha risposto: verifica che Ollama sia avviato "
+                    "e che i modelli siano installati con scarica-modelli-ia.bat "
+                    "(llama3.2:3b + qwen3:8b)."
+                )
         elif context.get("reviews"):
             answer = f"Ho trovato {len(context['reviews'])} recensioni pertinenti nell'archivio locale."
+        elif ollama_hint:
+            answer = (
+                "Ollama non è disponibile o mancano i modelli IA. "
+                "Avvia Ollama e lancia scarica-modelli-ia.bat "
+                "(llama3.2:3b veloce, qwen3:8b qualità). "
+                "Senza modelli restano solo le risposte deterministiche su SQLite."
+            )
         else:
             answer = "Non ho trovato dati pertinenti nell'archivio locale."
         return {
@@ -559,10 +615,11 @@ async def run_orchestrated_query(
             "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
             "answer": answer,
             "facts": [],
-            "confidence": "high" if verification["ok"] else "medium",
+            "confidence": "medium" if ollama_hint else ("high" if verification["ok"] else "medium"),
             "verification": verification,
             "context": _public_context(context),
             "ai_layer": "deterministic",
             "ai_model": None,
             "ai_policy": runtime.policy,
+            "ai_error": str(exc)[:240] if ollama_hint else None,
         }
