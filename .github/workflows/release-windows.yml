@@ -60,6 +60,7 @@ jobs:
       - name: Smoke test eseguibile
         shell: powershell
         run: |
+          $env:EYE_SUPREMO_HEADLESS = '1'
           $env:EYE_SUPREMO_NO_BROWSER = '1'
           $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo.exe" -PassThru
           $ok = $false
