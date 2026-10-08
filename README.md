@@ -26,8 +26,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
 - recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
 - dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
-- login locale per profilo utente con PIN, ruoli e permessi; il login sviluppatore non è più obbligatorio;
-- gestione utenti e PIN riservata al ruolo Sviluppatore;
+- login locale per profilo utente con PIN; il login sviluppatore non è più obbligatorio;
+- tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
 - controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve).
@@ -60,17 +60,15 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 - `choco` — Chocohotel
 - `brigantino` — Hotel Il Brigantino
 
-## Accesso e ruoli
+## Accesso e permessi
 
-Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con un PIN iniziale temporaneo (non riportato qui): lo Sviluppatore deve sostituirlo al primo accesso dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
+Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-- **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
-- **Supremo**: visibilità globale operativa sui tre hotel.
-- **Livello 1 / 2 / 3**: accesso operativo limitabile all'hotel assegnato e alle esclusioni configurate.
+PIN standard iniziale: **`000000`**. Si può cambiare in qualsiasi momento da **Sistema → Utenti e ruoli**. I nuovi profili locali ereditano gli stessi permessi e, se non indicato altrimenti, lo stesso PIN standard.
 
-Per le recensioni, Sviluppatore e Supremo vedono **Tutti gli hotel** oltre alle tre sezioni Giò/Choco/Brigantino. Gli utenti assegnati a una sola struttura vedono solo quella.
+Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
-Per le fatture la visibilità resta aziendale Apice con esclusioni per categoria/prodotto/fornitore/parola chiave; le fatture **non vengono separate in tre archivi hotel**.
+Per le fatture la visibilità resta aziendale Apice; le fatture **non vengono separate in tre archivi hotel**.
 
 ## Fatture: archivio unico Apice
 

@@ -91,7 +91,7 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
 
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
     role = x_eye_role.strip().lower()
-    if role not in {"developer", "supremo", "level1", "level2", "level3"}:
+    if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Ruolo non valido")
     return role
 
@@ -101,12 +101,8 @@ def current_username(x_eye_user: str = Header(default="", alias="X-Eye-User")) -
 
 
 def allowed_hotel_ids(db: Session, role: str, username: str) -> set[int] | None:
-    if role in {"developer", "supremo"}:
-        return None
-    profile = db.scalar(select(UserProfile).where(UserProfile.username == username)) if username else None
-    if profile and profile.home_hotel_id:
-        return {profile.home_hotel_id}
-    return set()
+    # Permessi unificati: ogni profilo attivo vede tutti gli hotel.
+    return None
 
 
 def hotel_from_code(db: Session, code: str) -> Hotel:
@@ -154,18 +150,7 @@ def exclusions(role_name: str | None = None, role: str = Depends(current_role), 
 def add_exclusion(payload: dict, role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Profilo non autorizzato")
-    role_name = str(payload.get("role_name", "")).strip()
-    exclusion_type = str(payload.get("exclusion_type", "")).strip()
-    value = normalize_text(str(payload.get("value", "")))
-    if role_name not in {"level1", "level2", "level3"} or exclusion_type not in {"category", "product", "supplier", "keyword"} or not value:
-        raise HTTPException(422, "Esclusione non valida")
-    existing = db.scalar(select(RoleExclusion).where(RoleExclusion.role_name == role_name, RoleExclusion.exclusion_type == exclusion_type, RoleExclusion.value == value))
-    if existing:
-        existing.enabled = True
-        item = existing
-    else:
-        item = RoleExclusion(role_name=role_name, exclusion_type=exclusion_type, value=value, note=payload.get("note")); db.add(item)
-    db.commit(); db.refresh(item); return item
+    raise HTTPException(410, "I livelli utente sono stati eliminati: le esclusioni per livello non sono più utilizzate")
 
 
 @router.get("/search/live")
@@ -182,9 +167,6 @@ async def ask_eye(payload: dict, role: str = Depends(current_role), username: st
     hotel_id = None
     if payload.get("hotel_code"):
         hotel = hotel_from_code(db, str(payload["hotel_code"])); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
-    elif role not in {"developer", "supremo"}:
-        allowed = allowed_hotel_ids(db, role, username)
-        hotel_id = next(iter(allowed)) if allowed else None
     return await eye_ai_answer(db, question, role_name=role, hotel_id=hotel_id)
 
 
@@ -323,9 +305,6 @@ def rankings(hotel_code: str | None = None, limit: int = Query(5, ge=1, le=25), 
     hotel_id = None
     if hotel_code:
         hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
-    elif role not in {"developer", "supremo"}:
-        allowed = allowed_hotel_ids(db, role, username)
-        hotel_id = next(iter(allowed)) if allowed else None
     return review_rankings(db, hotel_id=hotel_id, limit=limit)
 
 

@@ -85,7 +85,8 @@ export function Shell({
   setPinned: (v: boolean) => void;
 }) {
   const user = currentUser();
-  const isFullAccess = user?.role_name === "developer" || user?.role_name === "supremo";
+  // Permessi unificati: ogni profilo autenticato ha accesso completo.
+  const isFullAccess = Boolean(user);
   const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history">("overview");
   const visibleNav = nav.filter(
     ([id]) => isFullAccess || !["settings", "system"].includes(id),

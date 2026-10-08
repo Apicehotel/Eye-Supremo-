@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/eye/search", tags=["Eye Supremo search"])
 
 def role_from_header(value: str) -> str:
     role = value.strip().lower()
-    if role not in {"developer", "supremo", "level1", "level2", "level3"}:
+    if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Ruolo non valido")
     return role
 

@@ -60,13 +60,13 @@ Due dimensioni principali:
 
 Il punteggio camera applica un fattore di confidenza basato sul numero di recensioni, così una camera con una sola recensione non domina la classifica.
 
-## Ruoli
+## Accesso
 
-Profili logici: `developer`, `supremo`, `level1`, `level2`, `level3`.
+Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, con PIN standard `000000`.
 
-Le fatture sono visibili di base; `role_exclusions` sottrae categorie, prodotti, fornitori o keyword non pertinenti. La ricerca IA applica le stesse esclusioni prima di costruire il contesto.
+La tabella `role_exclusions` resta nel database per compatibilità storica ma non limita più l'accesso operativo.
 
-La selezione ruolo locale è utile per il client standalone. Qualsiasi accesso remoto usa JWT Supabase e membership server-side.
+Qualsiasi accesso remoto usa JWT Supabase e membership server-side.
 
 ## Supabase bridge
 
