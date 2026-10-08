@@ -45,6 +45,7 @@ def test_supplier_search_finds_supplier_from_invoice_line_text(client, db):
 
 
 def test_product_taxonomy_respects_word_boundaries():
+    from app.product_taxonomy import extract_product_query
     assert "lamp" not in search_terms("lampadine")
     assert is_family_match("lampadina LED E27", "lampadine")
     assert not is_family_match("lamponi surgelati", "lampadine")
@@ -53,6 +54,9 @@ def test_product_taxonomy_respects_word_boundaries():
     assert is_family_match("acqua naturale 0,5 lt", "acqua")
     assert not is_family_match("acquedotto tariffa base", "acqua")
     assert "bombolino" in search_terms("bomboloni")
+    assert extract_product_query("Chi mi vende meglio i bomboloni?") == "bomboloni"
+    assert "bombolone" in search_terms("Chi mi vende meglio i bomboloni?")
+    assert extract_product_query("Quanto abbiamo speso per limoncello?") == "limoncello"
 
 
 def test_pack_content_normalizes_piece_price_to_comparable_unit():
@@ -249,6 +253,7 @@ def test_live_search_endpoint_uses_row_total(client, db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["engine"] == "fts5+rapidfuzz"
+    assert payload["scope"] == "full-archive-unlimited"
     assert payload["summary"]["row_total"] == 40
     assert payload["results"][0]["description"] == "LAMP LED E27 12W"
 
@@ -309,6 +314,10 @@ def test_historical_report_tracks_price_direction_and_best_supplier(db):
     marr = next(x for x in report["suppliers"] if x["supplier"] == "MARR")
     assert marr["points"][-1]["trend"] == "down"
     assert marr["points"][-1]["delta"] == -0.05
+    # Domanda in linguaggio naturale: non deve cercare letteralmente tutta la frase.
+    nl_report = historical_product_report(db, "Chi mi vende meglio i bomboloni?")
+    assert nl_report["summary"] is not None
+    assert nl_report["summary"]["best_supplier"] == "MARR"
 
 
 def test_historical_report_understands_invoice_abbreviation(db):

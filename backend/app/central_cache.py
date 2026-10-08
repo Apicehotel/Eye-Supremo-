@@ -10,8 +10,7 @@ from sqlalchemy.orm import Session
 from .central_service import central_invoice_page
 from .database import SessionLocal
 from .models import AppSetting, CentralInvoiceCache
-
-_STOP = {"quanto", "quale", "quali", "cosa", "come", "ho", "hai", "abbiamo", "speso", "pagato", "nel", "nella", "da", "di", "il", "la", "le", "i", "un", "una", "fammi", "vedere", "mostra", "per", "vende", "meglio", "classifica"}
+from .product_taxonomy import QUESTION_FILLERS, extract_product_query, search_terms
 
 
 def cache_status(db: Session) -> dict:
@@ -23,29 +22,65 @@ def cache_status(db: Session) -> dict:
 def cached_search(db: Session, query: str, limit: int, offset: int = 0) -> dict:
     stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc()).offset(max(0, offset)).limit(limit)
     if query:
-        needle = f"%{query.strip().lower()}%"
-        stmt = stmt.where(or_(CentralInvoiceCache.search_text.ilike(needle), CentralInvoiceCache.invoice_number.ilike(needle), CentralInvoiceCache.supplier_name.ilike(needle)))
+        needle = extract_product_query(query) or query.strip().lower()
+        patterns = [f"%{normalize}%" for normalize in dict.fromkeys(
+            [needle.lower()] + [t.lower() for t in search_terms(needle)]
+        ) if normalize]
+        if patterns:
+            clause = or_(*[
+                or_(
+                    CentralInvoiceCache.search_text.ilike(pattern),
+                    CentralInvoiceCache.invoice_number.ilike(pattern),
+                    CentralInvoiceCache.supplier_name.ilike(pattern),
+                )
+                for pattern in patterns
+            ])
+            stmt = stmt.where(clause)
     items = [json.loads(x.payload_json) for x in db.scalars(stmt).all()]
     total_stmt = select(func.count()).select_from(CentralInvoiceCache)
     if query:
-        total_stmt = total_stmt.where(or_(CentralInvoiceCache.search_text.ilike(needle), CentralInvoiceCache.invoice_number.ilike(needle), CentralInvoiceCache.supplier_name.ilike(needle)))
+        needle = extract_product_query(query) or query.strip().lower()
+        patterns = [f"%{normalize}%" for normalize in dict.fromkeys(
+            [needle.lower()] + [t.lower() for t in search_terms(needle)]
+        ) if normalize]
+        if patterns:
+            total_stmt = total_stmt.where(or_(*[
+                or_(
+                    CentralInvoiceCache.search_text.ilike(pattern),
+                    CentralInvoiceCache.invoice_number.ilike(pattern),
+                    CentralInvoiceCache.supplier_name.ilike(pattern),
+                )
+                for pattern in patterns
+            ]))
     return {"enabled": True, "local": True, "items": items, "count": len(items), "total": db.scalar(total_stmt) or 0, "offset": max(0, offset), "limit": limit}
 
 
 def _query_tokens(query: str) -> list[str]:
-    tokens = [t for t in re.findall(r"[a-zàèéìòù0-9]+", (query or "").lower()) if len(t) >= 4 and t not in _STOP]
-    return tokens
+    product = extract_product_query(query)
+    variants = [normalize_text for normalize_text in (
+        [product] + list(search_terms(product or query))
+    ) if normalize_text]
+    tokens: list[str] = []
+    for variant in variants:
+        for token in re.findall(r"[a-zàèéìòù0-9]+", variant.lower()):
+            if len(token) >= 3 and token not in QUESTION_FILLERS and token not in tokens:
+                tokens.append(token)
+    if tokens:
+        return tokens
+    return [t for t in re.findall(r"[a-zàèéìòù0-9]+", (query or "").lower()) if len(t) >= 4 and t not in QUESTION_FILLERS]
 
 
-def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
-    """Cerca righe fattura nella cache SQLite locale (niente rete Supabase)."""
-    limit = max(1, min(int(limit or 50), 500))
+def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: int = 0) -> dict:
+    """Cerca righe fattura in TUTTA la cache SQLite locale (niente tetto nascosto)."""
+    unlimited = limit is None or int(limit) <= 0
+    page_size = None if unlimited else max(1, int(limit))
+    offset = max(0, int(offset or 0))
     tokens = _query_tokens(query)
-    needle = (query or "").strip().lower()
+    needle = (extract_product_query(query) or query or "").strip().lower()
     stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())
     if tokens:
         clauses = []
-        for term in tokens[-3:]:
+        for term in tokens:
             pattern = f"%{term}%"
             clauses.append(
                 or_(
@@ -54,6 +89,7 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
                     CentralInvoiceCache.invoice_number.ilike(pattern),
                 )
             )
+        # OR tra varianti prodotto: tutte le fatture candidate nell'archivio.
         stmt = stmt.where(or_(*clauses))
     elif needle:
         pattern = f"%{needle}%"
@@ -64,20 +100,17 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
                 CentralInvoiceCache.invoice_number.ilike(pattern),
             )
         )
-    records = list(db.scalars(stmt.limit(400)).all())
+    # Nessun LIMIT sulla query: scandisce tutte le fatture in cache che matchano.
+    records = list(db.scalars(stmt).all())
     if not records and tokens:
-        # Soft fallback: last token only, then fuzzy on a bounded scan.
-        term = tokens[-1]
+        term = tokens[0]
         records = list(
             db.scalars(
                 select(CentralInvoiceCache)
                 .where(CentralInvoiceCache.search_text.ilike(f"%{term}%"))
                 .order_by(CentralInvoiceCache.invoice_date.desc())
-                .limit(400)
             ).all()
         )
-    if not records and needle:
-        records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc()).limit(250)).all())
 
     ranked: list[tuple[float, dict]] = []
     for record in records:
@@ -155,7 +188,21 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
             }))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
-    return [item for _, item in ranked[:limit]]
+    total = len(ranked)
+    if unlimited:
+        page = [item for _, item in ranked]
+        page_size = total
+    else:
+        page = [item for _, item in ranked[offset: offset + page_size]]
+    return {
+        "items": page,
+        "count": len(page),
+        "total": total,
+        "offset": offset,
+        "limit": page_size,
+        "local": True,
+        "scope": "full-cache-unlimited",
+    }
 
 
 async def refresh_central_cache() -> dict:

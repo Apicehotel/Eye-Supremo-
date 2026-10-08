@@ -14,7 +14,6 @@ from .models import (
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
 )
 from .normalization import normalize_text
-from .product_taxonomy import search_terms
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -123,49 +122,10 @@ def row_visible_to_role(db: Session, role_name: str, row: InvoiceRow, supplier: 
     return True
 
 
-def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int = 50) -> list[dict]:
-    q = normalize_text(query).strip()
-    terms = [x for x in q.split() if x not in {"quanto", "speso", "pagato", "abbiamo", "ho", "per", "il", "la", "le", "i", "un", "una", "di", "da"}]
-    needle = " ".join(terms).strip()
-    year = re.search(r"\b(19|20)\d{2}\b", q)
-    stmt = (select(InvoiceRow, Invoice, Supplier)
-            .select_from(InvoiceRow)
-            .join(Invoice, InvoiceRow.invoice_id == Invoice.id)
-            .join(Supplier, Invoice.supplier_id == Supplier.id)
-            .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product)))
-    if year:
-        stmt = stmt.where(func.strftime("%Y", Invoice.data) == year.group(0))
-        needle = needle.replace(year.group(0), " ").strip()
-    if needle:
-        fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata, Supplier.ragione_sociale, Invoice.numero)
-        clauses = []
-        for term in tuple(dict.fromkeys(search_terms(needle) + (needle,))):
-            clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in fields]) for token in normalize_text(term).split()]))
-        stmt = stmt.where(or_(*clauses))
-    rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 4, 100))).all()
-    if needle and not rows:
-        candidates = db.execute((select(InvoiceRow, Invoice, Supplier)
-            .select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id)
-            .join(Supplier, Invoice.supplier_id == Supplier.id)
-            .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product))
-            .order_by(Invoice.data.desc()).limit(1500))).all()
-        scored = [(fuzz.WRatio(needle, normalize_text(r.descrizione_originale)), (r, i, s)) for r, i, s in candidates]
-        rows = [item for score, item in sorted(scored, key=lambda x: x[0], reverse=True) if score >= 55][:limit * 2]
-    result = []
-    for row, inv, supplier in rows:
-        if not row_visible_to_role(db, role_name, row, supplier):
-            continue
-        result.append({
-            "row_id": row.id, "invoice_id": inv.id, "invoice": inv.numero,
-            "date": inv.data.isoformat(), "supplier": supplier.ragione_sociale,
-            "description": row.descrizione_originale, "quantity": float(row.quantita),
-            "unit_price": float(row.prezzo_unitario), "row_total": float(row.totale_riga),
-            "normalized_price": float(row.prezzo_normalizzato) if row.prezzo_normalizzato is not None else None,
-            "unit": row.unita_normalizzata, "analysis_status": row.policy.analysis_status if row.policy else "product",
-        })
-        if len(result) >= limit:
-            break
-    return result
+def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int | None = None) -> list[dict]:
+    """Delega all'indice FTS: ricerca estesa a tutto l'archivio, senza tetti nascosti."""
+    from .search_index import invoice_search as fts_invoice_search
+    return fts_invoice_search(db, query, role_name=role_name, limit=limit)
 
 
 def invoice_search_summary(records: list[dict]) -> dict:

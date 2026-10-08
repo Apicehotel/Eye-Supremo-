@@ -16,12 +16,14 @@ from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .review_cache import cached_review_search
+from .product_taxonomy import extract_product_query
 from .search_index import invoice_search
 
-# Limiti snelli per Ask: meno token, meno SQL, risposta più rapida sui PC ufficio.
-ASK_ROW_LIMIT = 12
+# Limiti snelli per Ask: meno token verso l'LLM. La ricerca SQL/FTS invece
+# interroga tutto l'indice (anche 20k+ righe), non solo le ultime fatture.
+ASK_ROW_LIMIT = 24  # solo contesto passato all'LLM; la ricerca sotto è senza tetto
 ASK_REVIEW_LIMIT = 8
-ASK_HISTORY_LIMIT = 180
+ASK_HISTORY_LIMIT = None  # storico prezzi su tutte le osservazioni
 ASK_NUM_PREDICT = 260
 ASK_NUM_CTX = 3072
 
@@ -89,6 +91,26 @@ def _is_simple_spend_question(question: str) -> bool:
         for x in ("meglio", "confront", "aument", "storic", "classific", "perché", "perche", "analizz", "ranking", "sentiment")
     )
     return spend and not complex_
+
+
+def _asks_best_supplier(question: str) -> bool:
+    q = question.lower()
+    return any(
+        phrase in q
+        for phrase in (
+            "vende meglio",
+            "vendono meglio",
+            "fornitore migliore",
+            "miglior fornitore",
+            "chi mi vende",
+            "chi vende",
+            "prezzo migliore",
+            "costo minore",
+            "più conveniente",
+            "piu conveniente",
+            "meno caro",
+        )
+    )
 
 
 def _max_invoice_context(db: Session) -> dict[str, Any] | None:
@@ -307,15 +329,16 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         if max_invoice and _asks_for_max_invoice(question):
             return {"max_invoice": max_invoice, "invoice_rows": [], "invoice_summary": invoice_search_summary([])}
 
-        rows = invoice_search(db, question, role_name=role_name, limit=ASK_ROW_LIMIT)
-        # Keep the bakery product family separate from similarly spelled
-        # technical items such as bombole/bombole per pulizia.
-        lowered_question = question.lower()
-        if "bombolon" in lowered_question or "bobolon" in lowered_question:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        # Ricerca senza tetto su tutto l'archivio; al contesto LLM passiamo solo
+        # le prime ASK_ROW_LIMIT righe (il summary/storico usano il set completo).
+        all_rows = invoice_search(db, question, role_name=role_name, limit=None)
+        product_needle = extract_product_query(question)
+        if "bombolon" in product_needle or "bobolon" in product_needle:
+            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        rows = all_rows[:ASK_ROW_LIMIT]
         # Cache SQLite: usala se non ci sono hit locali, o per arricchire se i
         # risultati locali sono pochi (tipico su PC appena installati).
-        if len(rows) < ASK_ROW_LIMIT:
+        if len(all_rows) < ASK_ROW_LIMIT:
             seen_keys = {
                 (
                     str(r.get("invoice") or ""),
@@ -324,8 +347,9 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 )
                 for r in rows
             }
-            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
-            for item in cached_items:
+            cached_page = cached_row_search(db, question, limit=None)
+            cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
+            for item in cached_items or []:
                 mapped = {
                     "row_id": item.get("id"),
                     "invoice_id": item.get("source_hash") or item.get("id"),
@@ -348,23 +372,25 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 )
                 if key in seen_keys:
                     continue
-                rows.append(mapped)
+                all_rows.append(mapped)
                 seen_keys.add(key)
-                if len(rows) >= ASK_ROW_LIMIT:
-                    break
-        if "bombolon" in lowered_question or "bobolon" in lowered_question:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        if "bombolon" in product_needle or "bobolon" in product_needle:
+            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        rows = all_rows[:ASK_ROW_LIMIT]
 
         report = None
-        if _needs_price_history(question):
+        # Domande prezzo/fornitore: storico su TUTTE le osservazioni dell'archivio.
+        if _needs_price_history(question) or _asks_best_supplier(question) or (not all_rows and product_needle):
             try:
                 report = historical_product_report(db, question, limit=ASK_HISTORY_LIMIT)
             except Exception:
                 report = None
         return {
             "invoice_rows": rows,
-            "invoice_summary": invoice_search_summary(rows),
+            "invoice_summary": invoice_search_summary(all_rows),
+            "match_total": len(all_rows),
             "historical_product": report,
+            "product_query": product_needle or None,
             **({"max_invoice": max_invoice} if max_invoice else {}),
         }
     finally:
@@ -425,11 +451,36 @@ def _deterministic_answer(
     reviews = context.get("reviews") or []
     hist = context.get("historical_product") or {}
     hist_summary = hist.get("summary") if isinstance(hist, dict) else None
+    product_label = context.get("product_query") or (hist_summary or {}).get("product") or "il prodotto richiesto"
 
     if not rows and not reviews and not hist_summary and not max_invoice:
         return {
-            "answer": "Non ho trovato dati pertinenti nell'archivio locale.",
+            "answer": (
+                f"Non ho trovato righe pertinenti per «{product_label}» nell'archivio locale "
+                "(ricerca su tutto l'indice fatture). Verifica import/cache o prova un altro nome prodotto."
+            ),
             "facts": [],
+            "confidence": "high" if verification.get("ok", True) else "medium",
+        }
+
+    # «Chi mi vende meglio i bomboloni?» → risposta diretta dallo storico prezzi.
+    if hist_summary and _asks_best_supplier(question):
+        unit = hist_summary.get("unit") or "pz"
+        return {
+            "answer": (
+                f"Per {hist_summary.get('product') or product_label}, il fornitore migliore "
+                f"è {hist_summary['best_supplier']} "
+                f"(media € {hist_summary['best_supplier_average']:.4f}/{unit} "
+                f"su {hist_summary['best_supplier_observations']} osservazioni; "
+                f"miglior prezzo puntuale € {hist_summary['best_price']:.4f}/{unit} "
+                f"il {hist_summary.get('best_date') or 'n/d'})."
+            ),
+            "facts": [
+                f"Fornitore {hist_summary['best_supplier']}",
+                f"Media € {hist_summary['best_supplier_average']:.4f}/{unit}",
+                f"Miglior prezzo € {hist_summary['best_price']:.4f}/{unit}",
+                f"{hist_summary['best_supplier_observations']} osservazioni",
+            ],
             "confidence": "high" if verification.get("ok", True) else "medium",
         }
 

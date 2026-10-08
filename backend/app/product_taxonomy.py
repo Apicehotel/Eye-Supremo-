@@ -60,9 +60,56 @@ def is_non_product_query(query: str) -> bool:
     return any(token in NON_PRODUCT_TOKENS or token.startswith(NON_PRODUCT_PREFIXES) for token in tokens)
 
 
-def search_terms(query: str) -> tuple[str, ...]:
+# Parole tipiche delle domande Ask: non devono entrare in FTS/ILIKE come AND.
+QUESTION_FILLERS = {
+    "quanto", "quale", "quali", "chi", "cosa", "come", "dove", "quando", "perche", "perché",
+    "ho", "hai", "abbiamo", "hanno", "mi", "ti", "ci", "si", "lo", "la", "le", "li", "gli",
+    "il", "i", "un", "una", "uno", "del", "della", "dei", "delle", "degli", "dal", "dalla",
+    "da", "di", "in", "nel", "nella", "nei", "negli", "nelle", "su", "sul", "sulla", "per",
+    "con", "tra", "fra", "e", "o", "a", "al", "alla", "ai", "alle",
+    "speso", "pagato", "costo", "costa", "costano", "prezzo", "prezzi", "media", "medio",
+    "vende", "vendono", "fornitore", "fornitori", "fornisce", "meglio", "peggio", "migliore",
+    "migliori", "peggiore", "peggiori", "confronta", "confronto", "storico", "totale",
+    "fattura", "fatture", "prodotto", "prodotti", "acquisto", "acquisti", "acquistato",
+    "fammi", "vedere", "mostra", "dimmi", "trova", "cerca", "elenco", "lista", "classifica",
+    "analizza", "analisi", "risulta", "archivio", "locale", "tutti", "tutte", "piu", "più",
+    "meno", "alto", "alta", "basso", "bassa", "ultimo", "ultima", "recente",
+}
+
+
+def extract_product_query(query: str) -> str:
+    """Estrae il prodotto da una domanda in linguaggio naturale.
+
+    Senza questo, Ask manda in ricerca tutta la frase
+    («chi mi vende meglio i bomboloni») e FTS/ILIKE richiedono
+    anche «chi»/«vende»/«meglio» sulla riga fattura → zero risultati.
+    """
     normalized = normalize_text(query).strip()
-    return PRODUCT_FAMILY_ALIASES.get(normalized, (query.strip(),))
+    if not normalized:
+        return ""
+    # Alias multi-parola noti (es. «carta igienica») hanno priorità.
+    for alias in sorted(PRODUCT_FAMILY_ALIASES, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(alias)}\b", normalized):
+            return alias
+    tokens = [t for t in normalized.split() if t not in QUESTION_FILLERS and len(t) >= 3]
+    # Singolo token che coincide con un alias o una sua variante.
+    for token in tokens:
+        if token in PRODUCT_FAMILY_ALIASES:
+            return token
+        for key, variants in PRODUCT_FAMILY_ALIASES.items():
+            if token in variants:
+                return key
+            if any(token.startswith(v[: max(4, len(v) - 1)]) for v in variants if len(v) >= 4):
+                return key
+    return " ".join(tokens) if tokens else normalized
+
+
+def search_terms(query: str) -> tuple[str, ...]:
+    needle = extract_product_query(query)
+    normalized = normalize_text(needle).strip()
+    if not normalized:
+        return (query.strip(),) if query.strip() else ()
+    return PRODUCT_FAMILY_ALIASES.get(normalized, (needle.strip(),))
 
 
 def is_family_match(description: str, query: str) -> bool:

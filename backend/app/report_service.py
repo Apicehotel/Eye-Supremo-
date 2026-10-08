@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .models import Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import extract_content, normalize_text, normalize_unit
-from .product_taxonomy import search_terms
+from .product_taxonomy import extract_product_query, search_terms
 
 
 def _money(value) -> float:
@@ -24,8 +24,10 @@ def _comparable_quantity(row: InvoiceRow, unit: str) -> float:
     return quantity
 
 
-def historical_product_report(db: Session, query: str, limit: int = 1200) -> dict:
-    q = normalize_text(query)
+def historical_product_report(db: Session, query: str, limit: int | None = None) -> dict:
+    # Estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → bomboloni).
+    product_query = extract_product_query(query) or normalize_text(query)
+    q = normalize_text(product_query)
     if not q:
         return {"query": query, "summary": None, "suppliers": [], "dates": [], "units": []}
 
@@ -51,8 +53,10 @@ def historical_product_report(db: Session, query: str, limit: int = 1200) -> dic
         )
         .where(or_(InvoiceRowPolicy.analysis_status.is_(None), InvoiceRowPolicy.analysis_status == "product"))
         .order_by(Invoice.data.asc(), InvoiceRow.id.asc())
-        .limit(limit)
     )
+    # Nessun tetto: storico su tutte le osservazioni dell'archivio.
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
     records = db.execute(stmt).all()
 
     grouped: dict[tuple[int, str], list[dict]] = defaultdict(list)
