@@ -342,9 +342,9 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
           body: JSON.stringify({
             question: q,
             hotel_code: hotel || undefined,
-            // Ask consulta fatture e recensioni; in area recensioni forza solo quelle.
-            area: reviewOnly ? "reviews" : "all",
-            include_reviews: true,
+            // Ask Fatture = solo fatture; area recensioni = solo recensioni.
+            area: reviewOnly ? "reviews" : "invoices",
+            include_reviews: reviewOnly,
             review_only: reviewOnly,
           }),
           signal: controller.signal,
@@ -372,19 +372,19 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     : [
         "Qual è la fattura con il totale più alto?",
         "Chi mi vende meglio i bomboloni?",
-        "Quali camere hanno più lamentele?",
-        "Confronta recensioni e prezzi di un prodotto",
+        "Quanto abbiamo speso per limoncello?",
+        "Qual è il prezzo medio della carta igienica?",
       ];
   const invoiceRows = answer?.context?.invoice_rows || [];
   const reviewRows = answer?.context?.reviews || [];
   return (
     <>
       <PageHeader
-        title={reviewOnly ? "Analisi IA recensioni" : "Ask Eye Supremo"}
+        title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
         subtitle={
           reviewOnly
             ? "Analisi di recensioni, camere, servizi e ranking"
-            : "Consulta fatture, prodotti e anche le recensioni dall’archivio locale"
+            : "Fatture e prodotti via Ollama: llama3.2:3b veloce, poi qwen3:8b se serve"
         }
       >
         <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
@@ -413,7 +413,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               placeholder={
                 reviewOnly
                   ? "Es. Quali sono le camere peggiori del Giò?"
-                  : "Es. Fattura più alta, bomboloni, oppure camere con più lamentele…"
+                  : "Es. Fattura più alta, bomboloni, limoncello, prezzo medio…"
               }
             />
             <button className="primary-btn" onClick={ask}>

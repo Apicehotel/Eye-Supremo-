@@ -33,6 +33,20 @@ def test_ask_default_area_includes_reviews_for_ambiguous_questions():
     assert "reviews" in plan
 
 
+def test_ask_invoices_area_skips_reviews():
+    plan = classify_intent("Quanto abbiamo speso per limoncello?", area="invoices")
+    assert "products" in plan
+    assert "prices" in plan
+    assert "invoices" in plan
+    assert "reviews" not in plan
+
+
+def test_ask_invoices_area_ignores_review_words():
+    plan = classify_intent("Quanto costa la colazione in fattura?", area="invoices")
+    assert "products" in plan
+    assert "reviews" not in plan
+
+
 def test_ask_review_area_forces_reviews_agent():
     plan = classify_intent("Fammi un riepilogo", area="reviews")
     assert plan[0] == "reviews"

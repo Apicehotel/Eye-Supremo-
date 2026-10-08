@@ -58,3 +58,9 @@ def test_escalate_on_low_confidence_when_explicitly_enabled():
         policy="fast_first",
         escalate_on_low_confidence=True,
     ) is True
+    assert should_escalate(
+        {"answer": "ok", "confidence": "medium"},
+        has_more=True,
+        policy="fast_first",
+        escalate_on_low_confidence=True,
+    ) is False
