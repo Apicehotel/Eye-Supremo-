@@ -63,9 +63,10 @@ export function Invoices() {
   useEffect(() => {
     const t = setTimeout(() => {
       if (q.trim()) {
+        const offset = page * pageSize;
         Promise.all([
-          eyeApi<any>(`/search/live?q=${encodeURIComponent(q)}&limit=${pageSize}`),
-          eyeApi<any>(`/central/invoices?q=${encodeURIComponent(q)}&limit=${pageSize}`),
+          eyeApi<any>(`/search/live?q=${encodeURIComponent(q)}&limit=${pageSize}&offset=${offset}`),
+          eyeApi<any>(`/central/invoices?q=${encodeURIComponent(q)}&limit=${pageSize}&offset=${offset}`),
         ])
           .then(([local, central]) => {
             setLive(local);
@@ -90,6 +91,7 @@ export function Invoices() {
     }, 180);
     return () => clearTimeout(t);
   }, [q, page, pageSize]);
+  const searchTotal = Math.max(live?.total ?? 0, remote?.total ?? 0);
   const centralHasRows = Boolean(
     remote?.items?.some((r: any) => r.original_description != null),
   );
@@ -129,10 +131,10 @@ export function Invoices() {
               <option value={150}>150</option>
             </select>
           </label>
-          {(remote?.total ?? 0) > pageSize && <div className="pagination header-pagination" aria-label="Paginazione fatture">
-            <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, remote.total)} di {remote.total}</span>
+          {(q.trim() ? searchTotal : (remote?.total ?? 0)) > pageSize && <div className="pagination header-pagination" aria-label="Paginazione fatture">
+            <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, q.trim() ? searchTotal : remote.total)} di {q.trim() ? searchTotal : remote.total}</span>
             <button disabled={page === 0} onClick={() => setPage(page - 1)}>← Precedenti</button>
-            <button disabled={(page + 1) * pageSize >= remote.total} onClick={() => setPage(page + 1)}>Successivi →</button>
+            <button disabled={(page + 1) * pageSize >= (q.trim() ? searchTotal : remote.total)} onClick={() => setPage(page + 1)}>Successivi →</button>
           </div>}
         </div>
         </div>
@@ -142,11 +144,11 @@ export function Invoices() {
           <section className="panel list-panel">
             <div className="panel-title">
               <h2>
-                <Search size={18} /> Ricerca locale
+                <Search size={18} /> Ricerca locale (tutto l’archivio)
               </h2>
               {live?.summary && (
                 <Status tone="ok">
-                  {live.summary.rows} righe · {euro(live.summary.row_total)}
+                  {(live.total ?? live.summary.rows)} risultati in archivio · {euro(live.summary.row_total)}
                 </Status>
               )}
             </div>

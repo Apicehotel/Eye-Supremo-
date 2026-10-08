@@ -48,11 +48,21 @@ def _seed_cache(db):
 
 def test_cached_row_search_finds_product_rows_locally(db):
     _seed_cache(db)
-    rows = cached_row_search(db, "bomboloni crema", limit=10)
+    page = cached_row_search(db, "bomboloni crema", limit=10)
+    rows = page["items"]
     assert rows
+    assert page["total"] >= 1
+    assert page.get("scope") == "full-cache"
     assert all(item.get("local_cache") for item in rows)
     assert any("BOMBOLONI" in str(item.get("original_description") or "").upper() for item in rows)
     assert not any("BOMBOLA GAS" in str(item.get("original_description") or "").upper() for item in rows)
+
+
+def test_cached_row_search_understands_natural_language(db):
+    _seed_cache(db)
+    page = cached_row_search(db, "Chi mi vende meglio i bomboloni?", limit=10)
+    assert page["total"] >= 1
+    assert any("BOMBOLONI" in str(item.get("original_description") or "").upper() for item in page["items"])
 
 
 def test_central_invoices_prefers_sqlite_cache_over_supabase(client, db, monkeypatch):
@@ -69,4 +79,14 @@ def test_central_invoices_prefers_sqlite_cache_over_supabase(client, db, monkeyp
     payload = response.json()
     assert payload.get("source") == "sqlite-cache"
     assert payload.get("count", 0) >= 1
+    assert payload.get("total", 0) >= 1
     assert called["supabase"] == 0
+
+
+def test_live_search_accepts_large_page_size(client, db):
+    """La UI usa pageSize fino a 150: non deve più fallire con 422."""
+    response = client.get("/api/eye/search/live", params={"q": "bomboloni", "limit": 150})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("engine") == "fts5+rapidfuzz"
+    assert payload.get("scope") == "full-archive"

@@ -15,7 +15,7 @@ from ..local_cache_bootstrap import bootstrap_status, run_local_cache_bootstrap,
 from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
 from ..database import SessionLocal, get_db
 from ..eye_services import (
-    add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
+    add_review, ensure_invoice_metadata,
     review_rankings, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
@@ -151,12 +151,6 @@ def add_exclusion(payload: dict, role: str = Depends(current_role), db: Session 
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Profilo non autorizzato")
     raise HTTPException(410, "I livelli utente sono stati eliminati: le esclusioni per livello non sono più utilizzate")
-
-
-@router.get("/search/live")
-def live_search(q: str = Query(min_length=1, max_length=160), limit: int = Query(30, le=100), role: str = Depends(current_role), db: Session = Depends(get_db)):
-    records = invoice_search(db, q, role_name=role, limit=limit)
-    return {"query": q, "summary": invoice_search_summary(records), "results": records}
 
 
 @router.post("/ai/ask")
@@ -390,14 +384,18 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), of
             if background_tasks is not None and central_configured():
                 background_tasks.add_task(refresh_central_cache)
             if q.strip():
-                row_items = cached_row_search(db, q, limit)
-                if row_items:
+                row_page = cached_row_search(db, q, limit=limit, offset=offset)
+                if row_page.get("total"):
                     return {
                         "enabled": True,
                         "local": True,
-                        "items": row_items,
-                        "count": len(row_items),
+                        "items": row_page["items"],
+                        "count": row_page["count"],
+                        "total": row_page["total"],
+                        "offset": row_page["offset"],
+                        "limit": row_page["limit"],
                         "source": "sqlite-cache",
+                        "scope": "full-cache",
                         "sync": status,
                     }
             cached = cached_search(db, q, limit, offset)

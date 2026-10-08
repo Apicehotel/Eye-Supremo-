@@ -346,8 +346,9 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 )
                 for r in rows
             }
-            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
-            for item in cached_items:
+            cached_page = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
+            cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
+            for item in cached_items or []:
                 mapped = {
                     "row_id": item.get("id"),
                     "invoice_id": item.get("source_hash") or item.get("id"),
