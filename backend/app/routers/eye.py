@@ -400,11 +400,14 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=5000), o
                         "scope": "full-cache",
                         "sync": status,
                     }
-            cached = cached_search(db, q, limit, offset)
-            return cached | {"source": "sqlite-cache", "sync": status}
+                # Cache piena ma 0 match per questa query → prova Supabase
+                # (la cache può essere parziale/stale; non bloccare la ricerca).
+            else:
+                cached = cached_search(db, q, limit, offset)
+                return cached | {"source": "sqlite-cache", "sync": status}
     finally:
         db.close()
-    # Cache vuota: unica occasione in cui Ask/liste battono Supabase.
+    # Cache vuota, oppure query senza match in cache: prova Supabase.
     if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_central_cache)
     central = await central_invoice_search(q, limit)

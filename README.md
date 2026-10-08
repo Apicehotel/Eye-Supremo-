@@ -14,7 +14,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.4`
+**Versione applicativa:** `2.0.5`
 **Branch di lavoro:** `integrate/main-align`
 **Ultimo aggiornamento:** 8 ottobre 2026
 

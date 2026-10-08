@@ -84,8 +84,11 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
     offset = max(0, int(offset or 0))
     tokens = _query_tokens(query)
     needle = (extract_product_query(query) or query or "").strip().lower()
+    stem = product_stem(query)
+    # «mini» da solo è troppo largo: tieni token prodotto ≥4 + stem famiglia.
+    tokens = [t for t in tokens if len(t) >= 4 or t == needle]
     stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())
-    if tokens:
+    if tokens or (stem and len(stem) >= 6):
         clauses = []
         for term in tokens:
             pattern = f"%{term}%"
@@ -96,6 +99,8 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
                     CentralInvoiceCache.invoice_number.ilike(pattern),
                 )
             )
+        if stem and len(stem) >= 6:
+            clauses.append(CentralInvoiceCache.search_text.ilike(f"%{stem}%"))
         # OR tra varianti prodotto: tutte le fatture candidate nell'archivio.
         stmt = stmt.where(or_(*clauses))
     elif needle:
@@ -118,8 +123,6 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
                 .order_by(CentralInvoiceCache.invoice_date.desc())
             ).all()
         )
-
-    stem = product_stem(query)
 
     def _row_matches(hay: str, words: list[str]) -> float | None:
         """Match famiglia prodotto: substring, stem (minibomboloni), fuzzy stretto."""
