@@ -582,6 +582,11 @@ def _public_context(context: dict[str, Any]) -> dict[str, Any]:
         "invoice_rows": _slim_invoice_rows(context.get("invoice_rows") or []),
         "verification": context.get("verification"),
     }
+    if context.get("suppliers"):
+        public["suppliers"] = (context.get("suppliers") or [])[:12]
+        public["supplier_count"] = context.get("supplier_count") or len(context.get("suppliers") or [])
+    if context.get("match_total") is not None:
+        public["match_total"] = context["match_total"]
     if context.get("max_invoice"):
         public["max_invoice"] = context["max_invoice"]
     if context.get("reviews"):
