@@ -115,7 +115,7 @@ export function Invoices() {
     <>
       <PageHeader
         title="Fatture"
-        subtitle="Archivio locale + archivio centrale Supabase"
+        subtitle="Ricerca su tutto l’archivio locale/cache (non solo le ultime fatture)"
       >
         <div className="list-header-controls"><div className="list-header-main">
           <SearchBox
@@ -192,16 +192,18 @@ export function Invoices() {
             ) : (
               <Empty
                 title="Nessun risultato locale"
-                text="La ricerca locale prova FTS5 e, se serve, RapidFuzz."
+                text="La ricerca interroga tutto l’indice fatture (FTS). Prova un altro nome prodotto o verifica import/cache."
               />
             )}
           </section>
           <section className="panel list-panel">
             <div className="panel-title">
-              <h2>Risultati Supabase</h2>
-              {remote?.count != null && (
+              <h2>Risultati cache / centrale</h2>
+              {remote?.total != null ? (
+                <Status tone="ok">{remote.total} risultati</Status>
+              ) : remote?.count != null ? (
                 <Status tone="ok">{remote.count} righe</Status>
-              )}
+              ) : null}
             </div>
             {remote?.items?.length ? (
               <div className="table-wrap">
