@@ -170,7 +170,17 @@ def _collect_all_matches(
         stmt = stmt.where(text("strftime('%Y', invoices.data) = :year")).params(year=year)
 
     # Nessun .limit(): tutte le fatture/righe che matchano.
-    rows = db.execute(stmt.order_by(Invoice.data.desc(), InvoiceRow.id.desc())).all()
+    try:
+        rows = db.execute(stmt.order_by(Invoice.data.desc(), InvoiceRow.id.desc())).all()
+    except Exception:
+        # FTS assente/corrotto: riprova solo con ILIKE/stem.
+        db.rollback()
+        stmt = _base_stmt()
+        if product_clauses:
+            stmt = stmt.where(or_(*product_clauses))
+        if year:
+            stmt = stmt.where(text("strftime('%Y', invoices.data) = :year")).params(year=year)
+        rows = db.execute(stmt.order_by(Invoice.data.desc(), InvoiceRow.id.desc())).all()
 
     if needle and not rows:
         # Fallback fuzzy su TUTTE le righe che contengono almeno un token prodotto.

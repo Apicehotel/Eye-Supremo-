@@ -11,32 +11,73 @@ def configured() -> bool:
 async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
     if not configured():
         return {"enabled": False, "items": [], "message": "Supabase centrale non configurato"}
+    from .product_taxonomy import extract_product_query, search_terms
+
+    # Domande NL («chi mi vende meglio i bomboloni») → cerca solo il prodotto.
+    product = (extract_product_query(query) or query or "").strip()
+    needles = []
+    for term in (product, *search_terms(product)):
+        cleaned = (term or "").strip()
+        if cleaned and cleaned.lower() not in {n.lower() for n in needles}:
+            needles.append(cleaned)
+    if not needles and query.strip():
+        needles = [query.strip()]
+
     url = settings.supabase_url.rstrip("/") + f"/functions/v1/{settings.central_function}"
-    payload = {"action": "search_invoices", "username": settings.central_username, "pin": settings.central_pin, "query": query, "limit": max(1, min(limit, 500))}
+    headers = {"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"}
+    cap = max(1, min(limit, 500))
     try:
+        items: list[dict] = []
+        seen: set[str] = set()
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
-            data = response.json()
-        items = data.get("items", []) if isinstance(data, dict) else []
-        if not items and query.strip() and len(query.strip()) >= 3:
-            # Retry against a short prefix, then rank the candidates locally.
-            # This handles small typing errors without broadening a product
-            # search into a dangerous substring match (e.g. bomboloni/bombole).
-            prefix = query.strip()[:2]
+            for needle in needles[:8]:
+                payload = {
+                    "action": "search_invoices",
+                    "username": settings.central_username,
+                    "pin": settings.central_pin,
+                    "query": needle,
+                    "limit": cap,
+                }
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                batch = data.get("items", []) if isinstance(data, dict) else []
+                for item in batch:
+                    key = str(item.get("id") or item.get("source_hash") or "")
+                    dedupe = key or f"{item.get('invoice_number')}|{item.get('original_description')}|{item.get('supplier_name')}"
+                    if dedupe in seen:
+                        continue
+                    seen.add(dedupe)
+                    items.append(item)
+                if len(items) >= cap:
+                    break
+        items = items[:cap]
+        if not items and product and len(product) >= 3:
+            # Retry sul prefisso prodotto (bo…), non sulla frase NL (Ch…).
+            prefix = product[:2]
             async with httpx.AsyncClient(timeout=20) as retry_client:
-                broad = await retry_client.post(url, json={**payload, "query": prefix, "limit": 500}, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
+                broad = await retry_client.post(
+                    url,
+                    json={
+                        "action": "search_invoices",
+                        "username": settings.central_username,
+                        "pin": settings.central_pin,
+                        "query": prefix,
+                        "limit": 500,
+                    },
+                    headers=headers,
+                )
             if broad.is_success:
                 candidates = broad.json().get("items", []) if isinstance(broad.json(), dict) else []
                 ranked = []
-                needle = query.strip().lower()
+                needle = product.lower()
                 for item in candidates:
                     fields = [str(item.get(k) or "").lower() for k in ("original_description", "normalized_description", "supplier_name")]
                     score = max((fuzz.WRatio(needle, field) for field in fields if field and len(field) >= len(needle) * .75), default=0)
                     if score >= 70:
                         ranked.append((score, item))
-                items = [item for _, item in sorted(ranked, key=lambda pair: pair[0], reverse=True)[:max(1, min(limit, 500))]]
-        return {"enabled": True, "items": items, "count": len(items)}
+                items = [item for _, item in sorted(ranked, key=lambda pair: pair[0], reverse=True)[:cap]]
+        return {"enabled": True, "items": items, "count": len(items), "query": product or query}
     except Exception as exc:
         return {"enabled": True, "items": [], "message": str(exc)}
 

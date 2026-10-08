@@ -10,13 +10,19 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .central_cache import cached_row_search
+from .central_service import central_invoice_search, configured as central_configured
 from .database import SessionLocal
 from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .review_cache import cached_review_search
-from .product_taxonomy import diversify_by_supplier, extract_product_query, supplier_breakdown
+from .product_taxonomy import (
+    description_matches_product,
+    diversify_by_supplier,
+    extract_product_query,
+    supplier_breakdown,
+)
 from .search_index import invoice_search
 
 # Limiti snelli per Ask: meno token verso l'LLM. La ricerca SQL/FTS invece
@@ -326,6 +332,106 @@ def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any
         db.close()
 
 
+def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("invoice") or ""),
+        str(row.get("description") or "")[:80],
+        str(row.get("date") or ""),
+    )
+
+
+def _map_cache_item(item: dict[str, Any], *, source: str) -> dict[str, Any]:
+    return {
+        "row_id": item.get("id"),
+        "invoice_id": item.get("source_hash") or item.get("id"),
+        "invoice": item.get("invoice_number"),
+        "date": item.get("invoice_date"),
+        "supplier": item.get("supplier_name"),
+        "description": item.get("original_description") or item.get("normalized_description"),
+        "quantity": float(item.get("quantity") or 0),
+        "unit_price": float(item.get("unit_price") or 0),
+        "row_total": float(item.get("line_total") or 0),
+        "normalized_price": float(item["normalized_price"]) if item.get("normalized_price") is not None else None,
+        "unit": item.get("normalized_unit") or item.get("original_unit") or item.get("unit"),
+        "analysis_status": item.get("analysis_status") or "product",
+        "source": source,
+    }
+
+
+def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> list[dict[str, Any]]:
+    if not product_needle:
+        return rows
+    if "bombolon" in product_needle or "bobolon" in product_needle:
+        return [
+            row for row in rows
+            if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))
+        ]
+    return [row for row in rows if description_matches_product(str(row.get("description") or ""), product_needle)]
+
+
+def _report_from_rows(rows: list[dict[str, Any]], product_needle: str) -> dict[str, Any] | None:
+    """Storico fornitori costruito dalle righe trovate (cache/centrale), non solo da InvoiceRow locali."""
+    priced: list[dict[str, Any]] = []
+    for row in rows:
+        price = row.get("normalized_price")
+        if price is None:
+            price = row.get("unit_price")
+        try:
+            price_f = float(price or 0)
+        except (TypeError, ValueError):
+            continue
+        if price_f <= 0:
+            continue
+        priced.append({**row, "_price": price_f})
+    if not priced:
+        return None
+
+    by_supplier: dict[str, list[dict[str, Any]]] = {}
+    for row in priced:
+        key = str(row.get("supplier") or "—")
+        by_supplier.setdefault(key, []).append(row)
+
+    supplier_blocks = []
+    for name, points in by_supplier.items():
+        prices = [p["_price"] for p in points]
+        dated = sorted(points, key=lambda p: str(p.get("date") or ""))
+        best = min(points, key=lambda p: p["_price"])
+        supplier_blocks.append({
+            "supplier": name,
+            "unit": next((p.get("unit") for p in points if p.get("unit")), "pz") or "pz",
+            "average_price": round(sum(prices) / len(prices), 4),
+            "best_price": best["_price"],
+            "best_date": best.get("date"),
+            "latest_price": dated[-1]["_price"],
+            "latest_date": dated[-1].get("date"),
+            "observations": len(points),
+        })
+    supplier_blocks.sort(key=lambda b: (b["average_price"], b["supplier"].lower()))
+    best_supplier = supplier_blocks[0]
+    all_prices = [p["_price"] for p in priced]
+    dated_all = sorted(priced, key=lambda p: str(p.get("date") or ""))
+    best_point = min(priced, key=lambda p: p["_price"])
+    summary = {
+        "product": product_needle or "prodotto",
+        "unit": best_supplier["unit"],
+        "average_price": round(sum(all_prices) / len(all_prices), 4),
+        "best_price": best_point["_price"],
+        "best_date": best_point.get("date"),
+        "latest_price": dated_all[-1]["_price"],
+        "latest_date": dated_all[-1].get("date"),
+        "best_supplier": best_supplier["supplier"],
+        "best_supplier_average": best_supplier["average_price"],
+        "best_supplier_observations": best_supplier["observations"],
+    }
+    return {
+        "query": product_needle,
+        "summary": summary,
+        "suppliers": supplier_blocks,
+        "units": sorted({b["unit"] for b in supplier_blocks}),
+        "comparison_note": "Confronto costruito da cache/centrale e fatture locali trovate.",
+    }
+
+
 async def _product_context(question: str, role_name: str) -> dict[str, Any]:
     db = SessionLocal()
     try:
@@ -334,63 +440,55 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         if max_invoice and _asks_for_max_invoice(question):
             return {"max_invoice": max_invoice, "invoice_rows": [], "invoice_summary": invoice_search_summary([])}
 
-        # Ricerca senza tetto su tutto l'archivio; al contesto LLM passiamo solo
-        # le prime ASK_ROW_LIMIT righe (il summary/storico usano il set completo).
-        all_rows = invoice_search(db, question, role_name=role_name, limit=None)
         product_needle = extract_product_query(question)
-        if "bombolon" in product_needle or "bobolon" in product_needle:
-            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        # Cache SQLite: usala se non ci sono hit locali, o per arricchire se i
-        # risultati locali sono pochi (tipico su PC appena installati).
-        if len(all_rows) < ASK_ROW_LIMIT:
-            seen_keys = {
-                (
-                    str(r.get("invoice") or ""),
-                    str(r.get("description") or "")[:80],
-                    str(r.get("date") or ""),
-                )
-                for r in all_rows
-            }
-            cached_page = cached_row_search(db, question, limit=None)
-            cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
-            for item in cached_items or []:
-                mapped = {
-                    "row_id": item.get("id"),
-                    "invoice_id": item.get("source_hash") or item.get("id"),
-                    "invoice": item.get("invoice_number"),
-                    "date": item.get("invoice_date"),
-                    "supplier": item.get("supplier_name"),
-                    "description": item.get("original_description") or item.get("normalized_description"),
-                    "quantity": float(item.get("quantity") or 0),
-                    "unit_price": float(item.get("unit_price") or 0),
-                    "row_total": float(item.get("line_total") or 0),
-                    "normalized_price": None,
-                    "unit": None,
-                    "analysis_status": item.get("analysis_status") or "product",
-                    "source": "sqlite-cache",
-                }
-                key = (
-                    str(mapped.get("invoice") or ""),
-                    str(mapped.get("description") or "")[:80],
-                    str(mapped.get("date") or ""),
-                )
+        search_query = product_needle or question
+
+        # 1) Archivio locale (FTS/ILIKE) su tutto l'indice.
+        all_rows = invoice_search(db, search_query, role_name=role_name, limit=None)
+        seen_keys = {_row_key(r) for r in all_rows}
+
+        # 2) Sempre unisci la cache PC (non solo se i locali sono pochi).
+        cached_page = cached_row_search(db, search_query, limit=None)
+        cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
+        for item in cached_items or []:
+            mapped = _map_cache_item(item, source="sqlite-cache")
+            key = _row_key(mapped)
+            if key in seen_keys:
+                continue
+            all_rows.append(mapped)
+            seen_keys.add(key)
+
+        # 3) Se ancora vuoto dopo il filtro prodotto: stessa fonte delle Liste → Supabase.
+        sources = {"local", "sqlite-cache"}
+        filtered = _filter_product_rows(all_rows, product_needle)
+        if not filtered and central_configured():
+            try:
+                central = await central_invoice_search(search_query, limit=500)
+            except Exception:
+                central = {"items": []}
+            for item in central.get("items") or []:
+                mapped = _map_cache_item(item, source="supabase")
+                key = _row_key(mapped)
                 if key in seen_keys:
                     continue
                 all_rows.append(mapped)
                 seen_keys.add(key)
-        if "bombolon" in product_needle or "bobolon" in product_needle:
-            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+                sources.add("supabase")
+            filtered = _filter_product_rows(all_rows, product_needle)
+        all_rows = filtered
         # Contesto LLM: sample diversificato per fornitore (non solo il più frequente).
         rows = diversify_by_supplier(all_rows, supplier_key="supplier", limit=ASK_ROW_LIMIT)
         suppliers = supplier_breakdown(all_rows, supplier_key="supplier")
 
         report = None
-        # Domande prezzo/fornitore: storico su TUTTE le osservazioni dell'archivio.
+        # Domande prezzo/fornitore: storico locale, poi fallback dalle righe trovate.
         if _needs_price_history(question) or _asks_best_supplier(question) or (not all_rows and product_needle):
             try:
-                report = historical_product_report(db, question, limit=ASK_HISTORY_LIMIT)
+                report = historical_product_report(db, search_query, limit=ASK_HISTORY_LIMIT)
             except Exception:
                 report = None
+            if not (report and report.get("summary")) and all_rows:
+                report = _report_from_rows(all_rows, product_needle)
         return {
             "invoice_rows": rows,
             "invoice_summary": invoice_search_summary(all_rows),
@@ -399,6 +497,7 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
             "supplier_count": len(suppliers),
             "historical_product": report,
             "product_query": product_needle or None,
+            "data_sources": sorted(sources),
             **({"max_invoice": max_invoice} if max_invoice else {}),
         }
     finally:
