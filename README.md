@@ -14,7 +14,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.0`
+**Versione applicativa:** `2.0.2`
 **Branch di lavoro:** `feat/eye-supremo-foundations`
 **Ultimo aggiornamento:** 6 ottobre 2026
 
