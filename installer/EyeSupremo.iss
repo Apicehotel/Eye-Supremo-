@@ -1,7 +1,7 @@
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.5
+AppVersion=2.0.6
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 DefaultDirName={autopf}\Eye Supremo
