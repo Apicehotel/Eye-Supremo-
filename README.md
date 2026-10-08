@@ -167,7 +167,7 @@ Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
 
 Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
 
-**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Contesto ridotto (~12 righe), report storico solo se serve, risposte fattuali (fattura più alta / spese semplici) senza Ollama; altrimenti `llama3.2:3b` e, se la risposta è vuota o a bassa confidenza, escalation a `qwen3:8b`.
+**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). La ricerca estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → `bomboloni`) e interroga **tutto l’indice FTS** (anche 20k+ righe), non le ultime N fatture. Allo LLM arrivano solo ~24 righe di contesto; lo storico prezzi può leggere fino a migliaia di osservazioni. Domande tipo fornitore migliore / fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 
