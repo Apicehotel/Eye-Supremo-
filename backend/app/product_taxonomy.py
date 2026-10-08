@@ -43,6 +43,15 @@ PRODUCT_FAMILY_STEMS = {
     "bombolone": "bombolon",
 }
 
+# Famiglie con collisioni note: la riga deve contenere almeno uno di questi token.
+PRODUCT_REQUIRED_SUBSTRINGS = {
+    "bomboloni": ("bombolin", "bombolon"),
+    "bombolone": ("bombolin", "bombolon"),
+}
+
+# Stem generici troppo corti/ambigui: non usarli in ILIKE substring.
+UNSAFE_GENERIC_STEMS = {"bombol", "lamp", "acqu", "cart"}
+
 # These are invoice line items, not products. Keep them available to the
 # supplier/expense views, but out of the product catalogue and its search.
 NON_PRODUCT_TOKENS = {
@@ -120,15 +129,28 @@ def extract_product_query(query: str) -> str:
 
 
 def search_terms(query: str) -> tuple[str, ...]:
+    """Varianti di ricerca per QUALSIASI prodotto in fattura, non solo alias noti."""
     needle = extract_product_query(query)
     normalized = normalize_text(needle).strip()
     if not normalized:
         return (query.strip(),) if query.strip() else ()
-    return PRODUCT_FAMILY_ALIASES.get(normalized, (needle.strip(),))
+    if normalized in PRODUCT_FAMILY_ALIASES:
+        return PRODUCT_FAMILY_ALIASES[normalized]
+    # Prodotti fuori tassonomia: tieni il needle + forma senza ultima vocale
+    # (limoncelli←limoncello, pavimenti←pavimento) senza aprire substring pericolose.
+    variants = [normalized]
+    for token in normalized.split():
+        if len(token) >= 6 and token[-1] in "aeiou":
+            stem = token[:-1]
+            if stem not in UNSAFE_GENERIC_STEMS and stem not in variants:
+                variants.append(stem)
+        if token not in variants:
+            variants.append(token)
+    return tuple(dict.fromkeys(variants))
 
 
 def product_stem(query: str) -> str | None:
-    """Stem famiglia per match substring (minibomboloni) senza collidere con bombola."""
+    """Stem per match substring su ogni prodotto (minibomboloni, minilimoncello, …)."""
     needle = normalize_text(extract_product_query(query) or query).strip()
     if not needle:
         return None
@@ -137,24 +159,74 @@ def product_stem(query: str) -> str | None:
     for key, stem in PRODUCT_FAMILY_STEMS.items():
         if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
             return stem
+    # Stem generico: token più lungo, togli desinenza plurale/vocale finale.
+    token = max(needle.split(), key=len)
+    if len(token) < 7:
+        return None
+    stem = token
+    for suffix in ("zioni", "ioni", "oni", "ini", "ina", "one", "ani", "i", "e", "a", "o"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 6:
+            stem = token[: -len(suffix)]
+            break
+    if len(stem) < 6 or stem in UNSAFE_GENERIC_STEMS:
+        return None
+    return stem
+
+
+def required_substrings(query: str) -> tuple[str, ...] | None:
+    """Token obbligatori anti-collisione (bomboloni≠bombola). None = nessun vincolo extra."""
+    needle = normalize_text(extract_product_query(query) or query).strip()
+    if needle in PRODUCT_REQUIRED_SUBSTRINGS:
+        return PRODUCT_REQUIRED_SUBSTRINGS[needle]
+    for key, required in PRODUCT_REQUIRED_SUBSTRINGS.items():
+        if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
+            return required
     return None
 
 
 def description_matches_product(description: str, query: str) -> bool:
-    """True se la descrizione appartiene alla famiglia prodotto cercata."""
+    """True se la descrizione riga fattura appartiene al prodotto cercato (qualsiasi)."""
     text = normalize_text(description)
     if not text:
         return False
+    compact = text.replace(" ", "")
+    words = text.split()
+    required = required_substrings(query)
+    if required and not any(token in text or token in compact for token in required):
+        return False
     stem = product_stem(query)
-    if stem and stem in text.replace(" ", ""):
-        return True
-    if stem and stem in text:
+    if stem and (stem in compact or stem in text):
         return True
     needle = normalize_text(extract_product_query(query) or query)
+    if not needle:
+        return False
     for term in search_terms(needle):
-        if normalize_text(term) in text:
+        term_n = normalize_text(term)
+        if not term_n:
+            continue
+        if term_n in text or term_n.replace(" ", "") in compact:
+            return True
+        # Token della query tutti presenti (ordine libero) nella descrizione.
+        term_tokens = [t for t in term_n.split() if len(t) >= 3]
+        if term_tokens and all(any(t in w or w.startswith(t[: max(4, len(t) - 1)]) for w in words) for t in term_tokens):
+            return True
+        # Parola composta: limoncello ⊂ minilimoncello / limoncello70cl
+        if len(term_n) >= 5 and any(term_n in w or (len(term_n) >= 6 and term_n[:-1] in w) for w in words):
             return True
     return False
+
+
+def row_matches_product_query(description: str, query: str) -> bool:
+    """Filtro post-ricerca: anti-collisione se serve, altrimenti accetta match motore."""
+    if not (query or "").strip():
+        return bool(str(description or "").strip())
+    required = required_substrings(query)
+    if not required:
+        # Nessuna collisione nota: tieni i hit di FTS/cache/centrale.
+        return bool(str(description or "").strip())
+    text = normalize_text(description)
+    compact = text.replace(" ", "")
+    return any(token in text or token in compact for token in required)
 
 
 def diversify_by_supplier(

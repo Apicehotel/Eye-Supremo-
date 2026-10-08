@@ -18,9 +18,9 @@ from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
 from .report_service import historical_product_report
 from .review_cache import cached_review_search
 from .product_taxonomy import (
-    description_matches_product,
     diversify_by_supplier,
     extract_product_query,
+    row_matches_product_query,
     supplier_breakdown,
 )
 from .search_index import invoice_search
@@ -359,14 +359,13 @@ def _map_cache_item(item: dict[str, Any], *, source: str) -> dict[str, Any]:
 
 
 def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> list[dict[str, Any]]:
+    """Filtra solo collisioni note; ogni altra riga prodotto restata dal motore resta valida."""
     if not product_needle:
         return rows
-    if "bombolon" in product_needle or "bobolon" in product_needle:
-        return [
-            row for row in rows
-            if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))
-        ]
-    return [row for row in rows if description_matches_product(str(row.get("description") or ""), product_needle)]
+    return [
+        row for row in rows
+        if row_matches_product_query(str(row.get("description") or ""), product_needle)
+    ]
 
 
 def _report_from_rows(rows: list[dict[str, Any]], product_needle: str) -> dict[str, Any] | None:
@@ -481,14 +480,40 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         suppliers = supplier_breakdown(all_rows, supplier_key="supplier")
 
         report = None
-        # Domande prezzo/fornitore: storico locale, poi fallback dalle righe trovate.
-        if _needs_price_history(question) or _asks_best_supplier(question) or (not all_rows and product_needle):
+        # Per OGNI prodotto trovato: confronta i fornitori su tutto il match set
+        # (locale + cache + centrale), non solo per «chi vende meglio» / bomboloni.
+        wants_compare = bool(product_needle) and (
+            bool(all_rows)
+            or _needs_price_history(question)
+            or _asks_best_supplier(question)
+        )
+        if wants_compare:
             try:
                 report = historical_product_report(db, search_query, limit=ASK_HISTORY_LIMIT)
             except Exception:
                 report = None
-            if not (report and report.get("summary")) and all_rows:
-                report = _report_from_rows(all_rows, product_needle)
+            row_report = _report_from_rows(all_rows, product_needle) if all_rows else None
+            if not (report and report.get("summary")):
+                report = row_report
+            elif row_report and row_report.get("suppliers"):
+                # Unisci fornitori presenti solo in cache/centrale.
+                known = {str(b.get("supplier")) for b in (report.get("suppliers") or [])}
+                merged = list(report.get("suppliers") or [])
+                for block in row_report["suppliers"]:
+                    if block.get("supplier") not in known:
+                        merged.append(block)
+                merged.sort(key=lambda b: (float(b.get("average_price") or 0), str(b.get("supplier") or "").lower()))
+                report = {**report, "suppliers": merged}
+                if report.get("summary") and merged:
+                    best = merged[0]
+                    report["summary"] = {
+                        **report["summary"],
+                        "best_supplier": best.get("supplier"),
+                        "best_supplier_average": best.get("average_price"),
+                        "best_supplier_observations": best.get("observations"),
+                        "best_price": best.get("best_price"),
+                        "best_date": best.get("best_date"),
+                    }
         return {
             "invoice_rows": rows,
             "invoice_summary": invoice_search_summary(all_rows),
@@ -570,42 +595,60 @@ def _deterministic_answer(
             "confidence": "high" if verification.get("ok", True) else "medium",
         }
 
-    # «Chi mi vende meglio i bomboloni?» → migliore + elenco degli altri fornitori.
-    if hist_summary and _asks_best_supplier(question):
+    # Confronto fornitori per QUALSIASI prodotto (non solo bomboloni / «chi vende meglio»).
+    if hist_summary and (
+        _asks_best_supplier(question)
+        or _needs_price_history(question)
+        or (product_label and rows and (hist.get("suppliers") or context.get("suppliers")))
+    ):
         unit = hist_summary.get("unit") or "pz"
         supplier_blocks = [
             b for b in (hist.get("suppliers") or [])
             if (b.get("unit") or unit) == unit
         ]
-        others = [
-            f"{b.get('supplier')} (media € {float(b.get('average_price') or 0):.4f}/{unit}, "
-            f"{b.get('observations') or 0} oss.)"
-            for b in supplier_blocks
-            if b.get("supplier") and b.get("supplier") != hist_summary.get("best_supplier")
-        ][:8]
-        others_text = ""
-        if others:
-            others_text = " Altri fornitori nello stesso archivio: " + "; ".join(others) + "."
-        elif len(supplier_blocks) <= 1:
-            row_suppliers = context.get("suppliers") or []
-            alt = [s.get("supplier") for s in row_suppliers if s.get("supplier") and s.get("supplier") != hist_summary.get("best_supplier")]
-            if alt:
-                others_text = " Altri fornitori con righe trovate: " + ", ".join(alt[:8]) + "."
+        if not supplier_blocks:
+            # Fallback: costruisci elenco dai conteggi riga.
+            supplier_blocks = [
+                {
+                    "supplier": s.get("supplier"),
+                    "average_price": None,
+                    "observations": s.get("rows"),
+                    "unit": unit,
+                }
+                for s in (context.get("suppliers") or [])
+                if s.get("supplier")
+            ]
+        others = []
+        for b in supplier_blocks:
+            if not b.get("supplier") or b.get("supplier") == hist_summary.get("best_supplier"):
+                continue
+            if b.get("average_price") is not None:
+                others.append(
+                    f"{b.get('supplier')} (media € {float(b.get('average_price') or 0):.4f}/{unit}, "
+                    f"{b.get('observations') or 0} oss.)"
+                )
+            else:
+                others.append(f"{b.get('supplier')} ({b.get('observations') or 0} righe)")
+        others = others[:8]
+        others_text = (" Altri fornitori nello stesso archivio: " + "; ".join(others) + ".") if others else ""
+        match_total = context.get("match_total") or summary.get("rows") or len(rows)
         return {
             "answer": (
-                f"Per {hist_summary.get('product') or product_label}, il fornitore migliore "
-                f"è {hist_summary['best_supplier']} "
-                f"(media € {hist_summary['best_supplier_average']:.4f}/{unit} "
+                f"Per {hist_summary.get('product') or product_label} ho confrontato "
+                f"{match_total} righe prodotto tra {len(supplier_blocks) or context.get('supplier_count') or 1} fornitori. "
+                f"Il più conveniente è {hist_summary['best_supplier']} "
+                f"(media € {float(hist_summary['best_supplier_average']):.4f}/{unit} "
                 f"su {hist_summary['best_supplier_observations']} osservazioni; "
-                f"miglior prezzo puntuale € {hist_summary['best_price']:.4f}/{unit} "
+                f"miglior prezzo puntuale € {float(hist_summary['best_price']):.4f}/{unit} "
                 f"il {hist_summary.get('best_date') or 'n/d'})."
                 f"{others_text}"
             ),
             "facts": [
                 f"Fornitore migliore {hist_summary['best_supplier']}",
-                f"Media € {hist_summary['best_supplier_average']:.4f}/{unit}",
-                f"Miglior prezzo € {hist_summary['best_price']:.4f}/{unit}",
+                f"Media € {float(hist_summary['best_supplier_average']):.4f}/{unit}",
+                f"Miglior prezzo € {float(hist_summary['best_price']):.4f}/{unit}",
                 f"{hist_summary['best_supplier_observations']} osservazioni",
+                f"{match_total} righe prodotto",
                 *([f"{len(supplier_blocks)} fornitori confrontati"] if len(supplier_blocks) > 1 else []),
             ],
             "confidence": "high" if verification.get("ok", True) else "medium",
@@ -655,8 +698,8 @@ async def _qwen_structured(
         "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
         "Non inventare dati assenti dal contesto. Italiano, massimo 5 frasi. "
         f"{scope}"
-        "Se ci sono più fornitori nel contesto, elencarli (non citare solo il primo o il più frequente). "
-        "Includi varianti prodotto (es. mini bomboloni) se presenti. "
+        "Confronta tutte le righe prodotto trovate tra i fornitori; non limitarti a un solo vendor. "
+        "Se ci sono più fornitori o varianti (mini, formati, marche), elencarli. "
         "Prezzi solo su unità confrontabili. "
         "Se i dati non bastano, dillo esplicitamente e abbassa confidence a low.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"

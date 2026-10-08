@@ -14,7 +14,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.5`
+**Versione applicativa:** `2.0.6`
 **Branch di lavoro:** `integrate/main-align`
 **Ultimo aggiornamento:** 8 ottobre 2026
 
@@ -167,9 +167,9 @@ Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
 
 Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
 
-**Ricerca fatture:** estesa a **tutte** le fatture/righe dell’archivio locale e della cache — nessun tetto nascosto (500/2000/ultime N). Include varianti prodotto (es. `mini bomboloni` / `MINIBOMBOLONI` cercando `bomboloni`) e diversifica i fornitori in pagina così un vendor frequente non monopolizza i primi risultati. `limit`/`offset` paginano solo la UI; `total`, totali economici e conteggio fornitori coprono l’intero match set.
+**Ricerca fatture:** estesa a **tutte** le righe prodotto dell’archivio locale e della cache — nessun tetto nascosto e **nessun prodotto speciale**. Ogni descrizione riga (limoncello, carta igienica, detergenti, bomboloni, …) è cercabile con varianti/composti; i fornitori sono diversificati in pagina. `limit`/`offset` paginano solo la UI; `total`, totali economici e conteggio fornitori coprono l’intero match set.
 
-**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → `bomboloni`) e cerca senza limite sull’indice (anche mini/composti); allo LLM arrivano ~24 righe **diversificate per fornitore**, mentre summary e storico prezzi usano tutti i match. La risposta sul fornitore migliore elenca anche gli altri. Domande tipo fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
+**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda e cerca **tutte** le righe prodotto su locale + cache (+ Supabase se serve); confronta i fornitori su tutto il match set, non solo il vendor più frequente. Allo LLM arrivano ~24 righe diversificate; summary e storico usano tutti i match. Domande tipo fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 
