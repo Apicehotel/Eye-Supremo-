@@ -24,7 +24,7 @@ def _comparable_quantity(row: InvoiceRow, unit: str) -> float:
     return quantity
 
 
-def historical_product_report(db: Session, query: str, limit: int = 1200) -> dict:
+def historical_product_report(db: Session, query: str, limit: int | None = None) -> dict:
     # Estrae il prodotto dalla domanda («chi mi vende meglio i bomboloni» → bomboloni).
     product_query = extract_product_query(query) or normalize_text(query)
     q = normalize_text(product_query)
@@ -53,8 +53,10 @@ def historical_product_report(db: Session, query: str, limit: int = 1200) -> dic
         )
         .where(or_(InvoiceRowPolicy.analysis_status.is_(None), InvoiceRowPolicy.analysis_status == "product"))
         .order_by(Invoice.data.asc(), InvoiceRow.id.asc())
-        .limit(limit)
     )
+    # Nessun tetto: storico su tutte le osservazioni dell'archivio.
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
     records = db.execute(stmt).all()
 
     grouped: dict[tuple[int, str], list[dict]] = defaultdict(list)

@@ -21,9 +21,9 @@ from .search_index import invoice_search
 
 # Limiti snelli per Ask: meno token verso l'LLM. La ricerca SQL/FTS invece
 # interroga tutto l'indice (anche 20k+ righe), non solo le ultime fatture.
-ASK_ROW_LIMIT = 24
+ASK_ROW_LIMIT = 24  # solo contesto passato all'LLM; la ricerca sotto è senza tetto
 ASK_REVIEW_LIMIT = 8
-ASK_HISTORY_LIMIT = 2500
+ASK_HISTORY_LIMIT = None  # storico prezzi su tutte le osservazioni
 ASK_NUM_PREDICT = 260
 ASK_NUM_CTX = 3072
 
@@ -329,15 +329,16 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         if max_invoice and _asks_for_max_invoice(question):
             return {"max_invoice": max_invoice, "invoice_rows": [], "invoice_summary": invoice_search_summary([])}
 
-        rows = invoice_search(db, question, role_name=role_name, limit=ASK_ROW_LIMIT)
-        # Keep the bakery product family separate from similarly spelled
-        # technical items such as bombole/bombole per pulizia.
+        # Ricerca senza tetto su tutto l'archivio; al contesto LLM passiamo solo
+        # le prime ASK_ROW_LIMIT righe (il summary/storico usano il set completo).
+        all_rows = invoice_search(db, question, role_name=role_name, limit=None)
         product_needle = extract_product_query(question)
         if "bombolon" in product_needle or "bobolon" in product_needle:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        rows = all_rows[:ASK_ROW_LIMIT]
         # Cache SQLite: usala se non ci sono hit locali, o per arricchire se i
         # risultati locali sono pochi (tipico su PC appena installati).
-        if len(rows) < ASK_ROW_LIMIT:
+        if len(all_rows) < ASK_ROW_LIMIT:
             seen_keys = {
                 (
                     str(r.get("invoice") or ""),
@@ -346,8 +347,9 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 )
                 for r in rows
             }
-            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
-            for item in cached_items:
+            cached_page = cached_row_search(db, question, limit=None)
+            cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
+            for item in cached_items or []:
                 mapped = {
                     "row_id": item.get("id"),
                     "invoice_id": item.get("source_hash") or item.get("id"),
@@ -370,24 +372,23 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
                 )
                 if key in seen_keys:
                     continue
-                rows.append(mapped)
+                all_rows.append(mapped)
                 seen_keys.add(key)
-                if len(rows) >= ASK_ROW_LIMIT:
-                    break
         if "bombolon" in product_needle or "bobolon" in product_needle:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+            all_rows = [row for row in all_rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        rows = all_rows[:ASK_ROW_LIMIT]
 
         report = None
-        # Domande prezzo/fornitore: storico su tutto l'archivio (LIMIT alto),
-        # non solo le ultime N fatture caricate in UI.
-        if _needs_price_history(question) or _asks_best_supplier(question) or (not rows and product_needle):
+        # Domande prezzo/fornitore: storico su TUTTE le osservazioni dell'archivio.
+        if _needs_price_history(question) or _asks_best_supplier(question) or (not all_rows and product_needle):
             try:
                 report = historical_product_report(db, question, limit=ASK_HISTORY_LIMIT)
             except Exception:
                 report = None
         return {
             "invoice_rows": rows,
-            "invoice_summary": invoice_search_summary(rows),
+            "invoice_summary": invoice_search_summary(all_rows),
+            "match_total": len(all_rows),
             "historical_product": report,
             "product_query": product_needle or None,
             **({"max_invoice": max_invoice} if max_invoice else {}),

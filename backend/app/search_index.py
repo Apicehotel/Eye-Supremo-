@@ -44,7 +44,6 @@ def _clean_query(query: str) -> tuple[str, str | None]:
     if year and year in needle.split():
         needle = " ".join(t for t in needle.split() if t != year).strip()
     if not needle:
-        # Fallback: strip stopword dalla frase intera.
         normalized = normalize_text(query)
         if year:
             normalized = normalized.replace(year, " ")
@@ -53,53 +52,77 @@ def _clean_query(query: str) -> tuple[str, str | None]:
     return needle, year
 
 
-def _fts_ids(db: Session, needle: str, limit: int) -> list[int]:
-    """Cerca su tutto invoice_rows_fts. Varianti prodotto in OR, non AND della frase."""
+def _fts_match_expr(needle: str) -> str | None:
+    """Espressione FTS: varianti prodotto in OR. Nessun LIMIT implicito."""
     if not needle:
-        return []
+        return None
     variants = [normalize_text(t) for t in search_terms(needle)]
     variants = [v for v in dict.fromkeys(variants + [needle]) if v]
     or_parts: list[str] = []
     for variant in variants:
         tokens = [re.sub(r"[^\w]", "", x) for x in variant.split() if x]
-        tokens = [x for x in tokens if x and not (len(x) == 1)]
+        tokens = [x for x in tokens if x and len(x) > 1]
         if not tokens:
             continue
-        # Dentro una variante: AND dei token («carta» AND «igienica»).
-        # Tra varianti (bomboloni/bombolone/…): OR.
         and_match = " ".join([f'"{t}"*' for t in tokens])
         or_parts.append(f"({and_match})" if len(tokens) > 1 else and_match)
     if not or_parts:
-        return []
-    match = " OR ".join(or_parts)
-    try:
-        rows = db.execute(
-            text(
-                "SELECT rowid FROM invoice_rows_fts "
-                "WHERE invoice_rows_fts MATCH :match "
-                "ORDER BY bm25(invoice_rows_fts) LIMIT :limit"
-            ),
-            {"match": match, "limit": limit},
-        ).all()
-        return [int(r[0]) for r in rows]
-    except Exception:
-        return []
+        return None
+    return " OR ".join(or_parts)
 
 
-def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int = 50) -> list[dict]:
-    needle, year = _clean_query(query)
-    # L'indice FTS copre tutte le righe (anche 20k+); non è uno scan parziale.
-    ids = _fts_ids(db, needle, max(limit * 20, 500))
-    stmt = (
+def _base_stmt():
+    return (
         select(InvoiceRow, Invoice, Supplier)
         .select_from(InvoiceRow)
         .join(Invoice, InvoiceRow.invoice_id == Invoice.id)
         .join(Supplier, Invoice.supplier_id == Supplier.id)
         .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product))
     )
-    if ids:
-        stmt = stmt.where(InvoiceRow.id.in_(ids))
-    elif needle:
+
+
+def _serialize_row(row: InvoiceRow, inv: Invoice, supplier: Supplier) -> dict:
+    return {
+        "row_id": row.id,
+        "invoice_id": inv.id,
+        "invoice": inv.numero,
+        "date": inv.data.isoformat(),
+        "supplier": supplier.ragione_sociale,
+        "description": row.descrizione_originale,
+        "quantity": float(row.quantita),
+        "unit_price": float(row.prezzo_unitario),
+        "row_total": float(row.totale_riga),
+        "normalized_price": float(row.prezzo_normalizzato) if row.prezzo_normalizzato is not None else None,
+        "unit": row.unita_normalizzata,
+        "analysis_status": row.policy.analysis_status if row.policy else "product",
+    }
+
+
+def _collect_all_matches(
+    db: Session,
+    query: str,
+    role_name: str = "developer",
+) -> list[dict]:
+    """Restituisce TUTTE le righe pertinenti nell'archivio. Nessun tetto artificiale."""
+    needle, year = _clean_query(query)
+    stmt = _base_stmt()
+    match = _fts_match_expr(needle)
+    used_fts = False
+    if match:
+        try:
+            # Subquery FTS senza LIMIT: interroga l'intero indice.
+            stmt = stmt.where(
+                text(
+                    "invoice_rows.id IN ("
+                    "SELECT rowid FROM invoice_rows_fts "
+                    "WHERE invoice_rows_fts MATCH :fts_match"
+                    ")"
+                )
+            ).params(fts_match=match)
+            used_fts = True
+        except Exception:
+            used_fts = False
+    if needle and not used_fts:
         fields = (
             InvoiceRow.descrizione_originale,
             InvoiceRow.descrizione_normalizzata,
@@ -124,18 +147,14 @@ def invoice_search(db: Session, query: str, role_name: str = "developer", limit:
             )
     if year:
         stmt = stmt.where(text("strftime('%Y', invoices.data) = :year")).params(year=year)
-    rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 8, 200))).all()
+
+    # Nessun .limit(): tutte le fatture/righe che matchano.
+    rows = db.execute(stmt.order_by(Invoice.data.desc(), InvoiceRow.id.desc())).all()
+
     if needle and not rows:
-        # Ultimo fallback: fuzzy solo sulle descrizioni che contengono almeno un token prodotto.
-        tokens = [t for t in normalize_text(needle).split() if len(t) >= 4]
-        candidate_stmt = (
-            select(InvoiceRow, Invoice, Supplier)
-            .select_from(InvoiceRow)
-            .join(Invoice, InvoiceRow.invoice_id == Invoice.id)
-            .join(Supplier, Invoice.supplier_id == Supplier.id)
-            .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product))
-            .order_by(Invoice.data.desc())
-        )
+        # Fallback fuzzy su TUTTE le righe che contengono almeno un token prodotto.
+        tokens = [t for t in normalize_text(needle).split() if len(t) >= 3]
+        candidate_stmt = _base_stmt().order_by(Invoice.data.desc(), InvoiceRow.id.desc())
         if tokens:
             candidate_stmt = candidate_stmt.where(
                 or_(*[
@@ -145,33 +164,60 @@ def invoice_search(db: Session, query: str, role_name: str = "developer", limit:
                     )
                     for t in tokens
                 ])
-            ).limit(4000)
-        else:
-            candidate_stmt = candidate_stmt.limit(2000)
+            )
+        if year:
+            candidate_stmt = candidate_stmt.where(text("strftime('%Y', invoices.data) = :year")).params(year=year)
         candidates = db.execute(candidate_stmt).all()
         ranked = [
             (fuzz.WRatio(needle, normalize_text(r.descrizione_originale)), (r, i, s))
             for r, i, s in candidates
         ]
-        rows = [x for score, x in sorted(ranked, key=lambda z: z[0], reverse=True) if score >= 55][: limit * 2]
-    result = []
+        rows = [x for score, x in sorted(ranked, key=lambda z: z[0], reverse=True) if score >= 55]
+
+    result: list[dict] = []
     for row, inv, supplier in rows:
         if not row_visible_to_role(db, role_name, row, supplier):
             continue
-        result.append({
-            "row_id": row.id,
-            "invoice_id": inv.id,
-            "invoice": inv.numero,
-            "date": inv.data.isoformat(),
-            "supplier": supplier.ragione_sociale,
-            "description": row.descrizione_originale,
-            "quantity": float(row.quantita),
-            "unit_price": float(row.prezzo_unitario),
-            "row_total": float(row.totale_riga),
-            "normalized_price": float(row.prezzo_normalizzato) if row.prezzo_normalizzato is not None else None,
-            "unit": row.unita_normalizzata,
-            "analysis_status": row.policy.analysis_status if row.policy else "product",
-        })
-        if len(result) >= limit:
-            break
+        result.append(_serialize_row(row, inv, supplier))
     return result
+
+
+def invoice_search(
+    db: Session,
+    query: str,
+    role_name: str = "developer",
+    limit: int | None = None,
+) -> list[dict]:
+    """Ricerca estesa a tutto l'archivio. `limit` è solo un taglio opzionale in coda."""
+    records = _collect_all_matches(db, query, role_name=role_name)
+    if limit is None or limit <= 0:
+        return records
+    return records[:limit]
+
+
+def invoice_search_page(
+    db: Session,
+    query: str,
+    role_name: str = "developer",
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Cerca su tutto l'archivio; paginazione solo per la risposta UI."""
+    from .eye_services import invoice_search_summary
+
+    records = _collect_all_matches(db, query, role_name=role_name)
+    offset = max(0, int(offset or 0))
+    limit = max(1, int(limit or 50))
+    page = records[offset: offset + limit]
+    return {
+        "query": query,
+        "summary": invoice_search_summary(records),
+        "results": page,
+        "count": len(page),
+        "total": len(records),
+        "offset": offset,
+        "limit": limit,
+        "engine": "fts5+rapidfuzz",
+        "scope": "full-archive-unlimited",
+    }
