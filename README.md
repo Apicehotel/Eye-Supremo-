@@ -30,7 +30,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - gestione utenti e PIN riservata al ruolo Sviluppatore;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
-- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download dell'installer.
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve).
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 
 ### Verificato
