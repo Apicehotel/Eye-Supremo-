@@ -551,7 +551,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
 
 export function SettingsPage() {
   const user = currentUser();
-  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const canManage = Boolean(user);
   const [data, setData] = useState<any>(),
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
@@ -871,7 +871,7 @@ function updateErrorMessage(error: any): string {
 
 export function SystemPage() {
   const user = currentUser();
-  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const canManage = Boolean(user);
   const [logs, setLogs] = useState<any[]>();
   const [update, setUpdate] = useState<any>();
   const [updateBusy, setUpdateBusy] = useState(false);

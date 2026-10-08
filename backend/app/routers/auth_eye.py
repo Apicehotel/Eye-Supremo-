@@ -3,12 +3,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..auth_models import LocalCredential, LocalSession
-from ..auth_service import auth_configured, create_session, revoke_session, session_user, set_pin, verify_pin
+from ..auth_service import DEFAULT_PIN, auth_configured, create_session, revoke_session, session_user, set_pin, verify_pin
 from ..database import get_db
 from ..models import UserProfile
 
 router = APIRouter(prefix="/api/eye/auth", tags=["Eye Supremo auth"])
-ALLOWED_ROLES = {"developer", "supremo", "level1", "level2", "level3"}
+ALLOWED_ROLES = {"developer", "supremo"}
 FULL_ACCESS_ROLES = {"developer", "supremo"}
 
 
@@ -118,10 +118,9 @@ def create_user(payload: dict, x_eye_session: str | None = Header(default=None, 
         raise HTTPException(403, "Profilo non autorizzato")
     username = str(payload.get("username", "")).strip().lower()
     display_name = str(payload.get("display_name", "")).strip()
-    # I livelli sono temporaneamente disattivati: ogni nuovo profilo ha
-    # lo stesso comportamento operativo del profilo Supremo.
+    # Livelli utente eliminati: ogni nuovo profilo ha gli stessi permessi operativi.
     role_name = "supremo"
-    pin = str(payload.get("pin", ""))
+    pin = str(payload.get("pin") or DEFAULT_PIN)
     if not username or not username.replace("_", "").replace("-", "").isalnum() or len(username) > 80:
         raise HTTPException(422, "Username non valido")
     if not display_name or len(display_name) > 160:

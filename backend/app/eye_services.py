@@ -59,8 +59,7 @@ def seed_eye_supremo(db: Session) -> None:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
     db.flush()
-    # Temporarily keep every local profile at the same full-access level and
-    # PIN for the current PC rollout.
+    # Permessi unificati: niente livelli; PIN standard 000000 per tutti i profili.
     for user in db.scalars(select(UserProfile)).all():
         user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
         user.can_manage_config = True
@@ -100,9 +99,8 @@ def apply_row_policies(db: Session, invoice: Invoice) -> None:
 
 
 def role_exclusions(db: Session, role_name: str) -> list[RoleExclusion]:
-    if role_name in {"developer", "supremo"}:
-        return []
-    return list(db.scalars(select(RoleExclusion).where(RoleExclusion.role_name == role_name, RoleExclusion.enabled.is_(True))).all())
+    # Livelli eliminati: nessun profilo attivo usa più le esclusioni per ruolo.
+    return []
 
 
 def row_visible_to_role(db: Session, role_name: str, row: InvoiceRow, supplier: Supplier | None = None) -> bool:
