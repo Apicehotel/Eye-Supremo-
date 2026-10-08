@@ -14,7 +14,7 @@ from .models import (
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
 )
 from .normalization import normalize_text
-from .product_taxonomy import search_terms
+from .product_taxonomy import extract_product_query, search_terms
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -125,8 +125,7 @@ def row_visible_to_role(db: Session, role_name: str, row: InvoiceRow, supplier: 
 
 def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int = 50) -> list[dict]:
     q = normalize_text(query).strip()
-    terms = [x for x in q.split() if x not in {"quanto", "speso", "pagato", "abbiamo", "ho", "per", "il", "la", "le", "i", "un", "una", "di", "da"}]
-    needle = " ".join(terms).strip()
+    needle = extract_product_query(query)
     year = re.search(r"\b(19|20)\d{2}\b", q)
     stmt = (select(InvoiceRow, Invoice, Supplier)
             .select_from(InvoiceRow)
@@ -135,20 +134,30 @@ def invoice_search(db: Session, query: str, role_name: str = "developer", limit:
             .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product)))
     if year:
         stmt = stmt.where(func.strftime("%Y", Invoice.data) == year.group(0))
-        needle = needle.replace(year.group(0), " ").strip()
+        if year.group(0) in needle.split():
+            needle = " ".join(t for t in needle.split() if t != year.group(0)).strip()
     if needle:
         fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata, Supplier.ragione_sociale, Invoice.numero)
         clauses = []
         for term in tuple(dict.fromkeys(search_terms(needle) + (needle,))):
             clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in fields]) for token in normalize_text(term).split()]))
         stmt = stmt.where(or_(*clauses))
-    rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 4, 100))).all()
+    rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 8, 200))).all()
     if needle and not rows:
-        candidates = db.execute((select(InvoiceRow, Invoice, Supplier)
+        tokens = [t for t in needle.split() if len(t) >= 4]
+        candidate_stmt = (select(InvoiceRow, Invoice, Supplier)
             .select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id)
             .join(Supplier, Invoice.supplier_id == Supplier.id)
             .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product))
-            .order_by(Invoice.data.desc()).limit(1500))).all()
+            .order_by(Invoice.data.desc()))
+        if tokens:
+            candidate_stmt = candidate_stmt.where(or_(*[
+                or_(InvoiceRow.descrizione_originale.ilike(f"%{t}%"), InvoiceRow.descrizione_normalizzata.ilike(f"%{t}%"))
+                for t in tokens
+            ])).limit(4000)
+        else:
+            candidate_stmt = candidate_stmt.limit(2000)
+        candidates = db.execute(candidate_stmt).all()
         scored = [(fuzz.WRatio(needle, normalize_text(r.descrizione_originale)), (r, i, s)) for r, i, s in candidates]
         rows = [item for score, item in sorted(scored, key=lambda x: x[0], reverse=True) if score >= 55][:limit * 2]
     result = []
