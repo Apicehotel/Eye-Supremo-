@@ -105,10 +105,82 @@ def test_compact_context_limits_rows_and_text():
         "invoice_summary": {"rows": 30, "invoices": 3, "row_total": 10},
         "reviews": [{"text": "y" * 500, "hotel": "Giò"} for _ in range(20)],
     })
-    assert len(compact["invoice_rows"]) <= 12
+    assert len(compact["invoice_rows"]) <= 24
     assert len(compact["invoice_rows"][0]["description"]) <= 140
     assert len(compact["reviews"]) <= 8
     assert len(compact["reviews"][0]["text"]) <= 220
+
+
+def test_deterministic_best_supplier_from_history():
+    from app.agent_orchestrator import _deterministic_answer
+    result = _deterministic_answer(
+        "Chi mi vende meglio i bomboloni?",
+        {
+            "product_query": "bomboloni",
+            "historical_product": {
+                "summary": {
+                    "product": "Bombolone crema",
+                    "unit": "pz",
+                    "best_supplier": "MARR",
+                    "best_supplier_average": 0.875,
+                    "best_supplier_observations": 4,
+                    "best_price": 0.85,
+                    "best_date": "2025-02-01",
+                }
+            },
+        },
+        {"ok": True, "warnings": []},
+    )
+    assert result is not None
+    assert "MARR" in result["answer"]
+    assert result["confidence"] == "high"
+
+
+def test_ask_finds_bomboloni_across_natural_language(db):
+    from datetime import date
+    from decimal import Decimal
+    from app.models import Invoice, InvoiceRow, InvoiceRowPolicy, Supplier
+    from app.search_index import invoice_search
+
+    s1 = Supplier(ragione_sociale="Fornitore Vecchio")
+    s2 = Supplier(ragione_sociale="MARR")
+    db.add_all([s1, s2])
+    db.flush()
+    for supplier, number, when, price, desc in [
+        (s1, "OLD1", date(2020, 1, 1), Decimal("1.20"), "Bombolone crema"),
+        (s2, "NEW1", date(2025, 6, 1), Decimal("0.90"), "BOMBOLONI CREMA X12"),
+    ]:
+        inv = Invoice(supplier_id=supplier.id, numero=number, data=when, imponibile=price, iva=0, totale=price)
+        db.add(inv)
+        db.flush()
+        row = InvoiceRow(
+            invoice_id=inv.id,
+            descrizione_originale=desc,
+            descrizione_normalizzata=desc.lower(),
+            quantita=1,
+            unita_normalizzata="pz",
+            prezzo_unitario=price,
+            totale_riga=price,
+            confidence=1,
+        )
+        db.add(row)
+        db.flush()
+        db.add(InvoiceRowPolicy(row_id=row.id, analysis_status="product"))
+    db.commit()
+
+    rows = invoice_search(db, "Chi mi vende meglio i bomboloni?", limit=20)
+    assert rows, "la ricerca NL deve trovare bomboloni su tutto l'indice, non solo parole della domanda"
+    assert any("bombol" in r["description"].lower() for r in rows)
+
+    context = asyncio.run(_product_context("Chi mi vende meglio i bomboloni?", "developer"))
+    assert context.get("historical_product", {}).get("summary", {}).get("best_supplier") == "MARR"
+    answer = _deterministic_answer(
+        "Chi mi vende meglio i bomboloni?",
+        context,
+        {"ok": True, "warnings": []},
+    )
+    assert answer is not None
+    assert "MARR" in answer["answer"]
 
 
 def test_deterministic_short_circuit_for_max_invoice():
