@@ -315,3 +315,6 @@ Se la cache PC non è verificata completa, Ask integra sempre i risultati locali
 ### Credenziali centrali e variabili d'ambiente
 Le vecchie variabili Windows `EYESUPREMO_CENTRAL_USERNAME` e `EYESUPREMO_CENTRAL_PIN` vengono ignorate (causavano «Credenziali non valide» dopo il ripristino del PIN predefinito). Per cambiare le credenziali centrali si usano `EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` e `EYESUPREMO_CENTRAL_PIN_OVERRIDE`.
 La sincronizzazione recensioni non invia più un checkpoint vuoto come data (errore «invalid input syntax for type timestamp»), e l'errore «Credenziali non valide» indica utente e lunghezza PIN usati (mai il PIN).
+
+### Ask Fatture: pertinenza dei risultati
+Ask tiene solo le righe la cui **descrizione** è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile, usando il riconoscimento prodotti: autofatture/voci contabili e accessori (es. «molla portacarta igienica») non finiscono più nel confronto prezzi. Se l'archivio centrale non risponde, Ask lo segnala con il motivo invece di mostrare un risultato parziale senza avvisi.
