@@ -362,7 +362,7 @@ def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> lis
     """Tiene solo righe la cui DESCRIZIONE è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile."""
     if not product_needle:
         return rows
-    from .product_recognition import recognize
+    from .product_recognition import compatible, recognize
     from .product_taxonomy import description_matches_product
 
     wanted = recognize(product_needle)
@@ -371,16 +371,7 @@ def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> lis
         desc = str(row.get("description") or "")
         if not row_matches_product_query(desc, product_needle) or not description_matches_product(desc, product_needle):
             continue
-        got = recognize(desc)
-        # Famiglie non alimentari diverse (es. «molla portacarta igienica» ≠ carta igienica; autofatture ≠ prodotto).
-        if got["kind"] == "non_food" and got["category"] == "Imposte e voci contabili" and wanted.get("category") != got["category"]:
-            continue
-        if wanted["kind"] == "non_food" and got["kind"] == "non_food" and wanted["category"] != got["category"]:
-            continue
-        # Cerco un alimento: scarto accessori/attrezzature (dispenser, dosatori) e dolci pronti (crostata alla marmellata).
-        if wanted["kind"] == "food" and got["kind"] == "non_food":
-            continue
-        if wanted["kind"] == "food" and got["kind"] == "food" and got["category"] == "Dolci e pasticceria" and wanted["category"] != "Dolci e pasticceria":
+        if not compatible(wanted, recognize(desc)):
             continue
         out.append(row)
     return out

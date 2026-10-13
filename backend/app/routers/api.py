@@ -12,7 +12,7 @@ from ..models import AppSetting, AuditLog, CentralInvoiceCache, ImportJob, Invoi
 from ..schemas import InvoiceIn, ProductIn, ProductOut, SupplierIn, SupplierOut
 from ..services import answer_with_ollama, audit, create_backup, create_invoice, duplicate_candidates, ollama_status, search_records
 from ..central_service import central_product_page, central_product_summary
-from ..product_recognition import annotate as annotate_recognition
+from ..product_recognition import annotate as annotate_recognition, collapse_to_product
 from ..product_taxonomy import is_catalog_product, is_product_search_match, merge_product_catalog, search_terms
 
 router = APIRouter(prefix="/api")
@@ -108,7 +108,7 @@ async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), d
                 for item in page.get("items", []):
                     if item.get("nome_canonico") and is_catalog_product(item["nome_canonico"]) and is_product_search_match(item["nome_canonico"], q):
                         merged[item["nome_canonico"]] = item
-            return annotate_recognition(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None))
+            return annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))
     except Exception:
         pass
     stmt = select(Product)
@@ -121,11 +121,11 @@ async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), d
         stats = db.execute(select(func.min(InvoiceRow.prezzo_normalizzato), func.max(InvoiceRow.prezzo_normalizzato), func.avg(InvoiceRow.prezzo_normalizzato), func.count(InvoiceRow.id)).where(InvoiceRow.product_id == p.id)).one()
         result.append({**ProductOut.model_validate(p).model_dump(), "min_price": float(stats[0]) if stats[0] else None, "max_price": float(stats[1]) if stats[1] else None, "avg_price": float(stats[2]) if stats[2] else None, "purchases": stats[3]})
     if result:
-        return annotate_recognition(merge_product_catalog(result, collapse_family="acqua" if q.strip().lower() == "acqua" else None))
+        return annotate_recognition(collapse_to_product(merge_product_catalog(result, collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))
     try:
         central = await central_product_page(q, limit)
         items = [item for item in central.get("items", []) if is_catalog_product(item.get("nome_canonico", ""))]
-        return annotate_recognition(merge_product_catalog(items, collapse_family="acqua" if q.strip().lower() == "acqua" else None))
+        return annotate_recognition(collapse_to_product(merge_product_catalog(items, collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))
     except Exception:
         return result
 
