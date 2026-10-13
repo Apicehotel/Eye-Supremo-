@@ -233,18 +233,44 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
     }
 
 
+PROGRESS_KEY = "central_sync_progress"
+REMOTE_TOTAL_KEY = "central_remote_total"
+COMPLETE_KEY = "central_sync_complete"
+
+
+def _put_setting(db: Session, key: str, value: str) -> None:
+    row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
+    row.value = value
+    db.add(row)
+
+
+async def _remote_invoice_total() -> int | None:
+    """Totale fatture sul server centrale (sonda leggera). None se non verificabile."""
+    try:
+        page = await central_invoice_page(0, 1, None)
+    except Exception:  # noqa: BLE001
+        return None
+    if page.get("fallback") or page.get("enabled") is False:
+        return None
+    total = page.get("total")
+    return int(total) if isinstance(total, (int, float)) and total >= 0 else None
+
+
 async def refresh_central_cache() -> dict:
     db = SessionLocal()
     try:
-        setting = db.get(AppSetting, "central_sync_state") or AppSetting(key="central_sync_state", value="running")
-        setting.value = "running"; db.add(setting); db.commit()
-        offset = 0; total = None; imported = 0
+        _put_setting(db, "central_sync_state", "running")
+        _put_setting(db, COMPLETE_KEY, "unknown")
+        db.commit()
+        offset = 0; total = None; imported = 0; fallback_used = False
         checkpoint = db.get(AppSetting, "central_sync_at")
+        since = checkpoint.value if checkpoint and checkpoint.value else None
         while True:
-            # 50 keeps the nested line payload below Supabase gateway limits.
-            page = await central_invoice_page(offset, 500, checkpoint.value if checkpoint else None)
+            page = await central_invoice_page(offset, 500, since)
             items = page.get("items", [])
             total = page.get("total", total)
+            if page.get("fallback"):
+                fallback_used = True
             if not items: break
             for item in items:
                 source_hash = str(item.get("source_hash") or item.get("id"))
@@ -256,14 +282,40 @@ async def refresh_central_cache() -> dict:
                     for key, value in values.items(): setattr(existing, key, value)
                 else: db.add(CentralInvoiceCache(**values))
                 imported += 1
-            db.commit(); offset += len(items)
-            if len(items) < 500 or (total is not None and offset >= total): break
-        setting.value = f"ok:{imported}"; db.add(setting)
-        checkpoint = db.get(AppSetting, "central_sync_at") or AppSetting(key="central_sync_at", value="")
-        checkpoint.value = datetime.now(UTC).isoformat(); db.add(checkpoint); db.commit()
-        return {"ok": True, "imported": imported, "total": total}
+            offset += len(items)
+            _put_setting(db, PROGRESS_KEY, json.dumps({"downloaded": offset, "total": total, "at": datetime.now(UTC).isoformat()}))
+            db.commit()
+            # Il percorso alternativo restituisce al massimo 500 righe: non e' un download completo.
+            if fallback_used or len(items) < 500 or (total is not None and offset >= total): break
+
+        local_count = db.scalar(select(func.count()).select_from(CentralInvoiceCache)) or 0
+        remote_total = None
+        if not fallback_used:
+            remote_total = int(total) if (since is None and total is not None) else await _remote_invoice_total()
+        if remote_total is not None:
+            _put_setting(db, REMOTE_TOTAL_KEY, str(remote_total))
+        if fallback_used:
+            complete: bool | None = False
+        elif remote_total is not None:
+            complete = local_count >= remote_total
+        else:
+            complete = None
+        _put_setting(db, COMPLETE_KEY, "unknown" if complete is None else ("yes" if complete else "no"))
+        _put_setting(db, "central_sync_state", f"ok:{imported}" if complete is not False else f"partial:{local_count}")
+        # Il checkpoint incrementale si salva solo se la cache e' completa: altrimenti il prossimo giro riscarica tutto.
+        if complete is not False:
+            _put_setting(db, "central_sync_at", datetime.now(UTC).isoformat())
+        db.commit()
+        message = None
+        if fallback_used:
+            message = f"Percorso alternativo: scaricate solo {local_count} fatture (limite 500 righe). Controlla i permessi Supabase."
+        elif complete is False:
+            message = f"Cache incompleta: {local_count} di {remote_total} fatture"
+        return {"ok": True, "imported": imported, "total": total, "complete": complete, "fallback": fallback_used, "local_count": local_count, "remote_total": remote_total, **({"message": message} if message else {})}
     except Exception as exc:
-        setting = db.get(AppSetting, "central_sync_state") or AppSetting(key="central_sync_state", value="")
-        setting.value = f"error:{exc}"; db.add(setting); db.commit()
+        db.rollback()
+        _put_setting(db, "central_sync_state", f"error:{exc}")
+        _put_setting(db, COMPLETE_KEY, "no")
+        db.commit()
         return {"ok": False, "message": str(exc)}
     finally: db.close()

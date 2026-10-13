@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .central_cache import cache_status, refresh_central_cache
+from .central_cache import COMPLETE_KEY, PROGRESS_KEY, REMOTE_TOTAL_KEY, cache_status, refresh_central_cache
 from .central_service import configured as central_configured
 from .config import settings
 from .database import SessionLocal
@@ -46,6 +46,52 @@ def bootstrap_enabled() -> bool:
     return bool(settings.cache_bootstrap_on_start)
 
 
+def _int_setting(db: Session, key: str) -> int | None:
+    raw = _get(db, key)
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _health(*, configured: bool, running: bool, state: str, inv_count: int,
+            remote_total: int | None, complete: str | None) -> str:
+    """Stato sintetico della cache offline: syncing / ok / unverified / incomplete / empty / error / not_configured."""
+    if running:
+        return "syncing"
+    if not configured:
+        return "unverified" if inv_count else "not_configured"
+    if inv_count == 0:
+        return "error" if state == "error" else "empty"
+    if complete == "no" or state in {"partial", "error"} or (remote_total is not None and inv_count < remote_total):
+        return "incomplete"
+    if remote_total is not None and inv_count >= remote_total:
+        return "ok"
+    return "unverified"
+
+
+def _headline(health: str, inv_count: int, remote_total: int | None, progress: dict[str, Any]) -> str:
+    fmt = lambda n: f"{int(n):,}".replace(",", ".")  # noqa: E731
+    if health == "syncing":
+        downloaded, total = progress.get("downloaded"), progress.get("total") or remote_total
+        if downloaded and total:
+            return f"Download in corso: {fmt(downloaded)} di {fmt(total)} fatture"
+        return "Download in corso…"
+    if health == "ok":
+        return f"Offline pronto: {fmt(inv_count)} fatture complete"
+    if health == "unverified":
+        return f"Offline utilizzabile: {fmt(inv_count)} fatture (completezza non verificata)"
+    if health == "incomplete":
+        if remote_total:
+            return f"Cache incompleta: {fmt(inv_count)} di {fmt(remote_total)} fatture ({min(100, inv_count * 100 // max(remote_total, 1))}%)"
+        return f"Cache incompleta: {fmt(inv_count)} fatture"
+    if health == "error":
+        return "Download non riuscito"
+    if health == "not_configured":
+        return "Supabase non configurato: solo dati locali"
+    return "Nessuna fattura scaricata"
+
+
 def bootstrap_status(db: Session | None = None) -> dict[str, Any]:
     owns = db is None
     if owns:
@@ -61,15 +107,35 @@ def bootstrap_status(db: Session | None = None) -> dict[str, Any]:
             result = {}
         invoices = cache_status(db)
         reviews = review_cache_status(db)
-        ready = bool(invoices.get("count") or reviews.get("count")) and state in {"ok", "partial"}
+        running = state == "running" or (_TASK is not None and not _TASK.done())
+        remote_total = _int_setting(db, REMOTE_TOTAL_KEY)
+        complete = _get(db, COMPLETE_KEY)
+        try:
+            progress = json.loads(_get(db, PROGRESS_KEY) or "{}")
+        except (TypeError, ValueError):
+            progress = {}
+        inv_count = int(invoices.get("count") or 0)
+        shown_total = (progress.get("total") if running and progress.get("total") else None) or remote_total
+        invoices = {
+            **invoices,
+            "remote_total": shown_total,
+            "percent": min(100, inv_count * 100 // shown_total) if shown_total else None,
+            "missing": max(0, shown_total - inv_count) if shown_total else None,
+        }
+        health = _health(configured=central_configured(), running=running, state=state,
+                         inv_count=inv_count, remote_total=remote_total, complete=complete)
+        ready = health in {"ok", "unverified"}
         return {
+            "health": health,
+            "headline": _headline(health, inv_count, shown_total, progress),
+            "progress": progress if running else None,
             "enabled": central_configured(),
             "configured": central_configured(),
             "state": state,
             "detail": detail,
             "completed_at": at,
             "ready_offline": ready,
-            "running": state == "running" or (_TASK is not None and not _TASK.done()),
+            "running": running,
             "invoices": invoices,
             "reviews": reviews,
             "result": result,
@@ -98,6 +164,12 @@ def needs_bootstrap(db: Session | None = None) -> bool:
         if state in {"error", "skipped"} and (invoices == 0 or reviews == 0):
             return True
         if invoices == 0 and reviews == 0:
+            return True
+        # Cache incompleta (download interrotto, percorso alternativo, fatture mancanti): riprende da sola.
+        remote_total = _int_setting(db, REMOTE_TOTAL_KEY)
+        if _get(db, COMPLETE_KEY) == "no" or state == "partial":
+            return True
+        if remote_total is not None and invoices < remote_total:
             return True
         return False
     finally:
@@ -159,7 +231,8 @@ async def run_local_cache_bootstrap(*, force: bool = False, full: bool = False) 
             reviews = review_cache_status(db)
             inv_ok = bool(invoice_result.get("ok"))
             rev_ok = bool(review_result.get("ok"))
-            if inv_ok and rev_ok:
+            inv_incomplete = inv_ok and invoice_result.get("complete") is False
+            if inv_ok and rev_ok and not inv_incomplete:
                 state = "ok"
                 detail = (
                     f"Cache pronta: {invoices.get('count', 0)} fatture, "
@@ -167,8 +240,9 @@ async def run_local_cache_bootstrap(*, force: bool = False, full: bool = False) 
                 )
             elif inv_ok or rev_ok or invoices.get("count") or reviews.get("count"):
                 state = "partial"
+                inv_msg = invoice_result.get("message", "errore") if (not inv_ok or inv_incomplete) else "ok"
                 detail = (
-                    f"Cache parziale. Fatture: {'ok' if inv_ok else invoice_result.get('message', 'errore')}; "
+                    f"Cache parziale. Fatture: {inv_msg}; "
                     f"Recensioni: {'ok' if rev_ok else review_result.get('message', 'errore')}"
                 )
             else:
