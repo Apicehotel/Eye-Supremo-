@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.10`
+**Versione applicativa:** `2.0.11`
+
+**Novità 2.0.11:** ricerca a più parole («crostata marmellata»): servono tutte le parole, con plurali e sinonimi, e i prodotti restano insieme in un'unica voce.
 
 **Novità 2.0.10:** ricerca prodotti più precisa (un prodotto = una voce con tutti i produttori), virgolette per la parola esatta (`"olio"`), niente più falsi match (uova/nuova, vino/bovino, olio/gasolio), tovaglioli di carta uniti.
 
