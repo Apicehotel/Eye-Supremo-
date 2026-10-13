@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.11`
+**Versione applicativa:** `2.0.12`
+
+**Novità 2.0.12:** le voci dello stesso prodotto (es. crostata alla marmellata / crostata marmellata / crostate marmellate) si fondono in una sola anche mentre si scrive o con ricerche lunghe.
 
 **Novità 2.0.11:** ricerca a più parole («crostata marmellata»): servono tutte le parole, con plurali e sinonimi, e i prodotti restano insieme in un'unica voce.
 
