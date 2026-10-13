@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.9`
+**Versione applicativa:** `2.0.10`
+
+**Novità 2.0.10:** ricerca prodotti più precisa (un prodotto = una voce con tutti i produttori), virgolette per la parola esatta (`"olio"`), niente più falsi match (uova/nuova, vino/bovino, olio/gasolio), tovaglioli di carta uniti.
 
 **Novità 2.0.9:** le vecchie variabili d'ambiente PIN/utente centrali vengono ignorate (fine di «Credenziali non valide»), sincronizzazione recensioni corretta, errore credenziali più chiaro.
 
