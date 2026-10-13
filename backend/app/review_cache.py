@@ -112,7 +112,7 @@ async def refresh_review_cache() -> dict:
     checkpoint = db.get(AppSetting, "central_review_sync_at")
     try:
         while True:
-            page = await central_review_page(offset, 500, checkpoint.value if checkpoint else None)
+            page = await central_review_page(offset, 500, (checkpoint.value if checkpoint and checkpoint.value else None))
             items = page.get("items", [])
             total = page.get("total", 0)
             if not items:

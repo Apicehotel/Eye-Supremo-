@@ -17,7 +17,8 @@ def _check(response: httpx.Response) -> None:
         detail = (response.text or "")[:200]
     path = response.request.url.path.rsplit("/", 1)[-1]
     raise httpx.HTTPStatusError(
-        f"Supabase {response.status_code} su {path}: {detail or response.reason_phrase}",
+        f"Supabase {response.status_code} su {path}: {detail or response.reason_phrase}"
+        + (f" (utente «{settings.central_username}», PIN di {len(settings.central_pin)} cifre)" if "Credenziali" in detail else ""),
         request=response.request,
         response=response,
     )
@@ -104,7 +105,7 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
 async def central_invoice_page(offset: int = 0, limit: int = 500, since: str | None = None) -> dict:
     if not configured(): return {"enabled": False, "items": [], "total": 0}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_invoice_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since}
+    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since or None}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
         if response.is_success:
@@ -149,7 +150,7 @@ async def central_review_upsert(review: dict) -> dict:
 async def central_review_page(offset: int = 0, limit: int = 500, since: str | None = None) -> dict:
     if not configured(): return {"enabled": False, "items": [], "total": 0}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_review_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since}
+    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since or None}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Authorization": f"Bearer {settings.supabase_publishable_key or ''}", "Content-Type": "application/json"})
         _check(response)
