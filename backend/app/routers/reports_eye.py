@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..database import get_db
 from ..models import Hotel, Invoice, InvoiceMeta
 from ..central_service import central_invoice_search, central_product_detail, central_product_page
+from ..product_recognition import annotate as annotate_recognition
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
 from ..report_service import historical_product_report
 
@@ -69,11 +70,11 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # the product catalogue: equivalent descriptions with the same content
     # must appear as one product, while the source names remain available for
     # the detail/history lookup.
-    page = {"items": merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None)}
+    page = {"items": annotate_recognition(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None))}
     product = next((x for x in page["items"] if x.get("nome_canonico")), None)
     if not product:
         return result
-    matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price")} for x in page.get("items", []) if x.get("nome_canonico")]
+    matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price"), "recognition": x.get("recognition")} for x in page.get("items", []) if x.get("nome_canonico")]
     # A one-word family search (for example "acqua") is intentionally not
     # collapsed into the first catalogue row: let the user choose the exact
     # product variant so older purchases cannot hide newer ones.

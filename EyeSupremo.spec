@@ -4,6 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ('frontend/dist', 'frontend_dist'),
     ('installer/assets/eye-supremo.ico', '.'),
+    ('backend/app/data', 'app/data'),
 ]
 binaries = []
 hiddenimports = [

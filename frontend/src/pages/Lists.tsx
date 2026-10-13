@@ -521,7 +521,7 @@ export function Products() {
                       <b>{configs[p.nome_canonico]?.configured_name || p.nome_canonico}</b>
                     </td>
                     <td>{p.categoria || "—"}</td>
-                    <td>{configs[p.nome_canonico]?.manufacturer || p.marca || "—"}</td>
+                    <td>{configs[p.nome_canonico]?.manufacturer || p.marca || p.recognition?.brand || "—"}{p.recognition?.category && <small className="recognized-tag" title="Riconosciuto da Open Food Facts">{[p.recognition.category, p.recognition.subcategory].filter(Boolean).join(" › ")}</small>}</td>
                     <td>{p.purchases}</td>
                     <td>{p.min_price ? euro(p.min_price) : "—"}</td>
                     <td>{p.avg_price ? euro(p.avg_price) : "—"}</td>

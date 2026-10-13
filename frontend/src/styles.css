@@ -211,3 +211,5 @@ body{background:#f7f8fa;color:var(--ink)}
 .invoice-ref-panel{z-index:31}
 .open-invoice-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px!important;font-size:13px!important;white-space:nowrap}
 .invoice-ref-hit td{background:#fff4e5}
+
+.recognized-tag{display:block;color:var(--muted,#667085);font-size:11px;margin-top:2px}
