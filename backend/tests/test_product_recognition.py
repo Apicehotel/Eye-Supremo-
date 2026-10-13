@@ -25,3 +25,13 @@ def test_never_raises_and_unknown():
 def test_annotate_adds_field():
     items = annotate([{"nome_canonico": "LATTE INTERO 1L"}])
     assert "recognition" in items[0]
+
+
+def test_nonfood_taxonomy_gives_subcategory():
+    r = recognize("SHAMPOO 500ML")
+    assert r["kind"] == "non_food" and r["category"] == "Pulizia e igiene" and r["subcategory"] == "Shampoo"
+    assert recognize("SIGARETTE")["category"] == "Tabacchi"
+
+
+def test_accounting_lines_not_overridden_by_taxonomy():
+    assert recognize("IMPOSTA DI BOLLO")["category"] == "Imposte e voci contabili"

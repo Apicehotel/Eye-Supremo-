@@ -16,6 +16,7 @@ from pathlib import Path
 from .normalization import normalize_text
 
 DATA_FILE = Path(__file__).parent / "data" / "off_categories_it.json"
+NONFOOD_FILE = Path(__file__).parent / "data" / "off_nonfood_it.json"
 
 # Marche trovate nelle fatture (chiave normalizzata → nome mostrato). Si estende senza toccare il resto.
 BRANDS: dict[str, str] = {
@@ -80,6 +81,8 @@ EXTRA_FOODS: list[tuple[str, str, str]] = [
     ("xugia", "Dolci e pasticceria", "Cioccolato"), ("fondente", "Dolci e pasticceria", "Cioccolato"), ("olio", "Oli e grassi", "Olio"), ("uova", "Uova", "Uova"), ("uovo", "Uova", "Uova"),
 ]
 
+NONFOOD_FAMILIES_WITH_TAXONOMY = {"Pulizia e igiene", "Materiali e attrezzature", "Monouso e tavola"}
+
 ABBREVIATIONS = {
     "mozz": "mozzarella", "pomo": "pomodori", "croiss": "croissant", "pancet": "pancetta", "yog": "yogurt", "prosc": "prosciutto", "cioc": "cioccolato", "nocc": "nocciola", "zucch": "zucchine",
     "pomod": "pomodori", "cong": "congelato", "sgusc": "sgusciate", "marm": "marmellata", "form": "formaggio",
@@ -98,6 +101,32 @@ def _categories() -> dict[str, dict]:
         return json.loads(DATA_FILE.read_text(encoding="utf8")).get("categories", {})
     except (OSError, ValueError):
         return {}
+
+
+@lru_cache(maxsize=1)
+def _nonfood_categories() -> dict[str, dict]:
+    try:
+        return json.loads(NONFOOD_FILE.read_text(encoding="utf8")).get("categories", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _find_nonfood_taxonomy(tokens: list[str]) -> dict | None:
+    """Voce più specifica della tassonomia non alimentare (Open Products/Beauty Facts)."""
+    cats = _nonfood_categories()
+    best: tuple[int, int, dict] | None = None
+    for size in (3, 2, 1):
+        for start in range(0, len(tokens) - size + 1):
+            window = tokens[start: start + size]
+            if size == 1 and len(window[0]) < 5:
+                continue
+            for last in _variants(window[-1]):
+                hit = cats.get(" ".join(window[:-1] + [last]))
+                if hit and (best is None or (size, hit["depth"]) > best[:2]):
+                    best = (size, hit["depth"], hit)
+        if best is not None and size == best[0]:
+            break
+    return best[2] if best else None
 
 
 def _variants(token: str) -> list[str]:
@@ -202,7 +231,11 @@ def recognize(description: str) -> dict:
         if category and non_food is None:
             return {"kind": "food", "category": category["macro"], "subcategory": category["label"], "brand": brand, "origin": origin, "confidence": 0.8}
         if non_food:
-            return {"kind": "non_food", "category": non_food, "subcategory": None, "brand": brand, "origin": origin, "confidence": 0.7}
+            tax = _find_nonfood_taxonomy(tokens) if non_food in NONFOOD_FAMILIES_WITH_TAXONOMY else None
+            return {"kind": "non_food", "category": non_food, "subcategory": tax["label"] if tax else None, "brand": brand, "origin": origin, "confidence": 0.7}
+        tax = _find_nonfood_taxonomy(tokens)
+        if tax:
+            return {"kind": "non_food", "category": tax["family"], "subcategory": tax["label"], "brand": brand, "origin": origin, "confidence": 0.5}
         if brand:
             return {"kind": "food", "category": None, "subcategory": None, "brand": brand, "origin": origin, "confidence": 0.5}
         return {"kind": "unknown", "category": None, "subcategory": None, "brand": None, "origin": origin, "confidence": 0.0}
