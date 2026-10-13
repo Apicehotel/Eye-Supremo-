@@ -303,3 +303,4 @@ Ogni prodotto in elenco e nella selezione del report storico mostra categoria, m
 - Dizionario: `backend/app/data/off_categories_it.json`, rigenerabile con `python scripts/build_off_categories.py`.
 - Nessuna chiamata all'API di Open Food Facts a runtime (limiti di richieste e uso offline).
 - Marche e famiglie si estendono in `backend/app/product_recognition.py` (`BRANDS`, `NON_FOOD`, `EXTRA_FOODS`).
+- Prodotti **non alimentari**: oltre alle famiglie manuali (imposte, energia, lavanderia…), le righe senza esito alimentare usano le tassonomie Open Products Facts e Open Beauty Facts (`backend/app/data/off_nonfood_it.json`, rigenerabile con `python scripts/build_nonfood_categories.py`) e mostrano famiglia e sottocategoria (es. «Pulizia e igiene › Shampoo»). Le voci contabili restano manuali.
