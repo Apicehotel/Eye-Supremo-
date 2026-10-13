@@ -49,6 +49,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Da completare
 
+- sicurezza accessi: rimuovere il PIN predefinito dalla UI e imporre il cambio PIN al primo accesso;
 - pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
 - verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
