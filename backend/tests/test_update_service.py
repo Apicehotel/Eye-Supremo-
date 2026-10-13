@@ -90,3 +90,9 @@ def test_download_redirects_to_github(client, monkeypatch):
     response = client.get("/api/eye/updates/download", follow_redirects=False)
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "https://example.test/EyeSupremo-Setup.exe"
+
+
+def test_pick_installer_asset_accepts_versioned_name():
+    from app.update_service import pick_installer_asset
+    asset = pick_installer_asset([{"name": "EyeSupremo-Setup-2.0.14.exe", "browser_download_url": "https://x/y.exe"}])
+    assert asset and asset["name"] == "EyeSupremo-Setup-2.0.14.exe"

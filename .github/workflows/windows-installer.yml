@@ -65,5 +65,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: EyeSupremo-Windows-Setup
-          path: release/EyeSupremo-Setup.exe
+          path: release/EyeSupremo-Setup-*.exe
           if-no-files-found: error
