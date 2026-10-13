@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Download, ChevronRight, Bell, Search } from "lucide-react";
 import { api, eyeApi, euro, shortDate } from "../lib/api";
+import { InvoiceViewer, OpenInvoiceButton, type InvoiceRefTarget } from "../components/InvoiceRef";
 import {
   Empty,
   Loading,
@@ -42,6 +43,7 @@ export function Invoices() {
     [page, setPage] = useState(0),
     [pageSize, setPageSize] = useState(50),
     [detail, setDetail] = useState<any>(),
+    [invoiceRef, setInvoiceRef] = useState<InvoiceRefTarget>(),
     [sort, setSort] = useState<{key: SortKey; direction: SortDirection}>({key: "data", direction: "desc"});
   const setQ = (value: string) => {
     setPage(0);
@@ -113,6 +115,7 @@ export function Invoices() {
   )), [live?.results, sort]);
   return (
     <>
+      <InvoiceViewer target={invoiceRef} onClose={() => setInvoiceRef(undefined)} />
       <PageHeader
         title="Fatture"
         subtitle="Ricerca estesa a tutte le fatture dell’archivio — nessun tetto nascosto"
@@ -173,6 +176,7 @@ export function Invoices() {
                       <th>Quantità</th>
                       <th><SortHeader label="Prezzo unit." sort={sort} sortKey="prezzo" onSort={toggleSort} /></th>
                       <th><SortHeader label="Totale riga" sort={sort} sortKey="totale" onSort={toggleSort} /></th>
+                      <th>Fattura</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -191,6 +195,7 @@ export function Invoices() {
                         <td>
                           <b>{euro(r.row_total)}</b>
                         </td>
+                        <td><OpenInvoiceButton id={r.invoice_id} highlight={q} onOpen={setInvoiceRef} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -232,7 +237,7 @@ export function Invoices() {
                       <th><SortHeader label="Fattura" sort={sort} sortKey="numero" onSort={toggleSort} /></th>
                       <th>Quantità</th>
                       <th><SortHeader label="Prezzo" sort={sort} sortKey="prezzo" onSort={toggleSort} /></th>
-                      <th><SortHeader label="Totale" sort={sort} sortKey="totale" onSort={toggleSort} /></th>
+                      <th><SortHeader label="Totale" sort={sort} sortKey="totale" onSort={toggleSort} /></th><th>Fattura</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -248,7 +253,7 @@ export function Invoices() {
                         <td>{euro(Number(r.unit_price))}</td>
                         <td>
                           <b>{euro(Number(r.line_total))}</b>
-                        </td>
+                        </td><td><OpenInvoiceButton id={r.source_hash || r.id} highlight={q} onOpen={setInvoiceRef} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -341,7 +346,7 @@ export function Invoices() {
                         <th><SortHeader label="Fattura" sort={sort} sortKey="numero" onSort={toggleSort} /></th>
                         <th>Quantità</th>
                         <th><SortHeader label="Prezzo" sort={sort} sortKey="prezzo" onSort={toggleSort} /></th>
-                        <th><SortHeader label="Totale" sort={sort} sortKey="totale" onSort={toggleSort} /></th>
+                        <th><SortHeader label="Totale" sort={sort} sortKey="totale" onSort={toggleSort} /></th><th>Fattura</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -357,7 +362,7 @@ export function Invoices() {
                           <td>{euro(Number(r.unit_price))}</td>
                           <td>
                             <b>{euro(Number(r.line_total))}</b>
-                          </td>
+                          </td><td><OpenInvoiceButton id={r.source_hash || r.id} highlight={q} onOpen={setInvoiceRef} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -427,6 +432,7 @@ export function Products() {
     [page, setPage] = useState(0),
     [sort, setSort] = useState<{key: SortKey; direction: SortDirection}>({key: "nome_canonico", direction: "asc"}),
     [detail, setDetail] = useState<any>(),
+    [invoiceRef, setInvoiceRef] = useState<InvoiceRefTarget>(),
     [configuredName, setConfiguredName] = useState(""),
     [manufacturer, setManufacturer] = useState(""),
     [configSaved, setConfigSaved] = useState(false),
@@ -481,6 +487,7 @@ export function Products() {
   }
   return (
     <>
+      <InvoiceViewer target={invoiceRef} onClose={() => setInvoiceRef(undefined)} />
       <PageHeader
         title="Prodotti"
         subtitle="Prodotti canonici, prezzi e storico"
@@ -537,7 +544,7 @@ export function Products() {
             <div className="panel-title"><h2>Anteprima · {detail.product?.canonical_name || "Dettaglio prodotto"}</h2><button className="secondary-btn preview-close" aria-label="Chiudi anteprima" title="Chiudi anteprima" onClick={() => setDetail(undefined)}>×</button></div>
             <div className="product-config"><h3>Configurazione prodotto</h3><div className="product-config-grid"><label>Nome visualizzato<input value={configuredName} onChange={e => setConfiguredName(e.target.value)} /></label><label>Produttore<input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="Produttore / marca" /></label></div><button className="primary-btn" onClick={saveProductConfig} disabled={!configuredName.trim()}>Salva configurazione</button>{configSaved && <span className="success">Configurazione salvata</span>}<label className="product-track-toggle"><input type="checkbox" checked={tracked} onChange={e => saveTracking(e.target.checked)} /> Monitora questo prodotto e segnala variazioni di prezzo</label></div>
             <p><b>Acquisti:</b> {detail.product?.purchases ?? 0} · <b>Prezzo medio:</b> {detail.product?.avg_price != null ? euro(Number(detail.product.avg_price)) : "—"}</p>
-            {detail.history?.length ? <div className="table-wrap"><table><thead><tr><th>Data</th><th>Fattura</th><th>Fornitore</th><th>Quantità</th><th>Prezzo unit.</th><th>Prezzo normalizzato</th><th>Totale</th></tr></thead><tbody>{detail.history.map((h: any, i: number) => <tr key={`${h.source_hash}-${i}`}><td>{shortDate(h.invoice_date)}</td><td>{h.invoice_number}</td><td>{h.supplier_name}</td><td>{h.quantity ?? "—"} {h.original_unit || h.normalized_unit || ""}</td><td>{h.unit_price != null ? euro(Number(h.unit_price)) : "—"}</td><td>{h.normalized_price != null ? `${euro(Number(h.normalized_price))} / ${h.normalized_unit || h.original_unit || "unità"}` : "—"}</td><td>{h.line_total != null ? euro(Number(h.line_total)) : "—"}</td></tr>)}</tbody></table></div> : <p>Nessun acquisto collegato.</p>}
+            {detail.history?.length ? <div className="table-wrap"><table><thead><tr><th>Data</th><th>Fattura</th><th>Fornitore</th><th>Quantità</th><th>Prezzo unit.</th><th>Prezzo normalizzato</th><th>Totale</th><th>Fattura</th></tr></thead><tbody>{detail.history.map((h: any, i: number) => <tr key={`${h.source_hash}-${i}`}><td>{shortDate(h.invoice_date)}</td><td>{h.invoice_number}</td><td>{h.supplier_name}</td><td>{h.quantity ?? "—"} {h.original_unit || h.normalized_unit || ""}</td><td>{h.unit_price != null ? euro(Number(h.unit_price)) : "—"}</td><td>{h.normalized_price != null ? `${euro(Number(h.normalized_price))} / ${h.normalized_unit || h.original_unit || "unità"}` : "—"}</td><td>{h.line_total != null ? euro(Number(h.line_total)) : "—"}</td><td><OpenInvoiceButton id={h.source_hash} highlight={detail.product?.canonical_name} onOpen={setInvoiceRef} /></td></tr>)}</tbody></table></div> : <p>Nessun acquisto collegato.</p>}
           </>}
         </article>
       )}
