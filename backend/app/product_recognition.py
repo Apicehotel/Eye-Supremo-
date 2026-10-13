@@ -35,7 +35,7 @@ BRANDS: dict[str, str] = {
 
 # Righe che non sono cibo: parole (normalizzate) → famiglia.
 NON_FOOD: list[tuple[str, set[str]]] = [
-    ("Accessori e ricambi", {"molla", "molle", "portacarta", "portarotolo", "portasapone", "dispenser", "portascopino", "scopino"}),
+    ("Accessori e ricambi", {"molla", "molle", "portacarta", "portarotolo", "portasapone", "dispenser", "portascopino", "scopino", "dosatore", "dosatori"}),
     ("Energia e utenze", {"energia", "gasolio", "potenza", "dispacciamento", "cogenerazione", "rinnovabili", "contatore", "acquedotto",
                            "fognatura", "depurazione", "perequazione", "oneri", "perdite di rete", "quota fissa", "quota energia",
                            "fascia", "gas naturale", "elettrica", "tariffa", "ricalcolo", "ricalcoli", "scaglione"}),
@@ -64,7 +64,7 @@ EXTRA_FOODS: list[tuple[str, str, str]] = [
     ("bombolon", "Dolci e pasticceria", "Bomboloni"), ("bombolin", "Dolci e pasticceria", "Bomboloni"),
     ("cornett", "Dolci e pasticceria", "Cornetti"), ("croissant", "Dolci e pasticceria", "Cornetti"),
     ("maritozz", "Dolci e pasticceria", "Maritozzi"), ("zeppol", "Dolci e pasticceria", "Zeppole"),
-    ("crostat", "Dolci e pasticceria", "Crostate"), ("tortin", "Dolci e pasticceria", "Torte"), ("muffin", "Dolci e pasticceria", "Muffin"),
+    ("crostat", "Dolci e pasticceria", "Crostate"), ("tortin", "Dolci e pasticceria", "Torte"), ("muffin", "Dolci e pasticceria", "Muffin"), ("tartell", "Dolci e pasticceria", "Tartellette"), ("zatterin", "Dolci e pasticceria", "Zatterine"),
     ("donut", "Dolci e pasticceria", "Donut"), ("krapfen", "Dolci e pasticceria", "Krapfen"), ("sfogliatin", "Dolci e pasticceria", "Sfogliatine"),
     ("focaccia", "Pane e pizze", "Focaccia"), ("baguette", "Pane e pizze", "Baguette"), ("panino", "Pane e pizze", "Panini"), ("pizzett", "Pane e pizze", "Pizzette"),
     ("limoncello", "Alcolici", "Limoncello"), ("grappa", "Alcolici", "Grappa"), ("spumante", "Alcolici", "Spumante"), ("aperol", "Alcolici", "Aperitivi"),

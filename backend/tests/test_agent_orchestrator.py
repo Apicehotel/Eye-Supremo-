@@ -319,3 +319,16 @@ def test_ask_reports_central_error(db, monkeypatch):
     context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
     assert "Credenziali non valide" in context["central_error"]
     assert any("Archivio centrale" in w for w in _verify(context)["warnings"])
+
+
+def test_marmellata_and_confettura_are_the_same_product_without_pastries():
+    from app.agent_orchestrator import _filter_product_rows
+
+    rows = [{"description": d} for d in [
+        "NESTLE Marmellata Arance 120x25g IT", "NESTLE Confettura Extra Frag 120x25g IT", "MARM.HERO ARANCE A.ALL.25gX120",
+        "CONFETTURA DI SAMBUCO", "CROSTATA MARM. PRUGNE", "CORNETTI MARMELLATA", "TARTELLE MEDIE MISTE MARMELLATA DA 15PEZZI",
+        "DISPENSER VASO CONFETTURA 3 PZ", "DOSATORE CONFETTURE MANTEA", "MARMO BIANCO",
+    ]]
+    for query in ("marmellata", "marmellate", "confettura"):
+        kept = {r["description"] for r in _filter_product_rows(rows, query)}
+        assert kept == {"NESTLE Marmellata Arance 120x25g IT", "NESTLE Confettura Extra Frag 120x25g IT", "MARM.HERO ARANCE A.ALL.25gX120", "CONFETTURA DI SAMBUCO"}, query
