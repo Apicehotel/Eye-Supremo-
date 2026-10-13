@@ -207,3 +207,7 @@ body{background:#f7f8fa;color:var(--ink)}
 .cache-bar{height:10px;background:#e6ebf1;border-radius:999px;overflow:hidden;margin-top:14px}
 .cache-bar>div{height:100%;background:#2fb36b;border-radius:999px;transition:width .6s}
 .cache-card.warn .cache-bar>div{background:#f2a93b}.cache-card.sync .cache-bar>div{background:#3b8fe8}.cache-card.danger .cache-bar>div{background:#e24b4b}
+.invoice-ref-backdrop{position:fixed;inset:0;z-index:29;background:rgba(8,29,52,.28)}
+.invoice-ref-panel{z-index:31}
+.open-invoice-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px!important;font-size:13px!important;white-space:nowrap}
+.invoice-ref-hit td{background:#fff4e5}

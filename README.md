@@ -42,7 +42,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `142 passed`;
+- backend: `146 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -174,6 +174,8 @@ Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere
 **Ricerca fatture:** estesa a **tutte** le righe prodotto dell’archivio locale e della cache — nessun tetto nascosto e **nessun prodotto speciale**. Ogni descrizione riga (limoncello, carta igienica, detergenti, bomboloni, …) è cercabile con varianti/composti; i fornitori sono diversificati in pagina. `limit`/`offset` paginano solo la UI; `total`, totali economici e conteggio fornitori coprono l’intero match set.
 
 **Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda e cerca **tutte** le righe prodotto su locale + cache (+ Supabase se serve); confronta i fornitori su tutto il match set, non solo il vendor più frequente. Allo LLM arrivano ~24 righe diversificate; summary e storico usano tutti i match. Domande tipo fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
+
+**Fattura di riferimento su ogni ricerca prodotto:** ogni riga prodotto (Fatture → risultati locali e cache/centrale, Prodotti → storico acquisti, Ask Fatture → «Dati fatture verificati») ha il pulsante **Apri** che mostra la fattura completa in un pannello laterale, con la riga cercata evidenziata e la fonte (archivio locale, cache del PC, archivio centrale). Backend: `GET /api/eye/invoice-ref/{ref}` dove `ref` è l’id fattura locale o lo `source_hash` centrale; ordine di ricerca: locale → cache PC → Supabase. Se la fattura non è disponibile (né locale né in cache né online) il pannello lo dice chiaramente.
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 

@@ -17,6 +17,7 @@ import {
 } from "../lib/api";
 import { Empty, PageHeader, Status } from "../components/UI";
 import { UserAdmin } from "../components/UserAdmin";
+import { InvoiceViewer, OpenInvoiceButton, type InvoiceRefTarget } from "../components/InvoiceRef";
 
 type Hotel = { id: number; code: string; name: string };
 type BatchItem = {
@@ -322,7 +323,8 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     [answer, setAnswer] = useState<any>(),
     [busy, setBusy] = useState(false),
     [hotel, setHotel] = useState(""),
-    [hotels, setHotels] = useState<Hotel[]>([]);
+    [hotels, setHotels] = useState<Hotel[]>([]),
+    [invoiceRef, setInvoiceRef] = useState<InvoiceRefTarget>();
   const askAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     eyeApi<Hotel[]>("/hotels").then(setHotels);
@@ -379,6 +381,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
   const reviewRows = answer?.context?.reviews || [];
   return (
     <>
+      <InvoiceViewer target={invoiceRef} onClose={() => setInvoiceRef(undefined)} />
       <PageHeader
         title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
         subtitle={
@@ -481,6 +484,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                       <th>Prezzo unit.</th>
                       <th>Prezzo normalizzato</th>
                       <th>Totale</th>
+                      <th>Fattura</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -509,6 +513,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                             ? euro(Number(r.row_total))
                             : "—"}
                         </td>
+                        <td><OpenInvoiceButton id={r.invoice_id} highlight={r.description} onOpen={setInvoiceRef} /></td>
                       </tr>
                     ))}
                   </tbody>

@@ -437,6 +437,68 @@ async def central_invoice_detail_route(source_hash: str, role: str = Depends(cur
     return json.loads(item.payload_json or "{}")
 
 
+def _local_invoice_ref(db: Session, invoice: Invoice) -> dict:
+    """Fattura locale nello stesso formato del dettaglio centrale (per l'anteprima unica in app)."""
+    rows = db.scalars(select(InvoiceRow).where(InvoiceRow.invoice_id == invoice.id).order_by(InvoiceRow.id)).all()
+    return {
+        "source": "local",
+        "id": invoice.id,
+        "source_hash": invoice.hash_file,
+        "invoice_number": invoice.numero,
+        "invoice_date": invoice.data.isoformat(),
+        "supplier_name": invoice.supplier.ragione_sociale if invoice.supplier else None,
+        "taxable": float(invoice.imponibile or 0),
+        "vat": float(invoice.iva or 0),
+        "total": float(invoice.totale or 0),
+        "currency": invoice.valuta,
+        "source_filename": invoice.file_originale,
+        "rows": [{
+            "original_description": r.descrizione_originale,
+            "normalized_description": r.descrizione_normalizzata,
+            "quantity": float(r.quantita or 0),
+            "original_unit": r.unita_originale,
+            "normalized_unit": r.unita_normalizzata,
+            "unit_price": float(r.prezzo_unitario or 0),
+            "line_total": float(r.totale_riga or 0),
+            "normalized_price": float(r.prezzo_normalizzato) if r.prezzo_normalizzato is not None else None,
+        } for r in rows],
+    }
+
+
+@router.get("/invoice-ref/{ref}")
+async def invoice_reference(ref: str, role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Fattura di riferimento di una riga prodotto.
+
+    `ref` e' l'id numerico di una fattura locale oppure lo source_hash centrale. Prova in ordine:
+    fattura locale, cache del PC, archivio centrale.
+    """
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    ref = ref.strip()
+    if ref.isdigit() and len(ref) <= 9:
+        invoice = db.scalar(select(Invoice).options(selectinload(Invoice.supplier)).where(Invoice.id == int(ref)))
+        if invoice:
+            return _local_invoice_ref(db, invoice)
+    else:
+        invoice = db.scalar(select(Invoice).options(selectinload(Invoice.supplier)).where(Invoice.hash_file == ref))
+        if invoice:
+            return _local_invoice_ref(db, invoice)
+        cached = db.get(CentralInvoiceCache, ref)
+        if cached:
+            data = json.loads(cached.payload_json or "{}")
+            if data.get("rows"):
+                return {**data, "source": "cache"}
+        try:
+            remote = await central_invoice_detail(ref)
+            if remote and remote.get("invoice_number"):
+                return {**remote, "source": "central"}
+        except Exception:  # noqa: BLE001
+            pass
+        if cached:
+            return {**json.loads(cached.payload_json or "{}"), "source": "cache", "rows_available": False}
+    raise HTTPException(404, "Fattura di riferimento non trovata")
+
+
 @router.get("/central/products/{canonical_name:path}")
 async def central_product_detail_route(canonical_name: str, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
