@@ -40,7 +40,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `140 passed`;
+- backend: `142 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -177,7 +177,7 @@ Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere
 
 **Bootstrap all’installazione:** al primo avvio (o con cache vuota) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
 
-**Stato cache a colpo d’occhio:** nella barra laterale c’è un indicatore (verde = completa, ambra = in corso/non verificata/parziale, rosso = errore o vuota) e nella Dashboard una scheda con barra di avanzamento («X di Y fatture · mancano N»). Il download confronta le fatture locali con il totale centrale: se mancano record (o il fallback ha scaricato solo le prime 500) la cache è marcata *incompleta*, non viene salvato il checkpoint e al prossimo avvio il download riprende da solo. Pulsante *Completa download* per forzarlo. API: `GET /cache/bootstrap/status` → `health`, `headline`, `progress`, `invoices{local,remote_total,percent,missing}`, `ready_offline`.
+**Stato cache a colpo d’occhio:** nella barra laterale c’è un indicatore (verde = completa, ambra = in corso/non verificata/parziale, rosso = errore o vuota) e nella Dashboard una scheda con barra di avanzamento («X di Y fatture · mancano N»). Il download confronta le fatture locali con il totale centrale: se mancano record (o il fallback ha scaricato solo le prime 500) la cache è marcata *incompleta*, non viene salvato il checkpoint e al prossimo avvio il download riprende da solo. Pulsante *Completa download* per forzarlo. Gli errori di Supabase mostrano il motivo restituito dal server (es. `Supabase 400 su eye_central_invoice_page: Credenziali non valide`) invece del solo «400 Bad Request». API: `GET /cache/bootstrap/status` → `health`, `headline`, `progress`, `invoices{local,remote_total,percent,missing}`, `ready_offline`.
 
 Modelli inclusi nel completamento automatico:
 
