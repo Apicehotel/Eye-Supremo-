@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.8`
+**Versione applicativa:** `2.0.9`
+
+**Novità 2.0.9:** le vecchie variabili d'ambiente PIN/utente centrali vengono ignorate (fine di «Credenziali non valide»), sincronizzazione recensioni corretta, errore credenziali più chiaro.
 
 **Novità 2.0.8:** fattura di riferimento apribile su ogni ricerca prodotto, report storico con tutti i fornitori, ricerca per parte di parola («bombo» trova «bombolino»), riconoscimento prodotti con Open Food Facts (alimentari e non), Ask Fatture completo con integrazione dalla centrale.
 
