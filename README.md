@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.6`
+**Versione applicativa:** `2.0.7`
+
+**Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server, PIN predefinito `000000` ripristinato.
 **Branch principale:** `main` (modifiche solo via branch + PR)
 **Ultimo aggiornamento:** 13 ottobre 2026
 
