@@ -206,6 +206,9 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
                 "unit_price": float(row.get("unit_price") or 0),
                 "line_total": float(row.get("line_total") or 0),
                 "analysis_status": row.get("analysis_status") or "product",
+                "normalized_price": row.get("normalized_price"),
+                "normalized_unit": row.get("normalized_unit"),
+                "original_unit": row.get("original_unit"),
                 "local_cache": True,
             }))
 
