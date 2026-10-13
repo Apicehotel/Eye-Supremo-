@@ -27,6 +27,12 @@ def clean_db():
         session.close()
     yield
 
+@pytest.fixture(autouse=True)
+def no_real_supabase(monkeypatch):
+    """I test non devono mai raggiungere la Supabase reale (in CI la rete c'è): chi serve la simula."""
+    monkeypatch.setattr("app.agent_orchestrator.central_configured", lambda: False)
+
+
 @pytest.fixture
 def db():
     session = SessionLocal()
