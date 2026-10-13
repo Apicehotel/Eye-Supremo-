@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .models import Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import extract_content, normalize_text, normalize_unit
-from .product_taxonomy import extract_product_query, product_stem, search_terms
+from .product_taxonomy import extract_product_query, product_stem, row_matches_product_query, search_terms
 
 
 def _money(value) -> float:
@@ -22,6 +22,53 @@ def _comparable_quantity(row: InvoiceRow, unit: str) -> float:
     if content_in_base and content_unit == unit and original_unit in {None, "confezione", "scatola", "rotolo"}:
         return _money(Decimal(str(quantity)) * content_in_base)
     return quantity
+
+
+def _point_order(point: dict) -> tuple:
+    row_id = point.get("row_id")
+    return (point["date"], isinstance(row_id, str), row_id if isinstance(row_id, int) else 0, str(row_id))
+
+
+def _cache_complete(db: Session) -> bool | None:
+    """True/False se la cache fatture è stata verificata completa/incompleta, None se non verificata."""
+    from .models import AppSetting
+
+    row = db.get(AppSetting, "central_sync_complete")
+    value = row.value if row else None
+    return True if value == "yes" else False if value == "no" else None
+
+
+def _cache_observations(db: Session, product_query: str) -> list[dict]:
+    """Righe prodotto della cache PC (fatture centrali scaricate) per lo storico, senza tetto."""
+    try:
+        from .central_cache import cached_row_search
+
+        items = cached_row_search(db, product_query, limit=None).get("items", [])
+    except Exception:  # noqa: BLE001 - la cache non deve mai rompere il report
+        return []
+    out: list[dict] = []
+    for item in items:
+        if item.get("analysis_status") not in (None, "product"):
+            continue
+        description = str(item.get("original_description") or item.get("normalized_description") or "")
+        if not row_matches_product_query(description, product_query):
+            continue
+        raw = item.get("normalized_price")
+        price = _money(raw if raw not in (None, 0, "0") else item.get("unit_price"))
+        if price <= 0 or not item.get("invoice_date"):
+            continue
+        out.append({
+            "row_id": item.get("id"),
+            "hash": str(item.get("source_hash") or item.get("id")),
+            "supplier": str(item.get("supplier_name") or "Fornitore"),
+            "invoice": str(item.get("invoice_number") or ""),
+            "date": str(item.get("invoice_date"))[:10],
+            "price": price,
+            "quantity": _money(item.get("quantity")),
+            "unit": str(item.get("normalized_unit") or item.get("original_unit") or "pz").lower(),
+            "description": description,
+        })
+    return out
 
 
 def historical_product_report(db: Session, query: str, limit: int | None = None) -> dict:
@@ -65,9 +112,14 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         stmt = stmt.limit(limit)
     records = db.execute(stmt).all()
 
-    grouped: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    supplier_names: dict[str, str] = {}
+    supplier_ids: dict[str, object] = {}
     manufacturers: set[str] = set()
     product_names: list[str] = []
+    local_hashes: set[str] = set()
+    local_invoice_keys: set[tuple[str, str, str]] = set()
+    local_points = 0
     for row, invoice, supplier, product, _policy in records:
         unit = (row.unita_normalizzata or row.unita_originale or (product.unita_base if product else None) or "pz").lower()
         raw_price = row.prezzo_normalizzato if row.prezzo_normalizzato not in (None, Decimal("0")) else row.prezzo_unitario
@@ -79,7 +131,14 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
             manufacturers.add(manufacturer)
         if product and product.nome_canonico:
             product_names.append(product.nome_canonico)
-        grouped[(supplier.id, unit)].append({
+        skey = normalize_text(supplier.ragione_sociale)
+        supplier_names.setdefault(skey, supplier.ragione_sociale)
+        supplier_ids.setdefault(skey, supplier.id)
+        if invoice.hash_file:
+            local_hashes.add(invoice.hash_file)
+        local_invoice_keys.add((skey, normalize_text(invoice.numero), invoice.data.isoformat()))
+        local_points += 1
+        grouped[(skey, unit)].append({
             "row_id": row.id,
             "invoice_id": invoice.id,
             "invoice": invoice.numero,
@@ -89,12 +148,37 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
             "unit": unit,
             "description": row.descrizione_originale,
             "manufacturer": manufacturer or None,
+            "source": "local",
+        })
+
+    # Fatture scaricate nella cache del PC (archivio centrale): senza questo il report
+    # vedeva solo le fatture importate in locale e mostrava un solo fornitore.
+    cache_points = 0
+    cache_rows = _cache_observations(db, product_query)
+    for item in cache_rows:
+        skey = normalize_text(item["supplier"])
+        if item["hash"] in local_hashes or (skey, normalize_text(item["invoice"]), item["date"]) in local_invoice_keys:
+            continue  # stessa fattura già presente in locale
+        supplier_names.setdefault(skey, item["supplier"])
+        supplier_ids.setdefault(skey, item["supplier"])
+        cache_points += 1
+        grouped[(skey, item["unit"])].append({
+            "row_id": item["row_id"],
+            "invoice_id": item["hash"],
+            "invoice": item["invoice"],
+            "date": item["date"],
+            "price": item["price"],
+            "quantity": item["quantity"],
+            "unit": item["unit"],
+            "description": item["description"],
+            "manufacturer": None,
+            "source": "cache",
         })
 
     supplier_blocks = []
     all_points = []
-    for (supplier_id, unit), points in grouped.items():
-        points.sort(key=lambda x: (x["date"], x["row_id"]))
+    for (skey, unit), points in grouped.items():
+        points.sort(key=_point_order)
         previous = None
         for point in points:
             delta = None if previous is None else round(point["price"] - previous, 4)
@@ -104,12 +188,11 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
             point["trend"] = "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same")
             previous = point["price"]
         prices = [p["price"] for p in points]
-        supplier = db.get(Supplier, supplier_id)
         best_point = min(points, key=lambda p: p["price"])
         latest = points[-1]
         block = {
-            "supplier_id": supplier_id,
-            "supplier": supplier.ragione_sociale if supplier else f"Fornitore {supplier_id}",
+            "supplier_id": supplier_ids.get(skey),
+            "supplier": supplier_names.get(skey) or skey,
             "unit": unit,
             "manufacturer": next((p["manufacturer"] for p in points if p["manufacturer"]), None),
             "initial_price": prices[0],
@@ -135,8 +218,8 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
     dominant_unit = max(unit_counts, key=unit_counts.get)
     comparable = [b for b in supplier_blocks if b["unit"] == dominant_unit]
     comparable_points = [p for b, p in all_points if b["unit"] == dominant_unit]
-    first_point = min(comparable_points, key=lambda p: (p["date"], p["row_id"]))
-    last_point = max(comparable_points, key=lambda p: (p["date"], p["row_id"]))
+    first_point = min(comparable_points, key=_point_order)
+    last_point = max(comparable_points, key=_point_order)
     best_point = min(comparable_points, key=lambda p: p["price"])
     best_supplier = min(comparable, key=lambda b: b["average_price"])
     summary = {
@@ -163,4 +246,5 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         "dates": dates,
         "units": sorted(unit_counts),
         "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata.",
+        "sources": {"local": local_points, "cache": cache_points, "suppliers": len(supplier_blocks), "cache_complete": _cache_complete(db)},
     }
