@@ -43,7 +43,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Eye Supremo API", version="2.0.13", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="Eye Supremo API", version="2.0.14", docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:8765"],

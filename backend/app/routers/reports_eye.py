@@ -98,9 +98,16 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     if not history:
         return result
     grouped = {}
+    pieces = _pieces_per_pack(db, [product["nome_canonico"], *detail_names])
     for row in sorted(history, key=lambda x: (str(x.get("invoice_date") or ""), str(x.get("supplier_name") or ""))):
         unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
         price = row.get("normalized_price") or row.get("unit_price")
+        if pieces and row.get("unit_price"):
+            # Pezzi per confezione indicati a mano: prezzo e quantità si esprimono in pezzi.
+            price = float(row["unit_price"]) / pieces
+            unit = "pz"
+            if row.get("quantity") is not None:
+                row = {**row, "quantity": round(float(row["quantity"]) * pieces, 2)}
         if price is None or float(price) <= 0:
             continue
         key = (str(row.get("supplier_name") or "Fornitore"), unit)
@@ -119,6 +126,19 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     best = min(all_points, key=lambda x: x["price"])
     best_supplier = min(blocks, key=lambda x: x["average_price"])
     return {"query": q, "summary": {"product": product["nome_canonico"], "manufacturers": [product["marca"]] if product.get("marca") else [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda x: x["date"])["price"], "initial_date": min(x["date"] for x in all_points), "average_price": round(sum(x["price"] for x in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda x: x["date"])["price"], "latest_date": max(x["date"] for x in all_points), "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({x["date"] for x in all_points}), "units": sorted({x["unit"] for x in all_points}), "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata."}
+
+
+def _pieces_per_pack(db: Session, names: list[str]) -> float | None:
+    row = db.get(AppSetting, "product_configs")
+    try:
+        configs = json.loads(row.value) if row and row.value else {}
+    except Exception:  # noqa: BLE001
+        return None
+    for name in names:
+        value = (configs.get(name) or {}).get("pieces_per_pack") if isinstance(configs, dict) else None
+        if value and float(value) > 0:
+            return float(value)
+    return None
 
 
 def _load_groups(db: Session) -> list[list[str]]:

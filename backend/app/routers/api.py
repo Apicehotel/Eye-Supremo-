@@ -165,6 +165,14 @@ def update_product_config(payload: dict, db: Session = Depends(get_db)):
         config["category"] = category or None
     if "subcategory" in payload:
         config["subcategory"] = subcategory or None
+    if "pieces_per_pack" in payload:
+        try:
+            pieces = float(payload.get("pieces_per_pack") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Pezzi per confezione non valido")
+        config["pieces_per_pack"] = pieces if pieces > 0 else None
+    elif isinstance(configs.get(source_name), dict) and configs[source_name].get("pieces_per_pack"):
+        config["pieces_per_pack"] = configs[source_name]["pieces_per_pack"]
     configs[source_name] = config
     db.merge(AppSetting(key="product_configs", value=json.dumps(configs, ensure_ascii=False)))
     audit(db, "product.configured", f"Configurato prodotto {source_name} come {configured_name}")
