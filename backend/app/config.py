@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,8 +28,10 @@ class Settings(BaseSettings):
     # Logical namespace inside the temporary shared Supabase project.
     # Existing RPC compatibility remains in public until the staged cutover.
     supabase_schema: str = "eye_supremo"
-    central_username: str = "supremo"
-    central_pin: str = "000000"
+    # Credenziali centrali: le vecchie variabili EYESUPREMO_CENTRAL_USERNAME / _PIN lasciate su un PC non
+    # hanno più effetto (causavano «Credenziali non valide»). Per cambiarle servono i nomi *_OVERRIDE.
+    central_username: str = Field("supremo", validation_alias="EYESUPREMO_CENTRAL_USERNAME_OVERRIDE")
+    central_pin: str = Field("000000", validation_alias="EYESUPREMO_CENTRAL_PIN_OVERRIDE")
     central_function: str = "eye-central-gateway"
     sync_enabled: bool = False
     # Al primo avvio/installazione scarica fatture+recensioni in cache SQLite.

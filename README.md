@@ -309,3 +309,7 @@ Ogni prodotto in elenco e nella selezione del report storico mostra categoria, m
 
 ### Ask Fatture: integrazione dalla centrale
 Se la cache PC non è verificata completa, Ask integra sempre i risultati locali con una ricerca su Supabase (timeout 25 s), così un prodotto presente solo nell'archivio centrale mostra tutti i fornitori e non una riga sola.
+
+### Credenziali centrali e variabili d'ambiente
+Le vecchie variabili Windows `EYESUPREMO_CENTRAL_USERNAME` e `EYESUPREMO_CENTRAL_PIN` vengono ignorate (causavano «Credenziali non valide» dopo il ripristino del PIN predefinito). Per cambiare le credenziali centrali si usano `EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` e `EYESUPREMO_CENTRAL_PIN_OVERRIDE`.
+La sincronizzazione recensioni non invia più un checkpoint vuoto come data (errore «invalid input syntax for type timestamp»), e l'errore «Credenziali non valide» indica utente e lunghezza PIN usati (mai il PIN).
