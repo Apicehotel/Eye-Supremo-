@@ -342,3 +342,7 @@ Scrivendo la parola tra virgolette (`"olio"`, anche in Ask: «chi mi vende "olio
 ### Ricerca a più parole («crostata marmellata»)
 
 Con due o più parole la ricerca richiede **tutte** le parole (plurali e sinonimi inclusi: crostata≈crostate, marmellata≈marm≈confettura) e non si riduce più al solo sinonimo «marmellata». Così «crostata marmellata» riunisce in un solo prodotto crostata/crostate alla marmellata/crostate marmellate e non mostra più confetture, cornetti o dosatori. Una parola sola funziona come prima.
+
+### Ricerca incompleta o lunga («crost», «crostate marmellate crostata»)
+
+Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la famiglia viene dedotta dalle voci trovate. Se almeno due voci (e metà del totale) sono nella stessa famiglia (es. «Crostate») si fondono in una sola, senza toccare le voci non imparentate. Funziona offline, senza Ollama: l'IA locale resta per la risposta di Ask, il raggruppamento dei nomi è deterministico (più veloce e ripetibile).

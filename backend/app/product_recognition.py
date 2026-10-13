@@ -275,48 +275,82 @@ def compatible(wanted: dict, got: dict) -> bool:
 KEEP_VARIANTS = {"acqua", "carta igienica", "c igienica", "c ig", "carta a4", "a4", "lamp", "lampada", "lampade", "lampadina", "lampadine"}
 
 
+def _merge_group(same: list[dict], label: str) -> dict:
+    """Fonde più voci di catalogo in una sola (nomi originali conservati in ``canonical_names``)."""
+    names: list[str] = []
+    for item in same:
+        for n in item.get("canonical_names") or [item.get("nome_canonico")]:
+            if n and n not in names:
+                names.append(n)
+    top = max(same, key=lambda i: int(i.get("purchases") or 0))
+    merged = {**top, "nome_canonico": label, "canonical_names": names, "purchases": sum(int(i.get("purchases") or 0) for i in same), "marca": None}
+    mins = [float(i["min_price"]) for i in same if i.get("min_price") is not None]
+    maxs = [float(i["max_price"]) for i in same if i.get("max_price") is not None]
+    if mins:
+        merged["min_price"] = min(mins)
+    if maxs:
+        merged["max_price"] = max(maxs)
+    weighted = [(float(i["avg_price"]), int(i.get("purchases") or 0)) for i in same if i.get("avg_price") is not None]
+    if weighted:
+        weight = sum(w for _, w in weighted)
+        merged["avg_price"] = round(sum(p * w for p, w in weighted) / weight, 4) if weight else round(sum(p for p, _ in weighted) / len(weighted), 4)
+    merged["merged_variants"] = len(same)
+    return merged
+
+
+def _majority_family(items: list[dict]) -> tuple[dict, list[dict]] | None:
+    """Ricerca incompleta («crost») o lunga: la famiglia si deduce dalle voci trovate, non dal testo digitato.
+
+    Se almeno due voci (e la metà del totale) sono riconosciute nella stessa famiglia/sottocategoria, quelle
+    si fondono; le altre restano separate.
+    """
+    from collections import Counter
+
+    recs = [(item, recognize(str(item.get("nome_canonico") or ""))) for item in items]
+    keys = Counter((r["kind"], r["category"], r["subcategory"]) for _, r in recs if r["kind"] != "unknown" and r["subcategory"])
+    if not keys:
+        return None
+    (kind, category, sub), count = keys.most_common(1)[0]
+    if count < 2 or count * 2 < len(items):
+        return None
+    if kind == "non_food" and category == "Imposte e voci contabili":
+        return None
+    group = [item for item, r in recs if (r["kind"], r["category"], r["subcategory"]) == (kind, category, sub)]
+    return {"kind": kind, "category": category, "subcategory": sub}, group
+
+
 def collapse_to_product(items: list[dict], query: str) -> list[dict]:
     """Un solo prodotto con tutti i produttori/varianti trovati («crostata» ≠ 5 righe separate).
 
     Fonde gli elementi del catalogo che la ricerca ha trovato e che sono compatibili con il prodotto cercato;
     ``canonical_names`` conserva tutti i nomi originali per storico e confronto fornitori. Le voci incompatibili
-    (dolci pronti, accessori) vengono escluse.
+    (dolci pronti, accessori) vengono escluse. Se la ricerca è incompleta o lunga (es. «crost», 3+ parole) la
+    famiglia si ricava dalle voci stesse.
     """
     try:
         from .product_taxonomy import extract_product_query
 
         q = normalize_text(extract_product_query(query) or query).strip()
-        if not q or len(q.split()) > 2 or q in KEEP_VARIANTS:
+        if not q or q in KEEP_VARIANTS or len(items) < 2:
             return items
-        wanted = recognize(q)
+        wanted = recognize(q) if len(q.split()) <= 2 else {"kind": "unknown"}
         if wanted["kind"] == "unknown":
-            return items
+            found = _majority_family(items)
+            if not found:
+                return items
+            family, group = found
+            label = str(family["subcategory"]).title()
+            rest = [i for i in items if i not in group]
+            return [_merge_group(group, label), *rest]
         same, other = [], []
         for item in items:
             name = str(item.get("nome_canonico") or "")
             (same if name and compatible(wanted, recognize(name)) else other).append(item)
         if len(same) < 2:
             return items
-        names: list[str] = []
-        for item in same:
-            for n in item.get("canonical_names") or [item.get("nome_canonico")]:
-                if n and n not in names:
-                    names.append(n)
-        top = max(same, key=lambda i: int(i.get("purchases") or 0))
-        purchases = sum(int(i.get("purchases") or 0) for i in same)
-        merged = {**top, "nome_canonico": q.title(), "canonical_names": names, "purchases": purchases, "marca": None}
-        mins = [float(i["min_price"]) for i in same if i.get("min_price") is not None]
-        maxs = [float(i["max_price"]) for i in same if i.get("max_price") is not None]
-        if mins:
-            merged["min_price"] = min(mins)
-        if maxs:
-            merged["max_price"] = max(maxs)
-        weighted = [(float(i["avg_price"]), int(i.get("purchases") or 0)) for i in same if i.get("avg_price") is not None]
-        if weighted:
-            weight = sum(w for _, w in weighted)
-            merged["avg_price"] = round(sum(p * w for p, w in weighted) / weight, 4) if weight else round(sum(p for p, _ in weighted) / len(weighted), 4)
-        merged["merged_variants"] = len(same)
+        words = {w for i in same for w in normalize_text(str(i.get("nome_canonico") or "")).split()}
+        label = q.title() if all(t in words for t in q.split()) else (wanted.get("subcategory") or q).title()
         # Le voci non compatibili (cornetti alla marmellata, dispenser…) non sono il prodotto cercato: fuori, come in Ask.
-        return [merged]
+        return [_merge_group(same, label)]
     except Exception:  # noqa: BLE001
         return items

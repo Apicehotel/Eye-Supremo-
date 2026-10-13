@@ -89,3 +89,19 @@ def test_crostata_marmellata_tutte_insieme_e_senza_confetture():
         assert len(ask) == 5 and "cornetti marmellata" not in ask
     # una sola parola: i sinonimi restano
     assert is_product_search_match("marm s day arance pvc 25gx100", "marmellata")
+
+
+def test_ricerca_incompleta_o_lunga_fonde_la_famiglia():
+    import json, pathlib
+    from app.product_recognition import collapse_to_product
+    from app.product_taxonomy import merge_product_catalog
+    nomi = ["crostata marm albicocca g900 rspomb", "crostata marm prugne", "crostata marmellata",
+            "crostate alla marmellata", "crostate alle marmellate", "crostate marmellate", "crostatine marmellata"]
+    items = [{"nome_canonico": n, "purchases": 2, "avg_price": 5.0, "min_price": 5, "max_price": 5} for n in nomi]
+    for q in ("cros", "crost", "crosta", "crostat", "crostate marmellate crostata"):
+        out = collapse_to_product(merge_product_catalog(list(items)), q)
+        assert len(out) == 1 and out[0]["merged_variants"] == 7, q
+    # voci non imparentate non si fondono
+    misti = items + [{"nome_canonico": "croissant vuoto", "purchases": 1, "avg_price": 1, "min_price": 1, "max_price": 1}]
+    out = collapse_to_product(merge_product_catalog(misti), "cro")
+    assert any(o.get("merged_variants") == 7 for o in out) and any(o["nome_canonico"].lower().startswith("croissant") for o in out)
