@@ -321,3 +321,6 @@ Ask tiene solo le righe la cui **descrizione** è il prodotto cercato (non il no
 
 ### Sinonimi di prodotto
 La ricerca tratta «marmellata», «confettura» e la sigla «MARM.» come lo stesso prodotto (le righe di dolci pronti come «crostata alla marmellata» e gli accessori come dispenser o dosatori restano fuori dal confronto prezzi). Nuovi sinonimi si aggiungono in `PRODUCT_FAMILY_ALIASES` (`backend/app/product_taxonomy.py`).
+
+### Un prodotto, più produttori
+Cercando un prodotto (es. «crostata», «marmellata») l'elenco e la scelta del report storico mostrano **una sola voce** con tutti i nomi e produttori trovati, così il confronto prezzi per fornitore è unico. Le ricerche dove la misura conta (acqua, carta igienica, A4, lampadine) continuano a proporre le varianti da scegliere. Logica in `collapse_to_product` (`backend/app/product_recognition.py`).
