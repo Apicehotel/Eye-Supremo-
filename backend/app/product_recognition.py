@@ -319,7 +319,7 @@ def _majority_family(items: list[dict]) -> tuple[dict, list[dict]] | None:
     return {"kind": kind, "category": category, "subcategory": sub}, group
 
 
-def collapse_to_product(items: list[dict], query: str) -> list[dict]:
+def _collapse_core(items: list[dict], query: str) -> list[dict]:
     """Un solo prodotto con tutti i produttori/varianti trovati («crostata» ≠ 5 righe separate).
 
     Fonde gli elementi del catalogo che la ricerca ha trovato e che sono compatibili con il prodotto cercato;
@@ -349,8 +349,81 @@ def collapse_to_product(items: list[dict], query: str) -> list[dict]:
         if len(same) < 2:
             return items
         words = {w for i in same for w in normalize_text(str(i.get("nome_canonico") or "")).split()}
-        label = q.title() if all(t in words for t in q.split()) else (wanted.get("subcategory") or q).title()
+        if all(t in words for t in q.split()):
+            label = q.title()
+        else:
+            # Parola tagliata («crostat»): completa con la parola più frequente che inizia così.
+            from collections import Counter
+
+            starts = Counter(w for i in same for w in normalize_text(str(i.get("nome_canonico") or "")).split() if w.startswith(q.split()[0]))
+            label = (starts.most_common(1)[0][0] if starts else (wanted.get("subcategory") or q)).title()
         # Le voci non compatibili (cornetti alla marmellata, dispenser…) non sono il prodotto cercato: fuori, come in Ask.
         return [_merge_group(same, label)]
     except Exception:  # noqa: BLE001
         return items
+
+
+_FILLER_WORDS = {"a", "al", "all", "alla", "alle", "allo", "agli", "ai", "con", "da", "dei", "del", "della", "delle", "di", "e", "il", "in", "la", "le", "lo", "per", "su", "un", "una"}
+_SYNONYM_STEMS = {"marm": "marmellat", "marmellata": "marmellat", "marmellate": "marmellat"}
+
+
+def name_signature(name: str) -> frozenset[str]:
+    """Impronta di un nome prodotto: parole utili, senza articoli/preposizioni e senza desinenza (plurale/femminile).
+
+    «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate» → stessa impronta.
+    Numeri e formati restano nell'impronta: «acqua 75x12» e «acqua 100x12» non si confondono.
+    """
+    out = set()
+    for tok in normalize_text(name).split():
+        if tok in _FILLER_WORDS:
+            continue
+        tok = _SYNONYM_STEMS.get(tok, tok)
+        if len(tok) >= 5 and tok[-1] in "aeio" and not any(ch.isdigit() for ch in tok):
+            tok = tok[:-1]
+        if tok in _SYNONYM_STEMS.values() or tok:
+            out.add(_SYNONYM_STEMS.get(tok, tok))
+    return frozenset(out)
+
+
+def merge_equivalent_names(items: list[dict]) -> list[dict]:
+    """Fonde le voci che sono lo stesso prodotto scritto in modi diversi (singolare/plurale, articoli, sinonimi).
+
+    Vale anche senza testo di ricerca (elenco catalogo): una sola riga per prodotto con tutti i produttori;
+    i nomi originali restano in ``canonical_names``. Si fondono solo voci con impronta identica e stessa
+    famiglia riconosciuta.
+    """
+    try:
+        groups: dict[tuple, list[dict]] = {}
+        order: list[tuple] = []
+        for item in items:
+            name = str(item.get("nome_canonico") or "")
+            sig = name_signature(name)
+            rec = recognize(name)
+            key = (sig, rec["kind"], rec["category"], rec["subcategory"]) if sig else ("__solo__", id(item))
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].append(item)
+        out: list[dict] = []
+        for key in order:
+            group = groups[key]
+            if len(group) < 2:
+                out.extend(group)
+                continue
+            top = max(group, key=lambda i: int(i.get("purchases") or 0))
+            label = str(top.get("nome_canonico") or "")
+            out.append(_merge_group(group, label[:1].upper() + label[1:]))
+        return out
+    except Exception:  # noqa: BLE001
+        return items
+
+
+def collapse_to_product(items: list[dict], query: str) -> list[dict]:
+    """Un prodotto per ricerca (vedi ``_collapse_core``) e, in ogni caso, nomi equivalenti fusi in una sola voce."""
+    from .product_taxonomy import extract_product_query  # noqa: F401  (stesso import del core)
+
+    q = normalize_text(extract_product_query(query) or query).strip() if query else ""
+    result = _collapse_core(items, query)
+    if q in KEEP_VARIANTS:
+        return result
+    return merge_equivalent_names(result)

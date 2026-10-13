@@ -348,3 +348,7 @@ Con due o più parole la ricerca richiede **tutte** le parole (plurali e sinonim
 ### Ricerca incompleta o lunga («crost», «crostate marmellate crostata»)
 
 Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la famiglia viene dedotta dalle voci trovate. Se almeno due voci (e metà del totale) sono nella stessa famiglia (es. «Crostate») si fondono in una sola, senza toccare le voci non imparentate. Funziona offline, senza Ollama: l'IA locale resta per la risposta di Ask, il raggruppamento dei nomi è deterministico (più veloce e ripetibile).
+
+### Nomi equivalenti fusi anche nell'elenco catalogo
+
+Anche senza ricerca (elenco catalogo, suggerimenti) le voci che sono lo stesso prodotto scritto in modo diverso diventano **una sola riga** con tutti i produttori: «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate», «crostate marmellate». Si confrontano le parole utili senza articoli/preposizioni e senza desinenza (plurale/femminile), con «marm» = marmellata. Formati e misure restano nell'impronta (acqua 75x12 ≠ acqua 100x12) e si fondono solo voci della stessa famiglia riconosciuta. I nomi originali restano in `canonical_names` per storico e confronto fornitori.

@@ -105,3 +105,16 @@ def test_ricerca_incompleta_o_lunga_fonde_la_famiglia():
     misti = items + [{"nome_canonico": "croissant vuoto", "purchases": 1, "avg_price": 1, "min_price": 1, "max_price": 1}]
     out = collapse_to_product(merge_product_catalog(misti), "cro")
     assert any(o.get("merged_variants") == 7 for o in out) and any(o["nome_canonico"].lower().startswith("croissant") for o in out)
+
+
+def test_catalogo_senza_ricerca_fonde_nomi_equivalenti():
+    from app.product_recognition import collapse_to_product, name_signature
+    assert name_signature("crostata marmellata") == name_signature("crostate alla marmellata") == name_signature("crostate alle marmellate")
+    nomi = ["crostata marmellata", "crostate alla marmellata", "crostate alle marmellate", "crostate marmellate",
+            "crostata marm prugne", "acqua 75x12", "acqua 100x12"]
+    items = [{"nome_canonico": n, "purchases": 2, "avg_price": 5.0, "min_price": 5, "max_price": 5} for n in nomi]
+    out = collapse_to_product(items, "")
+    sizes = {o["nome_canonico"].lower(): o.get("merged_variants") for o in out}
+    assert len(out) == 4  # marmellata(4), marm prugne, acqua 75x12, acqua 100x12
+    assert any(v == 4 for v in sizes.values())
+    assert not any("merged_variants" in o for o in out if "acqua" in o["nome_canonico"].lower())
