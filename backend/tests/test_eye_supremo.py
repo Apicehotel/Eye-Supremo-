@@ -548,20 +548,30 @@ def test_review_txt_import_endpoint(client):
     assert len(items) == 1
 
 
+def _developer_token(client):
+    from app.auth_service import set_pin
+    from app.database import SessionLocal
+    from app.models import UserProfile
+    with SessionLocal() as session:
+        user = session.query(UserProfile).filter(UserProfile.username == "sviluppatore").one()
+        set_pin(session, user, "482916")
+    return client.post("/api/eye/auth/login", json={"username": "sviluppatore", "pin": "482916"}).json()["session"]
+
+
 def test_created_profiles_share_full_access(client):
-    developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
-    created = client.post("/api/eye/auth/users", json={"username":"operativo","display_name":"Operativo","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
+    developer_token = _developer_token(client)
+    created = client.post("/api/eye/auth/users", json={"username":"operativo","display_name":"Operativo","role_name":"level1","pin":"735194"}, headers={"X-Eye-Session":developer_token})
     assert created.status_code == 200
     assert created.json()["role_name"] == "supremo"
-    user_token = client.post("/api/eye/auth/login", json={"username":"operativo", "pin":"654321"}).json()["session"]
+    user_token = client.post("/api/eye/auth/login", json={"username":"operativo", "pin":"735194"}).json()["session"]
     response = client.get("/api/eye/users", headers={"X-Eye-Session":user_token})
     assert response.status_code == 200
 
 
-def test_default_pin_unlocks_eye_api_and_session_unlocks_it(client):
+def test_login_session_unlocks_eye_api(client):
     login = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"})
-    assert login.status_code == 200
-    token = login.json()["session"]
+    assert login.status_code == 401
+    token = _developer_token(client)
     blocked = client.get("/api/eye/hotels", headers={"X-Eye-Session":"invalid", "X-Eye-Role":"developer"})
     assert blocked.status_code == 401
     allowed = client.get("/api/eye/hotels", headers={"X-Eye-Session":token,"X-Eye-Role":"supremo"})
@@ -570,23 +580,60 @@ def test_default_pin_unlocks_eye_api_and_session_unlocks_it(client):
 
 
 def test_created_user_has_same_access_level_after_login(client):
-    developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
-    created = client.post("/api/eye/auth/users", json={"username":"utente1","display_name":"Utente 1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
+    developer_token = _developer_token(client)
+    created = client.post("/api/eye/auth/users", json={"username":"utente1","display_name":"Utente 1","pin":"735194"}, headers={"X-Eye-Session":developer_token})
     assert created.status_code == 200
     assert created.json()["role_name"] == "supremo"
-    login = client.post("/api/eye/auth/login", json={"username":"utente1","pin":"654321"})
+    login = client.post("/api/eye/auth/login", json={"username":"utente1","pin":"735194"})
     assert login.status_code == 200
-    user_token = login.json()["session"]
-    protected = client.get("/api/eye/users", headers={"X-Eye-Session":user_token})
+    assert login.json()["must_change_pin"] is False
+    protected = client.get("/api/eye/users", headers={"X-Eye-Session":login.json()["session"]})
     assert protected.status_code == 200
 
 
-def test_create_user_defaults_to_standard_pin(client):
-    developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
+def test_no_default_pin_after_seed(db):
+    from app.auth_service import auth_configured
+    from app.eye_services import seed_eye_supremo
+    assert auth_configured(db) is False
+    seed_eye_supremo(db)
+    assert auth_configured(db) is False
+
+
+def test_seed_does_not_reset_existing_pins(client, db):
+    from app.eye_services import seed_eye_supremo
+    _developer_token(client)
+    seed_eye_supremo(db)
+    ok = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"482916"})
+    assert ok.status_code == 200
+
+
+def test_create_user_requires_pin(client):
+    developer_token = _developer_token(client)
     created = client.post("/api/eye/auth/users", json={"username":"reception","display_name":"Reception"}, headers={"X-Eye-Session":developer_token})
-    assert created.status_code == 200
-    login = client.post("/api/eye/auth/login", json={"username":"reception","pin":"000000"})
-    assert login.status_code == 200
-    hotels = client.get("/api/eye/hotels", headers={"X-Eye-Session":login.json()["session"]})
-    assert hotels.status_code == 200
-    assert len(hotels.json()) == 3
+    assert created.status_code == 422
+
+
+def test_weak_pins_are_rejected(client):
+    developer_token = _developer_token(client)
+    for weak in ("000000", "111111", "123456", "654321"):
+        created = client.post("/api/eye/auth/users", json={"username":"debole","display_name":"Debole","pin":weak}, headers={"X-Eye-Session":developer_token})
+        assert created.status_code == 422, weak
+
+
+def test_legacy_default_pin_must_be_changed(client, db):
+    from app.auth_service import hash_pin
+    from app.auth_models import LocalCredential
+    from app.models import UserProfile
+    import secrets
+    user = db.query(UserProfile).filter(UserProfile.username == "supremo").one()
+    salt = secrets.token_hex(16)
+    db.add(LocalCredential(user_id=user.id, salt=salt, pin_hash=hash_pin("000000", salt)))
+    db.commit()
+    login = client.post("/api/eye/auth/login", json={"username":"supremo", "pin":"000000"})
+    assert login.status_code == 200 and login.json()["must_change_pin"] is True
+    weak = client.post("/api/eye/auth/change-own-pin", json={"username":"supremo","current_pin":"000000","new_pin":"123456"})
+    assert weak.status_code == 422
+    changed = client.post("/api/eye/auth/change-own-pin", json={"username":"supremo","current_pin":"000000","new_pin":"516273"})
+    assert changed.status_code == 200 and changed.json()["must_change_pin"] is False
+    assert client.post("/api/eye/auth/login", json={"username":"supremo", "pin":"000000"}).status_code == 401
+    assert client.post("/api/eye/auth/login", json={"username":"supremo", "pin":"516273"}).json()["must_change_pin"] is False

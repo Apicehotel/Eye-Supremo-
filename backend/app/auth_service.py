@@ -9,7 +9,6 @@ from .models import UserProfile
 
 PBKDF2_ITERATIONS = 310_000
 SESSION_HOURS = 12
-DEFAULT_PIN = "000000"
 
 
 def auth_configured(db: Session) -> bool:
@@ -20,9 +19,21 @@ def hash_pin(pin: str, salt_hex: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), bytes.fromhex(salt_hex), PBKDF2_ITERATIONS).hex()
 
 
+def is_weak_pin(pin: str) -> bool:
+    """PIN banali: cifre tutte uguali o sequenze crescenti/decrescenti (000000, 123456, 654321)."""
+    if not pin.isdigit() or len(pin) < 2:
+        return True
+    if len(set(pin)) == 1:
+        return True
+    steps = {int(b) - int(a) for a, b in zip(pin, pin[1:])}
+    return steps in ({1}, {-1})
+
+
 def validate_pin_format(pin: str) -> None:
     if not pin.isdigit() or not (6 <= len(pin) <= 12):
         raise ValueError("Il PIN deve contenere da 6 a 12 cifre")
+    if is_weak_pin(pin):
+        raise ValueError("PIN troppo semplice: evita cifre tutte uguali o sequenze (es. 000000, 123456)")
 
 
 def set_pin(db: Session, user: UserProfile, pin: str) -> None:
