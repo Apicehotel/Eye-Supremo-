@@ -27,6 +27,8 @@ PRODUCT_FAMILY_ALIASES = {
     # Sinonimi: in fattura la stessa cosa è «marmellata», «confettura» o «MARM.».
     "marmellata": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     "marmellate": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "mozzarella": ("mozzarella", "mozzarelle", "mozz"),
+    "mozzarelle": ("mozzarella", "mozzarelle", "mozz"),
     "confettura": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     "confetture": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
@@ -110,6 +112,19 @@ QUESTION_FILLERS = {
 }
 
 
+_QUOTED = re.compile(r'["“”«»]([^"“”«»]+)["“”«»]')
+
+
+def exact_phrases(query: str) -> list[str]:
+    """Parole tra virgolette ("olio") = ricerca esatta: parola intera, niente varianti né parti di parola."""
+    return [p for p in (normalize_text(m).strip() for m in _QUOTED.findall(query or "")) if p]
+
+
+def _has_exact_phrases(description: str, phrases: list[str]) -> bool:
+    text = " " + normalize_text(description).strip() + " "
+    return all(f" {p} " in text for p in phrases)
+
+
 def extract_product_query(query: str) -> str:
     """Estrae il prodotto da una domanda in linguaggio naturale.
 
@@ -117,6 +132,9 @@ def extract_product_query(query: str) -> str:
     («chi mi vende meglio i bomboloni») e FTS/ILIKE richiedono
     anche «chi»/«vende»/«meglio» sulla riga fattura → zero risultati.
     """
+    exact = exact_phrases(query)
+    if exact:
+        return " ".join(f'"{p}"' for p in exact)
     normalized = normalize_text(query).strip()
     if not normalized:
         return ""
@@ -141,6 +159,8 @@ def search_terms(query: str) -> tuple[str, ...]:
     """Varianti di ricerca per QUALSIASI prodotto in fattura, non solo alias noti."""
     needle = extract_product_query(query)
     normalized = normalize_text(needle).strip()
+    if exact_phrases(needle):
+        return tuple(exact_phrases(needle))
     if not normalized:
         return (query.strip(),) if query.strip() else ()
     if normalized in PRODUCT_FAMILY_ALIASES:
@@ -198,6 +218,9 @@ def description_matches_product(description: str, query: str) -> bool:
     text = normalize_text(description)
     if not text:
         return False
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
     compact = text.replace(" ", "")
     words = text.split()
     required = required_substrings(query)
@@ -213,11 +236,15 @@ def description_matches_product(description: str, query: str) -> bool:
         term_n = normalize_text(term)
         if not term_n:
             continue
-        if term_n in text or term_n.replace(" ", "") in compact:
+        # Parole corte solo a inizio parola: «vino» non deve trovare «bovino», «olio» non «gasolio».
+        if len(term_n) >= 6:
+            if term_n in text or term_n.replace(" ", "") in compact:
+                return True
+        elif re.search(r"(?<![a-z0-9])" + re.escape(term_n), text):
             return True
         # Token della query tutti presenti (ordine libero) nella descrizione.
         term_tokens = [t for t in term_n.split() if len(t) >= 3]
-        if term_tokens and all(any(t in w or w.startswith(t[: max(4, len(t) - 1)]) for w in words) for t in term_tokens):
+        if term_tokens and all(any(w.startswith(t) or (len(t) >= 6 and t in w) or w.startswith(t[: max(4, len(t) - 1)]) for w in words) for t in term_tokens):
             return True
         # Parola composta: limoncello ⊂ minilimoncello / limoncello70cl
         if len(term_n) >= 5 and any(term_n in w or (len(term_n) >= 6 and term_n[:-1] in w) for w in words):
@@ -229,6 +256,9 @@ def row_matches_product_query(description: str, query: str) -> bool:
     """Filtro post-ricerca: anti-collisione se serve, altrimenti accetta match motore."""
     if not (query or "").strip():
         return bool(str(description or "").strip())
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
     required = required_substrings(query)
     if not required:
         # Nessuna collisione nota: tieni i hit di FTS/cache/centrale.
@@ -314,6 +344,9 @@ def is_family_match(description: str, query: str) -> bool:
 def is_product_search_match(description: str, query: str) -> bool:
     """Reject broad central-search hits unrelated to the displayed name."""
     text = normalize_text(description)
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
     query_text = normalize_text(query).strip()
     if not query_text:
         return True
@@ -331,7 +364,10 @@ def is_product_search_match(description: str, query: str) -> bool:
             return True
         # Ricerca per parte di parola: «bombo» trova «bombolino», «limon» trova «limoncello».
         # Sotto i 4 caratteri sarebbe troppo largo (es. «car», «ac»).
-        if len(token) >= 4 and any(token in candidate for candidate in tokens):
+        # In mezzo alla parola solo da 6 caratteri: «uova» non deve trovare «nuova».
+        if len(token) >= 4 and any(
+            candidate.startswith(token) or (len(token) >= 6 and token in candidate) for candidate in tokens
+        ):
             return True
         # Accept small typographical errors such as ``igenica``/``igienica``
         # without turning short or unrelated searches into broad matches.

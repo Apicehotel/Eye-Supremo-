@@ -183,6 +183,10 @@ def _find_brand(tokens: list[str]) -> str | None:
 def _find_non_food(tokens: list[str]) -> str | None:
     token_set = set(tokens)
     joined = " ".join(tokens)
+    # Tovaglioli di carta (plurale o con «2V», «PZ», «CT») ≠ tovagliolo di stoffa a noleggio.
+    if token_set & {"tovagliolo", "tovaglioli"} and not token_set & {"lavanolo", "lavaggio", "servizio", "noleggio"}:
+        if "tovaglioli" in token_set or token_set & {"2v", "carta", "veline"} or any(t.endswith("pz") or t.startswith("ct") for t in token_set):
+            return "Monouso e tavola"
     for family, words in NON_FOOD:
         for word in words:
             if (" " in word and word in joined) or word in token_set:
@@ -250,3 +254,69 @@ def annotate(items: list[dict]) -> list[dict]:
         if isinstance(item, dict):
             item["recognition"] = recognize(item.get("nome_canonico") or item.get("name") or item.get("descrizione") or "")
     return items
+
+
+def compatible(wanted: dict, got: dict) -> bool:
+    """Una riga (riconosciuta come ``got``) può stare nel confronto del prodotto cercato (``wanted``)?"""
+    if got["kind"] == "non_food" and got["category"] == "Imposte e voci contabili" and wanted.get("category") != got["category"]:
+        return False
+    if wanted["kind"] == "non_food" and got["kind"] == "non_food" and wanted["category"] != got["category"]:
+        return False
+    # Cerco un alimento: scarto accessori/attrezzature (dispenser, dosatori) e dolci pronti (crostata alla marmellata).
+    # Solo accessori veri: parole come «sgrassato», «vassoio», «busta» descrivono il confezionamento di un alimento.
+    if wanted["kind"] == "food" and got["kind"] == "non_food" and got["category"] == "Accessori e ricambi":
+        return False
+    if wanted["kind"] == "food" and got["kind"] == "food" and got["category"] == "Dolci e pasticceria" and wanted["category"] != "Dolci e pasticceria":
+        return False
+    return True
+
+
+# Ricerche dove le varianti (formato, misura) vanno scelte a mano: non si fondono in un solo prodotto.
+KEEP_VARIANTS = {"acqua", "carta igienica", "c igienica", "c ig", "carta a4", "a4", "lamp", "lampada", "lampade", "lampadina", "lampadine"}
+
+
+def collapse_to_product(items: list[dict], query: str) -> list[dict]:
+    """Un solo prodotto con tutti i produttori/varianti trovati («crostata» ≠ 5 righe separate).
+
+    Fonde gli elementi del catalogo che la ricerca ha trovato e che sono compatibili con il prodotto cercato;
+    ``canonical_names`` conserva tutti i nomi originali per storico e confronto fornitori. Le voci incompatibili
+    (dolci pronti, accessori) vengono escluse.
+    """
+    try:
+        from .product_taxonomy import extract_product_query
+
+        q = normalize_text(extract_product_query(query) or query).strip()
+        if not q or len(q.split()) > 2 or q in KEEP_VARIANTS:
+            return items
+        wanted = recognize(q)
+        if wanted["kind"] == "unknown":
+            return items
+        same, other = [], []
+        for item in items:
+            name = str(item.get("nome_canonico") or "")
+            (same if name and compatible(wanted, recognize(name)) else other).append(item)
+        if len(same) < 2:
+            return items
+        names: list[str] = []
+        for item in same:
+            for n in item.get("canonical_names") or [item.get("nome_canonico")]:
+                if n and n not in names:
+                    names.append(n)
+        top = max(same, key=lambda i: int(i.get("purchases") or 0))
+        purchases = sum(int(i.get("purchases") or 0) for i in same)
+        merged = {**top, "nome_canonico": q.title(), "canonical_names": names, "purchases": purchases, "marca": None}
+        mins = [float(i["min_price"]) for i in same if i.get("min_price") is not None]
+        maxs = [float(i["max_price"]) for i in same if i.get("max_price") is not None]
+        if mins:
+            merged["min_price"] = min(mins)
+        if maxs:
+            merged["max_price"] = max(maxs)
+        weighted = [(float(i["avg_price"]), int(i.get("purchases") or 0)) for i in same if i.get("avg_price") is not None]
+        if weighted:
+            weight = sum(w for _, w in weighted)
+            merged["avg_price"] = round(sum(p * w for p, w in weighted) / weight, 4) if weight else round(sum(p for p, _ in weighted) / len(weighted), 4)
+        merged["merged_variants"] = len(same)
+        # Le voci non compatibili (cornetti alla marmellata, dispenser…) non sono il prodotto cercato: fuori, come in Ask.
+        return [merged]
+    except Exception:  # noqa: BLE001
+        return items
