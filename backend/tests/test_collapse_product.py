@@ -129,3 +129,21 @@ def test_search_real_invoice_words_no_fuzzy_false_hits():
     assert m("mozz colfiorito 100g ls", "mozzarella")
     assert m("crostata albicocca", "crostate")
     assert m("carta igienica fascettata ct24x4rt", "carta igenica")
+
+
+def test_user_groups_merge_and_split(db):
+    import asyncio
+    from app.product_recognition import apply_user_groups, set_user_groups
+    from app.routers import reports_eye as r
+    items = [{"nome_canonico": "pizzette sfoglia p pane", "purchases": 2}, {"nome_canonico": "fagottini", "purchases": 5}, {"nome_canonico": "sale", "purchases": 1}]
+    set_user_groups([])
+    assert len(apply_user_groups(items)) == 3
+    r.merge_product_names({"names": ["Fagottini", "pizzette sfoglia p pane"]}, db)
+    out = apply_user_groups(items)
+    assert len(out) == 2
+    merged = next(x for x in out if x.get("canonical_names"))
+    assert merged["purchases"] == 7 and len(merged["canonical_names"]) == 2
+    assert r.product_groups(db) == [["fagottini", "pizzette sfoglia p pane"]]
+    r.split_product_name("fagottini", db)
+    assert len(apply_user_groups(items)) == 3
+    set_user_groups([])

@@ -425,5 +425,55 @@ def collapse_to_product(items: list[dict], query: str) -> list[dict]:
     q = normalize_text(extract_product_query(query) or query).strip() if query else ""
     result = _collapse_core(items, query)
     if q in KEEP_VARIANTS:
-        return result
-    return merge_equivalent_names(result)
+        return apply_user_groups(result)
+    return apply_user_groups(merge_equivalent_names(result))
+
+
+# --- Gruppi confermati dall'utente -------------------------------------------------
+# «Questi nomi sono lo stesso prodotto»: la scelta viene salvata (tabella settings) e vale
+# per ogni ricerca, catalogo e report storico. Le regole automatiche restano valide.
+_USER_GROUPS: list[list[str]] = []
+
+
+def set_user_groups(groups: list[list[str]]) -> None:
+    global _USER_GROUPS
+    _USER_GROUPS = [[normalize_text(n) for n in g if n] for g in groups if g and len([n for n in g if n]) >= 2]
+
+
+def get_user_groups() -> list[list[str]]:
+    return [list(g) for g in _USER_GROUPS]
+
+
+def apply_user_groups(items: list[dict]) -> list[dict]:
+    """Fonde le voci i cui nomi (anche quelli già fusi in ``canonical_names``) stanno nello stesso gruppo."""
+    if not _USER_GROUPS or len(items) < 2:
+        return items
+    try:
+        def names_of(item: dict) -> list[str]:
+            return [normalize_text(n) for n in (item.get("canonical_names") or [item.get("nome_canonico")]) if n]
+
+        buckets: dict[int, list[dict]] = {}
+        order: list[tuple[str, int]] = []
+        for item in items:
+            gi = next((i for i, g in enumerate(_USER_GROUPS) if any(n in g for n in names_of(item))), None)
+            if gi is None:
+                order.append(("solo", id(item)))
+                buckets[id(item)] = [item]
+            else:
+                if ("grp", gi) not in order:
+                    order.append(("grp", gi))
+                buckets.setdefault(-1 - gi, []).append(item)
+        out: list[dict] = []
+        for kind, ref in order:
+            group = buckets[ref] if kind == "solo" else buckets[-1 - ref]
+            if len(group) < 2:
+                out.extend(group)
+                continue
+            top = max(group, key=lambda i: int(i.get("purchases") or 0))
+            label = str(top.get("nome_canonico") or "")
+            merged = _merge_group(group, label)
+            merged["user_group"] = True
+            out.append(merged)
+        return out
+    except Exception:  # noqa: BLE001
+        return items
