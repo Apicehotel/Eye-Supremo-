@@ -27,6 +27,8 @@ PRODUCT_FAMILY_ALIASES = {
     # Sinonimi: in fattura la stessa cosa è «marmellata», «confettura» o «MARM.».
     "marmellata": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     "marmellate": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "mozzarella": ("mozzarella", "mozzarelle", "mozz"),
+    "mozzarelle": ("mozzarella", "mozzarelle", "mozz"),
     "confettura": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     "confetture": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
@@ -331,7 +333,10 @@ def is_product_search_match(description: str, query: str) -> bool:
             return True
         # Ricerca per parte di parola: «bombo» trova «bombolino», «limon» trova «limoncello».
         # Sotto i 4 caratteri sarebbe troppo largo (es. «car», «ac»).
-        if len(token) >= 4 and any(token in candidate for candidate in tokens):
+        # In mezzo alla parola solo da 6 caratteri: «uova» non deve trovare «nuova».
+        if len(token) >= 4 and any(
+            candidate.startswith(token) or (len(token) >= 6 and token in candidate) for candidate in tokens
+        ):
             return True
         # Accept small typographical errors such as ``igenica``/``igienica``
         # without turning short or unrelated searches into broad matches.

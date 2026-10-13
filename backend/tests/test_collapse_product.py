@@ -32,3 +32,18 @@ def test_incompatible_rows_are_dropped_when_collapsing():
     out = collapse_to_product(items, "marmellata")
     assert len(out) == 1 and out[0]["merged_variants"] == 2
     assert set(out[0]["canonical_names"]) == {"NESTLE Marmellata Arance 120x25g IT", "CONFETTURA DI SAMBUCO"}
+
+
+def test_uova_non_trova_nuova_e_mozz_abbreviato():
+    from app.product_taxonomy import is_product_search_match
+    assert not is_product_search_match("KIWI NUOVA ZELANDA", "uova")
+    assert is_product_search_match("UOVA FRESCHE VASSOIO", "uova")
+    assert is_product_search_match("MOZZ. FIOR DI LATTE 1KG", "mozzarella")
+    assert is_product_search_match("LIMONCELLO 70CL", "limon")
+
+
+def test_alimento_con_parola_di_confezione_resta():
+    from app.product_recognition import compatible, recognize
+    wanted = recognize("prosciutto")
+    assert compatible(wanted, recognize("PROSCIUTTO COTTO SGRASSATO 1KG"))
+    assert compatible(recognize("mozzarella"), recognize("MOZZARELLA IN BUSTA 125G"))

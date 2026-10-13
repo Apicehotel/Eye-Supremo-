@@ -259,7 +259,8 @@ def compatible(wanted: dict, got: dict) -> bool:
     if wanted["kind"] == "non_food" and got["kind"] == "non_food" and wanted["category"] != got["category"]:
         return False
     # Cerco un alimento: scarto accessori/attrezzature (dispenser, dosatori) e dolci pronti (crostata alla marmellata).
-    if wanted["kind"] == "food" and got["kind"] == "non_food":
+    # Solo accessori veri: parole come «sgrassato», «vassoio», «busta» descrivono il confezionamento di un alimento.
+    if wanted["kind"] == "food" and got["kind"] == "non_food" and got["category"] == "Accessori e ricambi":
         return False
     if wanted["kind"] == "food" and got["kind"] == "food" and got["category"] == "Dolci e pasticceria" and wanted["category"] != "Dolci e pasticceria":
         return False
