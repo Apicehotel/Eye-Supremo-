@@ -274,7 +274,8 @@ def collapse_to_product(items: list[dict], query: str) -> list[dict]:
     """Un solo prodotto con tutti i produttori/varianti trovati («crostata» ≠ 5 righe separate).
 
     Fonde gli elementi del catalogo che la ricerca ha trovato e che sono compatibili con il prodotto cercato;
-    ``canonical_names`` conserva tutti i nomi originali per storico e confronto fornitori.
+    ``canonical_names`` conserva tutti i nomi originali per storico e confronto fornitori. Le voci incompatibili
+    (dolci pronti, accessori) vengono escluse.
     """
     try:
         from .product_taxonomy import extract_product_query
@@ -310,6 +311,7 @@ def collapse_to_product(items: list[dict], query: str) -> list[dict]:
             weight = sum(w for _, w in weighted)
             merged["avg_price"] = round(sum(p * w for p, w in weighted) / weight, 4) if weight else round(sum(p for p, _ in weighted) / len(weighted), 4)
         merged["merged_variants"] = len(same)
-        return sorted([merged, *other], key=lambda i: str(i.get("nome_canonico") or ""))
+        # Le voci non compatibili (cornetti alla marmellata, dispenser…) non sono il prodotto cercato: fuori, come in Ask.
+        return [merged]
     except Exception:  # noqa: BLE001
         return items
