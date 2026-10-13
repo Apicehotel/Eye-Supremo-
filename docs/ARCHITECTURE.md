@@ -62,7 +62,7 @@ Il punteggio camera applica un fattore di confidenza basato sul numero di recens
 
 ## Accesso
 
-Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, senza PIN predefinito: al primo avvio si sceglie il PIN (bootstrap) e il seed non sovrascrive mai i PIN esistenti.
+Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, con PIN standard `000000`.
 
 La tabella `role_exclusions` resta nel database per compatibilità storica ma non limita più l'accesso operativo.
 

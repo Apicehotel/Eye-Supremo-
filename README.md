@@ -26,7 +26,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
 - recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
 - dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
-- login locale per profilo utente con PIN scelto dall'utente (nessun PIN predefinito); il login sviluppatore non è più obbligatorio;
+- login locale per profilo utente con PIN; il login sviluppatore non è più obbligatorio;
 - tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
@@ -40,7 +40,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `146 passed`;
+- backend: `142 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -66,7 +66,7 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-**Non esiste un PIN predefinito.** Al primo avvio l'app chiede di scegliere il profilo e un PIN personale (6-12 cifre; sono rifiutate cifre tutte uguali e sequenze come `123456`). Gli altri profili ricevono il PIN da **Sistema → Utenti e ruoli**, dove ogni nuovo profilo richiede un PIN iniziale. I PIN esistenti non vengono mai sovrascritti all'avvio. Le installazioni precedenti che usano ancora il vecchio PIN banale devono sceglierne uno nuovo al prossimo accesso. I nuovi profili hanno gli stessi permessi degli altri.
+Il PIN predefinito di tutti i profili locali (Sviluppatore, Supremo e nuovi profili) è **`000000`**, ripristinato su richiesta del titolare; può essere cambiato da **Sistema → Utenti e ruoli**. Gli utenti centrali Supabase `supremo` e `sviluppatore` hanno anch’essi PIN `000000` (verificato). I PIN locali e quelli centrali sono sistemi distinti e **non si sincronizzano automaticamente**: se cambi il PIN dell’account centrale su Supabase, aggiorna anche `central_pin` (variabile `EYESUPREMO_CENTRAL_PIN`) su tutti i PC, altrimenti il download cache fallisce con «Credenziali non valide».
 
 Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
@@ -269,7 +269,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 ## Sicurezza
 
 - dati reali locali per default;
-- autenticazione locale con PIN e sessione (nessun PIN predefinito, PIN banali rifiutati);
+- autenticazione locale con PIN e sessione (PIN iniziale da cambiare al primo accesso);
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
 - agenti con strumenti dichiarati e limitati;

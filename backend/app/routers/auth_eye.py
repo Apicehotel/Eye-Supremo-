@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..auth_models import LocalCredential, LocalSession
-from ..auth_service import auth_configured, create_session, is_weak_pin, revoke_session, session_user, set_pin, validate_pin_format, verify_pin
+from ..auth_service import DEFAULT_PIN, auth_configured, create_session, revoke_session, session_user, set_pin, verify_pin
 from ..database import get_db
 from ..models import UserProfile
 
@@ -49,21 +49,7 @@ def login(payload: dict, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(401, "Utente o PIN non validi")
     token = create_session(db, user)
-    # Installazioni precedenti potrebbero avere ancora il vecchio PIN predefinito (000000): va cambiato.
-    return {"session": token, "must_change_pin": is_weak_pin(str(payload.get("pin", ""))), "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
-
-
-@router.post("/change-own-pin")
-def change_own_pin(payload: dict, db: Session = Depends(get_db)):
-    user = verify_pin(db, str(payload.get("username", "")), str(payload.get("current_pin", "")))
-    if not user:
-        raise HTTPException(401, "Utente o PIN non validi")
-    try:
-        set_pin(db, user, str(payload.get("new_pin", "")))
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    token = create_session(db, user)
-    return {"session": token, "must_change_pin": False, "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
+    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
 
 
 @router.get("/me")
@@ -134,14 +120,13 @@ def create_user(payload: dict, x_eye_session: str | None = Header(default=None, 
     display_name = str(payload.get("display_name", "")).strip()
     # Livelli utente eliminati: ogni nuovo profilo ha gli stessi permessi operativi.
     role_name = "supremo"
-    pin = str(payload.get("pin") or "")
-    if not pin:
-        raise HTTPException(422, "Indica un PIN iniziale per il nuovo profilo")
+    pin = str(payload.get("pin") or DEFAULT_PIN)
     if not username or not username.replace("_", "").replace("-", "").isalnum() or len(username) > 80:
         raise HTTPException(422, "Username non valido")
     if not display_name or len(display_name) > 160:
         raise HTTPException(422, "Nome visualizzato non valido")
     try:
+        from ..auth_service import validate_pin_format
         validate_pin_format(pin)
         user = UserProfile(username=username, display_name=display_name, role_name=role_name, can_manage_config=True)
         db.add(user); db.flush(); set_pin(db, user, pin)
