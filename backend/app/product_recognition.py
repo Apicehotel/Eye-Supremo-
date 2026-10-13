@@ -35,6 +35,7 @@ BRANDS: dict[str, str] = {
 
 # Righe che non sono cibo: parole (normalizzate) → famiglia.
 NON_FOOD: list[tuple[str, set[str]]] = [
+    ("Accessori e ricambi", {"molla", "molle", "portacarta", "portarotolo", "portasapone", "dispenser", "portascopino", "scopino"}),
     ("Energia e utenze", {"energia", "gasolio", "potenza", "dispacciamento", "cogenerazione", "rinnovabili", "contatore", "acquedotto",
                            "fognatura", "depurazione", "perequazione", "oneri", "perdite di rete", "quota fissa", "quota energia",
                            "fascia", "gas naturale", "elettrica", "tariffa", "ricalcolo", "ricalcoli", "scaglione"}),
@@ -81,7 +82,7 @@ EXTRA_FOODS: list[tuple[str, str, str]] = [
     ("xugia", "Dolci e pasticceria", "Cioccolato"), ("fondente", "Dolci e pasticceria", "Cioccolato"), ("olio", "Oli e grassi", "Olio"), ("uova", "Uova", "Uova"), ("uovo", "Uova", "Uova"),
 ]
 
-NONFOOD_FAMILIES_WITH_TAXONOMY = {"Pulizia e igiene", "Materiali e attrezzature", "Monouso e tavola"}
+NONFOOD_FAMILIES_WITH_TAXONOMY = {"Accessori e ricambi", "Pulizia e igiene", "Materiali e attrezzature", "Monouso e tavola"}
 
 ABBREVIATIONS = {
     "mozz": "mozzarella", "pomo": "pomodori", "croiss": "croissant", "pancet": "pancetta", "yog": "yogurt", "prosc": "prosciutto", "cioc": "cioccolato", "nocc": "nocciola", "zucch": "zucchine",

@@ -359,13 +359,26 @@ def _map_cache_item(item: dict[str, Any], *, source: str) -> dict[str, Any]:
 
 
 def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> list[dict[str, Any]]:
-    """Filtra solo collisioni note; ogni altra riga prodotto restata dal motore resta valida."""
+    """Tiene solo righe la cui DESCRIZIONE è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile."""
     if not product_needle:
         return rows
-    return [
-        row for row in rows
-        if row_matches_product_query(str(row.get("description") or ""), product_needle)
-    ]
+    from .product_recognition import recognize
+    from .product_taxonomy import description_matches_product
+
+    wanted = recognize(product_needle)
+    out = []
+    for row in rows:
+        desc = str(row.get("description") or "")
+        if not row_matches_product_query(desc, product_needle) or not description_matches_product(desc, product_needle):
+            continue
+        got = recognize(desc)
+        # Famiglie non alimentari diverse (es. «molla portacarta igienica» ≠ carta igienica; autofatture ≠ prodotto).
+        if got["kind"] == "non_food" and got["category"] == "Imposte e voci contabili" and wanted.get("category") != got["category"]:
+            continue
+        if wanted["kind"] == "non_food" and got["kind"] == "non_food" and wanted["category"] != got["category"]:
+            continue
+        out.append(row)
+    return out
 
 
 def _report_from_rows(rows: list[dict[str, Any]], product_needle: str) -> dict[str, Any] | None:
@@ -459,14 +472,17 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
 
         # 3) Se ancora vuoto dopo il filtro prodotto: stessa fonte delle Liste → Supabase.
         sources = {"local", "sqlite-cache"}
+        central_error = None
         filtered = _filter_product_rows(all_rows, product_needle)
         # Anche con qualche riga locale: se la cache PC non è verificata completa, integra dalla centrale
         # (altrimenti un prodotto presente solo su Supabase risulta con 1 fornitore o nessuno).
         if central_configured() and (not filtered or _cache_complete(db) is not True):
             try:
                 central = await asyncio.wait_for(central_invoice_search(search_query, limit=500), timeout=25)
-            except Exception:
-                central = {"items": []}
+            except Exception as exc:  # noqa: BLE001
+                central = {"items": [], "message": str(exc) or exc.__class__.__name__}
+            if central.get("message") and not central.get("items"):
+                central_error = str(central["message"])
             for item in central.get("items") or []:
                 mapped = _map_cache_item(item, source="supabase")
                 key = _row_key(mapped)
@@ -525,6 +541,7 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
             "historical_product": report,
             "product_query": product_needle or None,
             "data_sources": sorted(sources),
+            "central_error": central_error,
             **({"max_invoice": max_invoice} if max_invoice else {}),
         }
     finally:
@@ -544,6 +561,8 @@ def _verify(context: dict[str, Any]) -> dict[str, Any]:
         terms = {str(r.get("description", "")).lower() for r in rows}
         if any("bombola" in t for t in terms) and any("bombolone" in t for t in terms):
             warnings.append("Rilevata possibile collisione bombola/bombolone: risultati da tenere separati.")
+    if context.get("central_error"):
+        warnings.append(f"Archivio centrale non interrogabile ({context['central_error']}): risultati solo dalla cache del PC.")
     return {"ok": not warnings, "warnings": warnings}
 
 

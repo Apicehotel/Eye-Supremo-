@@ -284,3 +284,38 @@ def test_ask_supplements_from_central_when_cache_incomplete(db, monkeypatch):
     context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
     assert context["supplier_count"] >= 2
     assert "supabase" in context["data_sources"]
+
+
+def _add_cache(db, h, supplier, desc, price):
+    db.add(CentralInvoiceCache(
+        source_hash=h, invoice_number=h, invoice_date=date(2025, 1, 1), supplier_name=supplier, total=Decimal(str(price)),
+        search_text=f"{h} {supplier} {desc}",
+        payload_json=json.dumps({"rows": [{"original_description": desc, "quantity": 1, "unit_price": price, "line_total": price, "analysis_status": "product"}]}),
+    ))
+
+
+def test_ask_ignores_supplier_name_matches_and_wrong_family(db):
+    _add_cache(db, "a", "MAGRIS S.P.A.", "CARTA IGIENICA 500 CF10X4RT", 23.3)
+    _add_cache(db, "b", "Cinque P srl", "CARTA IGIENICA PROF 6 ROTOLI 4 VELI", 1.55)
+    _add_cache(db, "c", "CARTAA", "Autofattura Art.17, c.2 DPR 633/72 - Beni", 39.34)
+    _add_cache(db, "d", "FERRAMENTA TEI", "MOLLE PORTACARTA IGIENICA B.", 0.82)
+    db.add(AppSetting(key="central_sync_complete", value="yes"))
+    db.commit()
+    context = asyncio.run(_product_context("Qual è il prezzo medio della carta igienica?", "developer"))
+    suppliers = {r["supplier"] for r in context["invoice_rows"]}
+    assert suppliers == {"MAGRIS S.P.A.", "Cinque P srl"}
+
+
+def test_ask_reports_central_error(db, monkeypatch):
+    db.add(AppSetting(key="central_sync_complete", value="no"))
+    db.commit()
+
+    async def failing(*_a, **_k):
+        return {"enabled": True, "items": [], "message": "Supabase 400 su x: Credenziali non valide"}
+
+    monkeypatch.setattr("app.agent_orchestrator.central_configured", lambda: True)
+    monkeypatch.setattr("app.agent_orchestrator.central_invoice_search", failing)
+    from app.agent_orchestrator import _verify
+    context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
+    assert "Credenziali non valide" in context["central_error"]
+    assert any("Archivio centrale" in w for w in _verify(context)["warnings"])
