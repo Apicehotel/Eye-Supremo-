@@ -16,7 +16,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Versione applicativa:** `2.0.7`
 
-**Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server, PIN predefinito `000000` ripristinato.
+**Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server.
 **Branch principale:** `main` (modifiche solo via branch + PR)
 **Ultimo aggiornamento:** 13 ottobre 2026
 
@@ -68,7 +68,9 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-Il PIN predefinito di tutti i profili locali (Sviluppatore, Supremo e nuovi profili) è **`000000`**, ripristinato su richiesta del titolare; può essere cambiato da **Sistema → Utenti e ruoli**. Gli utenti centrali Supabase `supremo` e `sviluppatore` hanno anch’essi PIN `000000` (verificato). I PIN locali e quelli centrali sono sistemi distinti e **non si sincronizzano automaticamente**: se cambi il PIN dell’account centrale su Supabase, aggiorna anche `central_pin` (variabile `EYESUPREMO_CENTRAL_PIN`) su tutti i PC, altrimenti il download cache fallisce con «Credenziali non valide».
+Al primo avvio i profili locali (Sviluppatore, Supremo e nuovi profili) usano un **PIN iniziale predefinito**, che il titolare comunica a voce e che si cambia da **Sistema → Utenti e ruoli** (il valore non è riportato qui né nei commit perché il repository è pubblico). I PIN locali e quelli dell’account centrale Supabase sono sistemi distinti e **non si sincronizzano automaticamente**: se cambi il PIN dell’account centrale su Supabase, aggiorna anche `central_pin` (variabile `EYESUPREMO_CENTRAL_PIN`) su tutti i PC, altrimenti il download cache fallisce con «Credenziali non valide».
+
+**Regola di repository:** README, docs e messaggi di commit non contengono mai PIN, password, token o altri dati sensibili.
 
 Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
