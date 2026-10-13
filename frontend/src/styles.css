@@ -190,3 +190,20 @@ body{background:#f7f8fa;color:var(--ink)}
 .history-match small{color:var(--muted);font-size:10px}
 @media(max-width:760px){.hist-search{width:100%;justify-content:stretch}.hist-search .search-box{width:100%;min-width:0}.hist-search .primary-btn,.hist-search .secondary-btn{flex:1}.history-matches{grid-template-columns:1fr}}
 .online-hotel-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px 22px}.online-hotel-card{border:1px solid var(--border);border-radius:9px;background:#fbfcfd;overflow:hidden}.online-hotel-heading{padding:16px;border-bottom:1px solid var(--border)}.online-hotel-heading h3{font:700 15px Manrope;margin:0}.online-hotel-heading span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.online-source-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}.online-source-row:last-child{border-bottom:0}.online-source-row b,.online-source-row small{display:block}.online-source-row b{font-size:12px}.online-source-row small{color:var(--muted);font-size:10px;margin-top:3px}.online-source-row strong{font-size:14px;color:var(--teal);white-space:nowrap}.online-source-row a{font-size:10px;color:var(--teal);font-weight:700;text-decoration:none}.online-source-row a:hover{text-decoration:underline}@media(max-width:980px){.online-hotel-grid{grid-template-columns:1fr 1fr}}@media(max-width:760px){.online-hotel-grid{grid-template-columns:1fr;padding-inline:12px}}
+
+/* Stato cache offline a colpo d'occhio */
+.cache-chip{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:center;margin:0 0 12px;padding:9px 10px;border-radius:8px;background:#ffffff12;font-size:12px;color:#dbe7f3}
+.cache-chip i{width:10px;height:10px;border-radius:50%;background:#8095aa;grid-row:1 / span 2}
+.cache-chip b{font-weight:700}.cache-chip small{color:#9fb2c6;font-size:11px}
+.cache-chip.ok i{background:#54d175}.cache-chip.warn i{background:#f2a93b}.cache-chip.danger i{background:#ef5b5b}.cache-chip.sync i{background:#4aa8ff;animation:cachepulse 1.2s infinite}
+@keyframes cachepulse{50%{opacity:.35}}
+.cache-card{margin-bottom:16px;border-left:6px solid #8095aa}
+.cache-card.ok{border-left-color:#2fb36b}.cache-card.warn{border-left-color:#f2a93b}.cache-card.danger{border-left-color:#e24b4b}.cache-card.sync{border-left-color:#3b8fe8}
+.cache-card-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.cache-card-head>div{flex:1;min-width:200px}.cache-card-head strong{display:block;font:700 18px/1.3 Manrope}
+.cache-card-head small,.cache-numbers,.cache-detail{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.cache-dot{width:16px;height:16px;border-radius:50%;background:#8095aa;flex:none}
+.cache-card.ok .cache-dot{background:#2fb36b}.cache-card.warn .cache-dot{background:#f2a93b}.cache-card.danger .cache-dot{background:#e24b4b}.cache-card.sync .cache-dot{background:#3b8fe8;animation:cachepulse 1.2s infinite}
+.cache-bar{height:10px;background:#e6ebf1;border-radius:999px;overflow:hidden;margin-top:14px}
+.cache-bar>div{height:100%;background:#2fb36b;border-radius:999px;transition:width .6s}
+.cache-card.warn .cache-bar>div{background:#f2a93b}.cache-card.sync .cache-bar>div{background:#3b8fe8}.cache-card.danger .cache-bar>div{background:#e24b4b}

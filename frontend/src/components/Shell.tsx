@@ -26,6 +26,7 @@ import {
   Globe2,
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
+import { CacheChip } from "./CacheStatus";
 export type Page =
   | "dashboard"
   | "invoices"
@@ -288,6 +289,7 @@ export function Shell({
             Esci
           </button>
         </div>
+        <CacheChip />
         <div className="local-status">
           <i />
           Archivio locale<small>Windows · Offline first · Sync opzionale</small>

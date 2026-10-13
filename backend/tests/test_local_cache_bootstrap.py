@@ -95,3 +95,97 @@ def test_bootstrap_status_reads_persisted_state(db):
     status = bootstrap_status(db)
     assert status["state"] == "ok"
     assert status["detail"] == "Cache pronta"
+
+
+# ---- completezza cache, percorso alternativo, ripresa automatica, stato sintetico ----
+
+def _fake_pages(total, page_size=500, fallback=False):
+    """Simula central_invoice_page con `total` fatture sul server."""
+    async def fake(offset=0, limit=500, since=None):
+        n = max(0, min(limit, total - offset))
+        items = [
+            {"source_hash": f"p{offset + i:06d}", "invoice_number": str(offset + i), "invoice_date": "2026-01-01",
+             "supplier_name": "Forn", "total": 1, "rows": []}
+            for i in range(n)
+        ]
+        out = {"items": items, "offset": offset, "limit": limit, "total": total}
+        if fallback:
+            out["fallback"] = True
+            out["total"] = len(items)
+        return out
+    return fake
+
+
+def _configure(monkeypatch):
+    monkeypatch.setattr("app.local_cache_bootstrap.central_configured", lambda: True)
+
+
+def test_full_download_is_verified_complete(db, monkeypatch):
+    from app.central_cache import refresh_central_cache
+    _configure(monkeypatch)
+    monkeypatch.setattr("app.central_cache.central_invoice_page", _fake_pages(1200))
+    result = asyncio.run(refresh_central_cache())
+    assert result["ok"] and result["complete"] is True and result["local_count"] == 1200
+    status = bootstrap_status(db)
+    assert status["health"] == "ok" and status["ready_offline"] is True
+    assert status["invoices"]["remote_total"] == 1200 and status["invoices"]["percent"] == 100
+    assert "1.200" in status["headline"]
+
+
+def test_fallback_path_is_flagged_incomplete_and_retried(db, monkeypatch):
+    from app.central_cache import refresh_central_cache
+    _configure(monkeypatch)
+    db.merge(AppSetting(key="local_cache_bootstrap_state", value="ok")); db.commit()
+    monkeypatch.setattr("app.central_cache.central_invoice_page", _fake_pages(20000, fallback=True))
+    result = asyncio.run(refresh_central_cache())
+    assert result["ok"] and result["complete"] is False and result["fallback"] is True
+    assert "Percorso alternativo" in result["message"]
+    assert db.get(AppSetting, "central_sync_at") is None or not db.get(AppSetting, "central_sync_at").value
+    status = bootstrap_status(db)
+    assert status["health"] == "incomplete" and status["ready_offline"] is False
+    assert needs_bootstrap(db) is True
+
+
+def test_missing_invoices_are_detected_and_resumed(db, monkeypatch):
+    from app.central_cache import refresh_central_cache
+    _configure(monkeypatch)
+    monkeypatch.setattr("app.central_cache.central_invoice_page", _fake_pages(1000))
+    asyncio.run(refresh_central_cache())
+    db.merge(AppSetting(key="local_cache_bootstrap_state", value="ok")); db.commit()
+    assert bootstrap_status(db)["health"] == "ok"
+    assert needs_bootstrap(db) is False
+    # il server ora ha 1300 fatture: la cache (1000) e' incompleta
+    monkeypatch.setattr("app.central_cache.central_invoice_page", _fake_pages(1300))
+    db.merge(AppSetting(key="central_remote_total", value="1300")); db.commit()
+    status = bootstrap_status(db)
+    assert status["health"] == "incomplete" and status["invoices"]["missing"] == 300
+    assert needs_bootstrap(db) is True
+    asyncio.run(refresh_central_cache())
+    assert bootstrap_status(db)["health"] == "ok"
+    assert needs_bootstrap(db) is False
+
+
+def test_interrupted_download_keeps_progress_and_reports_error(db, monkeypatch):
+    from app.central_cache import refresh_central_cache
+    _configure(monkeypatch)
+    ok_pages = _fake_pages(5000)
+
+    async def flaky(offset=0, limit=500, since=None):
+        if offset >= 1000:
+            raise RuntimeError("rete caduta")
+        return await ok_pages(offset, limit, since)
+
+    monkeypatch.setattr("app.central_cache.central_invoice_page", flaky)
+    db.merge(AppSetting(key="local_cache_bootstrap_state", value="ok")); db.commit()
+    result = asyncio.run(refresh_central_cache())
+    assert result["ok"] is False
+    status = bootstrap_status(db)
+    assert status["invoices"]["count"] == 1000
+    assert status["health"] == "incomplete"
+    assert needs_bootstrap(db) is True
+
+
+def test_health_when_empty_and_not_configured(db):
+    status = bootstrap_status(db)
+    assert status["health"] in {"empty", "not_configured"}
+    assert status["ready_offline"] is False
