@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.7`
+**Versione applicativa:** `2.0.8`
+
+**Novità 2.0.8:** fattura di riferimento apribile su ogni ricerca prodotto, report storico con tutti i fornitori, ricerca per parte di parola («bombo» trova «bombolino»), riconoscimento prodotti con Open Food Facts (alimentari e non), Ask Fatture completo con integrazione dalla centrale.
 
 **Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server, PIN predefinito `000000` ripristinato.
 **Branch principale:** `main` (modifiche solo via branch + PR)
