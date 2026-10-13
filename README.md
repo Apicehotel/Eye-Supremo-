@@ -306,3 +306,5 @@ Ogni prodotto in elenco e nella selezione del report storico mostra categoria, m
 
 ### Ask Fatture: integrazione dalla centrale
 Se la cache PC non è verificata completa, Ask integra sempre i risultati locali con una ricerca su Supabase (timeout 25 s), così un prodotto presente solo nell'archivio centrale mostra tutti i fornitori e non una riga sola.
+
+- Prodotti **non alimentari**: oltre alle famiglie manuali (imposte, energia, lavanderia…), le righe senza esito alimentare usano le tassonomie Open Products Facts e Open Beauty Facts (`backend/app/data/off_nonfood_it.json`, rigenerabile con `python scripts/build_nonfood_categories.py`) e mostrano famiglia e sottocategoria (es. «Pulizia e igiene › Shampoo»). Le voci contabili restano manuali.
