@@ -118,3 +118,14 @@ def test_catalogo_senza_ricerca_fonde_nomi_equivalenti():
     assert len(out) == 4  # marmellata(4), marm prugne, acqua 75x12, acqua 100x12
     assert any(v == 4 for v in sizes.values())
     assert not any("merged_variants" in o for o in out if "acqua" in o["nome_canonico"].lower())
+
+
+def test_search_real_invoice_words_no_fuzzy_false_hits():
+    from app.product_taxonomy import is_product_search_match as m
+    assert not m("ananas fyffes prov costa rica", "crostata")
+    assert not m("sacchi neri 90x120 80my kg 20", "succhi")
+    assert not m("saponetta a foglia 18gr apice x320p", "sfoglia")
+    assert not m("pomodoro rosso a grappolo prov italia", "mozzarella")
+    assert m("mozz colfiorito 100g ls", "mozzarella")
+    assert m("crostata albicocca", "crostate")
+    assert m("carta igienica fascettata ct24x4rt", "carta igenica")

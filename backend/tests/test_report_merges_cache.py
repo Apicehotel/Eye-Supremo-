@@ -47,3 +47,23 @@ def test_report_from_cache_only(db):
     db.commit()
     report = historical_product_report(db, "bomboloni")
     assert {b["supplier"] for b in report["suppliers"]} >= {"Solo Cache A", "Solo Cache B"}
+
+
+def test_central_history_points_carry_invoice_id(db, monkeypatch):
+    import asyncio
+    from app.routers import reports_eye
+
+    async def page(term, limit=2000):
+        return {"items": [{"nome_canonico": "Crostata marmellata", "categoria": "Dolci", "marca": None, "purchases": 2}]}
+
+    async def detail(name):
+        return {"history": [
+            {"invoice_number": "F1", "invoice_date": "2026-01-02", "supplier_name": "Dolce Srl", "unit_price": 3.0,
+             "normalized_price": 3.0, "normalized_unit": "pz", "quantity": 4, "source_hash": "abc123"}]}
+
+    monkeypatch.setattr(reports_eye, "central_product_page", page)
+    monkeypatch.setattr(reports_eye, "central_product_detail", detail)
+    monkeypatch.setattr(reports_eye, "historical_product_report", lambda db, q: {})
+    res = asyncio.run(reports_eye.history_product("crostata marmellata", db))
+    pts = [p for b in res.get("suppliers", res.get("blocks", [])) for p in b["points"]]
+    assert pts and pts[0]["invoice_id"] == "abc123"

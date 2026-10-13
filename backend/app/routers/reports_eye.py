@@ -45,7 +45,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             points = grouped.setdefault(key, [])
             previous = points[-1]["price"] if points else None
             delta = None if previous is None else round(float(price) - previous, 4)
-            points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "description": row.get("original_description") or q})
+            points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": row.get("original_description") or q})
         blocks = []
         for (supplier, unit), points in grouped.items():
             prices = [p["price"] for p in points]; best = min(points, key=lambda p: p["price"])
@@ -103,7 +103,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
         points = grouped.setdefault(key, [])
         previous = points[-1]["price"] if points else None
         delta = None if previous is None else round(float(price) - previous, 4)
-        points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "description": product["nome_canonico"]})
+        points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": product["nome_canonico"]})
     blocks = []
     for (supplier, unit), points in grouped.items():
         prices = [x["price"] for x in points]

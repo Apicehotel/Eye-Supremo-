@@ -383,7 +383,8 @@ def is_product_search_match(description: str, query: str) -> bool:
     if query_text in PRODUCT_FAMILY_ALIASES:
         if query_text in {"c igienica", "carta igienica", "c ig"}:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
-        return is_family_match(description, query_text)
+        if query_text in {"acqua", "acque", "lampadine", "lamp", "lampada", "a4", "carta a4"}:
+            return is_family_match(description, query_text)
     terms = match_terms(query_text)
 
     def matches(token: str) -> bool:
@@ -409,8 +410,9 @@ def is_product_search_match(description: str, query: str) -> bool:
         # Accept small typographical errors such as ``igenica``/``igienica``
         # without turning short or unrelated searches into broad matches.
         return any(
-            len(token) >= 5 and abs(len(candidate) - len(token)) <= 2
-            and fuzz.ratio(token, candidate) >= 82
+            len(token) >= 6 and abs(len(candidate) - len(token)) <= 1
+            and candidate[:1] == token[:1]
+            and fuzz.ratio(token, candidate) >= 85
             for candidate in tokens
         )
 

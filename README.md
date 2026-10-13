@@ -16,6 +16,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Versione applicativa:** `2.0.12`
 
+**Novità 2.0.13:** il report storico mostra di nuovo il pulsante «fattura N» (apre la fattura con tutte le righe acquistate); ricerca provata su nomi reali delle fatture: «mozzarella» non lascia più passare tutto e il confronto a somiglianza non confonde più crostata/costa, succhi/sacchi, sfoglia/foglia.
+
 **Novità 2.0.12:** le voci dello stesso prodotto (es. crostata alla marmellata / crostata marmellata / crostate marmellate) si fondono in una sola anche mentre si scrive o con ricerche lunghe.
 
 **Novità 2.0.11:** ricerca a più parole («crostata marmellata»): servono tutte le parole, con plurali e sinonimi, e i prodotti restano insieme in un'unica voce.
