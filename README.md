@@ -14,9 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.12`
+**Versione applicativa:** `2.0.13`
 
-**Novità 2.0.13:** il report storico mostra di nuovo il pulsante «fattura N» (apre la fattura con tutte le righe acquistate); ricerca provata su nomi reali delle fatture: «mozzarella» non lascia più passare tutto e il confronto a somiglianza non confonde più crostata/costa, succhi/sacchi, sfoglia/foglia.
+**Novità 2.0.13:** il report storico mostra di nuovo il pulsante «fattura N» (apre la fattura con tutte le righe acquistate); ricerca provata su nomi reali delle fatture: «mozzarella» non lascia più passare tutto e il confronto a somiglianza non confonde più crostata/costa, succhi/sacchi, sfoglia/foglia. **Unisci prodotti:** nel catalogo spunta due o più voci e premi «Unisci»: la scelta viene salvata (tabella `settings`, chiave `product_groups`) e vale per catalogo e report storico; «separa» annulla. API: `GET/POST/DELETE /api/eye/product-groups`.
 
 **Novità 2.0.12:** le voci dello stesso prodotto (es. crostata alla marmellata / crostata marmellata / crostate marmellate) si fondono in una sola anche mentre si scrive o con ricerche lunghe.
 

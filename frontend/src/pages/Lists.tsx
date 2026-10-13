@@ -438,6 +438,19 @@ export function Products() {
     [configSaved, setConfigSaved] = useState(false),
     [tracked, setTracked] = useState(false);
   const productsRequest = useRef(0);
+  const [selected, setSelected] = useState<Record<string, string[]>>({}),
+    [reloadTick, setReloadTick] = useState(0);
+  const selectedKeys = Object.keys(selected);
+  async function mergeSelected() {
+    const names = selectedKeys.flatMap((k) => selected[k]);
+    await eyeApi("/product-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names }) });
+    setSelected({});
+    setReloadTick((t) => t + 1);
+  }
+  async function splitItem(p: any) {
+    for (const n of p.canonical_names || []) await eyeApi(`/product-groups?name=${encodeURIComponent(n)}`, { method: "DELETE" });
+    setReloadTick((t) => t + 1);
+  }
   useEffect(() => {
     api<Record<string, any>>("/product-config").then(setConfigs).catch(() => setConfigs({}));
     api<Record<string, boolean>>("/product-tracking").then(setTracking).catch(() => setTracking({}));
@@ -451,7 +464,7 @@ export function Products() {
     }).catch(() => {
       if (requestId === productsRequest.current) setItems([]);
     });
-  }, [q]);
+  }, [q, reloadTick]);
   const totalItems = items?.length || 0;
   const toggleSort = (key: SortKey) => setSort((current) => current.key === key ? {key, direction: current.direction === "asc" ? "desc" : "asc"} : {key, direction: "asc"});
   const sortedItems = useMemo(() => [...(items || [])].sort((a, b) => compareValues(a[sort.key], b[sort.key], sort.direction)), [items, sort]);
@@ -498,6 +511,12 @@ export function Products() {
         </div><div className="pagination header-pagination" aria-label="Paginazione prodotti"><span>{totalItems ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, totalItems)} di ${totalItems}` : "Nessun prodotto"}</span><button disabled={page === 0} onClick={() => setPage((value) => value - 1)}>← Precedenti</button><button disabled={(page + 1) * pageSize >= totalItems} onClick={() => setPage((value) => value + 1)}>Successivi →</button></div></div>
       </PageHeader>
       <section className="panel list-panel">
+        {selectedKeys.length >= 2 && (
+          <div className="screen-only" style={{ padding: "8px 12px" }}>
+            <button type="button" onClick={mergeSelected}>Unisci {selectedKeys.length} selezionati in un solo prodotto</button>{" "}
+            <button type="button" onClick={() => setSelected({})}>Annulla</button>
+          </div>
+        )}
         {!items ? (
           <Loading />
         ) : items.length ? (
@@ -505,6 +524,7 @@ export function Products() {
             <table>
               <thead>
                     <tr>
+                      <th title="Seleziona più voci per unirle"></th>
                       <th><SortHeader label="Nome canonico" sort={sort} sortKey="nome_canonico" onSort={toggleSort} /></th>
                   <th>Categoria</th>
                   <th>Marca</th>
@@ -517,8 +537,12 @@ export function Products() {
               <tbody>
                 {visibleItems.map((p) => (
                   <tr key={p.id} onClick={() => openDetail(p.nome_canonico, p.canonical_names || [p.nome_canonico])} style={{ cursor: "pointer" }}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label="Seleziona per unire" checked={p.nome_canonico in selected} onChange={(e) => setSelected((cur) => { const next = { ...cur }; if (e.target.checked) next[p.nome_canonico] = p.canonical_names || [p.nome_canonico]; else delete next[p.nome_canonico]; return next; })} />
+                    </td>
                     <td>
                       <b>{configs[p.nome_canonico]?.configured_name || p.nome_canonico}</b>
+                      {p.user_group && <small className="recognized-tag" onClick={(e) => e.stopPropagation()}> {p.canonical_names.length} nomi uniti <button type="button" onClick={() => splitItem(p)}>separa</button></small>}
                     </td>
                     <td>{p.categoria || "—"}</td>
                     <td>{configs[p.nome_canonico]?.manufacturer || p.marca || p.recognition?.brand || "—"}{p.recognition?.category && <small className="recognized-tag" title="Riconosciuto da Open Food Facts">{[p.recognition.category, p.recognition.subcategory].filter(Boolean).join(" › ")}</small>}</td>

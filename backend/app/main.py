@@ -27,6 +27,14 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         seed_eye_supremo(db)
+        from .models import AppSetting
+        from .product_recognition import set_user_groups
+        import json as _json
+        row = db.get(AppSetting, "product_groups")
+        if row:
+            set_user_groups(_json.loads(row.value))
+    except Exception:  # noqa: BLE001
+        pass
     finally:
         db.close()
     ensure_fts5(engine)
@@ -35,7 +43,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Eye Supremo API", version="2.0.12", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="Eye Supremo API", version="2.0.13", docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:8765"],

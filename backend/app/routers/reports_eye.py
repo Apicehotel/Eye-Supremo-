@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session, selectinload
 from ..database import get_db
 from ..models import Hotel, Invoice, InvoiceMeta
 from ..central_service import central_invoice_search, central_product_detail, central_product_page
-from ..product_recognition import annotate as annotate_recognition, collapse_to_product
+import json
+
+from ..models import AppSetting
+from ..normalization import normalize_text
+from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
 from ..report_service import historical_product_report
 
@@ -115,6 +119,59 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     best = min(all_points, key=lambda x: x["price"])
     best_supplier = min(blocks, key=lambda x: x["average_price"])
     return {"query": q, "summary": {"product": product["nome_canonico"], "manufacturers": [product["marca"]] if product.get("marca") else [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda x: x["date"])["price"], "initial_date": min(x["date"] for x in all_points), "average_price": round(sum(x["price"] for x in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda x: x["date"])["price"], "latest_date": max(x["date"] for x in all_points), "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({x["date"] for x in all_points}), "units": sorted({x["unit"] for x in all_points}), "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata."}
+
+
+def _load_groups(db: Session) -> list[list[str]]:
+    row = db.get(AppSetting, "product_groups")
+    try:
+        return json.loads(row.value) if row else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _save_groups(db: Session, groups: list[list[str]]) -> list[list[str]]:
+    groups = [g for g in groups if len(g) >= 2]
+    row = db.get(AppSetting, "product_groups")
+    if row:
+        row.value = json.dumps(groups, ensure_ascii=False)
+    else:
+        db.add(AppSetting(key="product_groups", value=json.dumps(groups, ensure_ascii=False)))
+    db.commit()
+    set_user_groups(groups)
+    return groups
+
+
+@router.get("/product-groups")
+def product_groups(db: Session = Depends(get_db)):
+    groups = _load_groups(db)
+    set_user_groups(groups)
+    return groups
+
+
+@router.post("/product-groups")
+def merge_product_names(payload: dict, db: Session = Depends(get_db)):
+    """Conferma che questi nomi sono lo stesso prodotto (si uniscono ai gruppi già esistenti)."""
+    names = [normalize_text(str(n)) for n in payload.get("names", []) if str(n).strip()]
+    names = list(dict.fromkeys(names))
+    if len(names) < 2:
+        raise HTTPException(400, "Servono almeno due nomi")
+    groups = _load_groups(db)
+    joined = set(names)
+    rest = []
+    for g in groups:
+        if joined & set(g):
+            joined |= set(g)
+        else:
+            rest.append(g)
+    return _save_groups(db, [*rest, sorted(joined)])
+
+
+@router.delete("/product-groups")
+def split_product_name(name: str = Query(min_length=1), db: Session = Depends(get_db)):
+    """Toglie un nome dal suo gruppo (separa di nuovo)."""
+    key = normalize_text(name)
+    groups = [[n for n in g if n != key] for g in _load_groups(db)]
+    return _save_groups(db, groups)
 
 
 @router.get("/invoice-destinations")
