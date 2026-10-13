@@ -435,6 +435,7 @@ export function Products() {
     [invoiceRef, setInvoiceRef] = useState<InvoiceRefTarget>(),
     [configuredName, setConfiguredName] = useState(""),
     [manufacturer, setManufacturer] = useState(""),
+    [piecesPerPack, setPiecesPerPack] = useState(""),
     [configSaved, setConfigSaved] = useState(false),
     [tracked, setTracked] = useState(false);
   const productsRequest = useRef(0);
@@ -481,6 +482,7 @@ export function Products() {
       setDetail({ ...details[0], product, history, sourceName: name, sourceNames: aliases });
       setConfiguredName(configs[name]?.configured_name || name);
       setManufacturer(configs[name]?.manufacturer || product.brand || product.marca || "");
+      setPiecesPerPack(configs[name]?.pieces_per_pack ? String(configs[name].pieces_per_pack) : "");
       setTracked(Boolean(tracking[name]));
       setConfigSaved(false);
     } catch {
@@ -489,7 +491,7 @@ export function Products() {
   }
   async function saveProductConfig() {
     if (!detail?.sourceName || !configuredName.trim()) return;
-    const saved = await api<any>("/product-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_name: detail.sourceName, configured_name: configuredName.trim(), manufacturer: manufacturer.trim() }) });
+    const saved = await api<any>("/product-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_name: detail.sourceName, configured_name: configuredName.trim(), manufacturer: manufacturer.trim(), pieces_per_pack: Number(piecesPerPack.replace(",", ".")) || null }) });
     setConfigs(current => ({ ...current, [detail.sourceName]: saved })); setConfigSaved(true);
   }
   async function saveTracking(enabled: boolean) {
@@ -566,7 +568,7 @@ export function Products() {
         <article className="panel detail-panel detail-preview-panel">
           {detail.error ? <Empty title="Dettaglio prodotto non disponibile" text={detail.error} /> : <>
             <div className="panel-title"><h2>Anteprima · {detail.product?.canonical_name || "Dettaglio prodotto"}</h2><button className="secondary-btn preview-close" aria-label="Chiudi anteprima" title="Chiudi anteprima" onClick={() => setDetail(undefined)}>×</button></div>
-            <div className="product-config"><h3>Configurazione prodotto</h3><div className="product-config-grid"><label>Nome visualizzato<input value={configuredName} onChange={e => setConfiguredName(e.target.value)} /></label><label>Produttore<input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="Produttore / marca" /></label></div><button className="primary-btn" onClick={saveProductConfig} disabled={!configuredName.trim()}>Salva configurazione</button>{configSaved && <span className="success">Configurazione salvata</span>}<label className="product-track-toggle"><input type="checkbox" checked={tracked} onChange={e => saveTracking(e.target.checked)} /> Monitora questo prodotto e segnala variazioni di prezzo</label></div>
+            <div className="product-config"><h3>Configurazione prodotto</h3><div className="product-config-grid"><label>Nome visualizzato<input value={configuredName} onChange={e => setConfiguredName(e.target.value)} /></label><label>Produttore<input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="Produttore / marca" /></label><label>Pezzi per confezione<input inputMode="decimal" value={piecesPerPack} onChange={e => setPiecesPerPack(e.target.value)} placeholder="es. 6 (per cartone)" title="Quanti pezzi contiene ogni unità acquistata: il report calcola il prezzo al pezzo" /></label></div><button className="primary-btn" onClick={saveProductConfig} disabled={!configuredName.trim()}>Salva configurazione</button>{configSaved && <span className="success">Configurazione salvata</span>}<label className="product-track-toggle"><input type="checkbox" checked={tracked} onChange={e => saveTracking(e.target.checked)} /> Monitora questo prodotto e segnala variazioni di prezzo</label></div>
             <p><b>Acquisti:</b> {detail.product?.purchases ?? 0} · <b>Prezzo medio:</b> {detail.product?.avg_price != null ? euro(Number(detail.product.avg_price)) : "—"}</p>
             {detail.history?.length ? <div className="table-wrap"><table><thead><tr><th>Data</th><th>Fattura</th><th>Fornitore</th><th>Quantità</th><th>Prezzo unit.</th><th>Prezzo normalizzato</th><th>Totale</th><th>Fattura</th></tr></thead><tbody>{detail.history.map((h: any, i: number) => <tr key={`${h.source_hash}-${i}`}><td>{shortDate(h.invoice_date)}</td><td>{h.invoice_number}</td><td>{h.supplier_name}</td><td>{h.quantity ?? "—"} {h.original_unit || h.normalized_unit || ""}</td><td>{h.unit_price != null ? euro(Number(h.unit_price)) : "—"}</td><td>{h.normalized_price != null ? `${euro(Number(h.normalized_price))} / ${h.normalized_unit || h.original_unit || "unità"}` : "—"}</td><td>{h.line_total != null ? euro(Number(h.line_total)) : "—"}</td><td><OpenInvoiceButton id={h.source_hash} highlight={detail.product?.canonical_name} onOpen={setInvoiceRef} /></td></tr>)}</tbody></table></div> : <p>Nessun acquisto collegato.</p>}
           </>}

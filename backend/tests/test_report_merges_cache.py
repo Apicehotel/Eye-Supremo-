@@ -67,3 +67,25 @@ def test_central_history_points_carry_invoice_id(db, monkeypatch):
     res = asyncio.run(reports_eye.history_product("crostata marmellata", db))
     pts = [p for b in res.get("suppliers", res.get("blocks", [])) for p in b["points"]]
     assert pts and pts[0]["invoice_id"] == "abc123"
+
+
+def test_pieces_per_pack_makes_price_per_piece(db, monkeypatch):
+    import asyncio
+    from app.routers import api, reports_eye
+    api.update_product_config({"source_name": "Crostata marmellata", "configured_name": "Crostata marmellata", "pieces_per_pack": 6}, db)
+    # senza il campo la configurazione successiva non cancella i pezzi
+    api.update_product_config({"source_name": "Crostata marmellata", "configured_name": "Crostata M"}, db)
+
+    async def page(term, limit=2000):
+        return {"items": [{"nome_canonico": "Crostata marmellata", "categoria": "Dolci", "marca": None, "purchases": 1}]}
+
+    async def detail(name):
+        return {"history": [{"invoice_number": "F1", "invoice_date": "2026-01-02", "supplier_name": "Dolce Srl", "unit_price": 12.0,
+                             "normalized_price": 12.0, "normalized_unit": "cartone", "quantity": 2, "source_hash": "h1"}]}
+
+    monkeypatch.setattr(reports_eye, "central_product_page", page)
+    monkeypatch.setattr(reports_eye, "central_product_detail", detail)
+    monkeypatch.setattr(reports_eye, "historical_product_report", lambda db, q: {})
+    res = asyncio.run(reports_eye.history_product("crostata marmellata", db))
+    p = res["suppliers"][0]["points"][0]
+    assert p["price"] == 2.0 and p["unit"] == "pz" and p["quantity"] == 12
