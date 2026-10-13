@@ -15,8 +15,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 ## Stato del progetto
 
 **Versione applicativa:** `2.0.6`
-**Branch di lavoro:** `integrate/main-align`
-**Ultimo aggiornamento:** 8 ottobre 2026
+**Branch principale:** `main` (modifiche solo via branch + PR)
+**Ultimo aggiornamento:** 13 ottobre 2026
 
 ### Completato
 
@@ -30,11 +30,12 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
-- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve).
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve);
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 - ricerca dello storico prodotti con suggerimenti, selezione delle varianti e layout responsive a due colonne;
 - gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
 - parsing XML FatturaPA dei riepiloghi fiscali tramite `DatiRiepilogo`, con imponibile, IVA e totale coerenti;
+- import PDF/TXT più affidabile e somma delle spese calcolata sulle righe pertinenti;
 - autenticazione centrale Supabase verificata per gli utenti `supremo` e `sviluppatore`; i PIN locali e centrali restano sistemi distinti.
 
 ### Verificato
@@ -48,6 +49,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Da completare
 
+- sicurezza accessi: rimuovere il PIN predefinito dalla UI e imporre il cambio PIN al primo accesso;
 - pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
 - verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
@@ -64,7 +66,7 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-PIN standard iniziale: **`000000`**. Si può cambiare in qualsiasi momento da **Sistema → Utenti e ruoli**. I nuovi profili locali ereditano gli stessi permessi e, se non indicato altrimenti, lo stesso PIN standard.
+Al primo avvio ogni profilo usa un **PIN iniziale predefinito**, che va **cambiato subito** da **Sistema → Utenti e ruoli** (il valore non è riportato qui perché il repository è pubblico). I nuovi profili locali ereditano gli stessi permessi e il PIN iniziale predefinito, da cambiare al primo accesso.
 
 Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
@@ -265,7 +267,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 ## Sicurezza
 
 - dati reali locali per default;
-- autenticazione locale con PIN e sessione;
+- autenticazione locale con PIN e sessione (PIN iniziale da cambiare al primo accesso);
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
 - agenti con strumenti dichiarati e limitati;
