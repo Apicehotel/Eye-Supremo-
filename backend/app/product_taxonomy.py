@@ -140,9 +140,14 @@ def extract_product_query(query: str) -> str:
         return ""
     # Alias multi-parola noti (es. «carta igienica») hanno priorità.
     for alias in sorted(PRODUCT_FAMILY_ALIASES, key=len, reverse=True):
+        if " " not in alias:
+            continue
         if re.search(rf"\b{re.escape(alias)}\b", normalized):
             return alias
     tokens = [t for t in normalized.split() if t not in QUESTION_FILLERS and len(t) >= 3]
+    # Più parole («crostata marmellata»): sono tutte parte del prodotto, non si riduce a un solo sinonimo.
+    if len(tokens) > 1:
+        return " ".join(tokens)
     # Singolo token che coincide con un alias o una sua variante.
     for token in tokens:
         if token in PRODUCT_FAMILY_ALIASES:
@@ -178,6 +183,18 @@ def search_terms(query: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(variants))
 
 
+def match_terms(query: str) -> tuple[str, ...]:
+    """Termini per decidere se una riga è il prodotto cercato.
+
+    Una ricerca a più parole («crostata marmellata») deve avere TUTTE le parole (con plurali e sinonimi);
+    ``search_terms`` resta largo perché serve a recuperare le righe candidate da centrale/cache.
+    """
+    needle = normalize_text(extract_product_query(query)).strip()
+    if needle and not exact_phrases(query) and needle not in PRODUCT_FAMILY_ALIASES and len(needle.split()) > 1:
+        return (needle,)
+    return search_terms(query)
+
+
 def product_stem(query: str) -> str | None:
     """Stem per match substring su ogni prodotto (minibomboloni, minilimoncello, …)."""
     needle = normalize_text(extract_product_query(query) or query).strip()
@@ -188,6 +205,9 @@ def product_stem(query: str) -> str | None:
     for key, stem in PRODUCT_FAMILY_STEMS.items():
         if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
             return stem
+    # Più parole: servono tutte (match_terms); lo stem della parola più lunga farebbe passare tutto.
+    if len(needle.split()) > 1:
+        return None
     # Stem generico: token più lungo, togli desinenza plurale/vocale finale.
     token = max(needle.split(), key=len)
     if len(token) < 7:
@@ -232,7 +252,7 @@ def description_matches_product(description: str, query: str) -> bool:
     needle = normalize_text(extract_product_query(query) or query)
     if not needle:
         return False
-    for term in search_terms(needle):
+    for term in match_terms(needle):
         term_n = normalize_text(term)
         if not term_n:
             continue
@@ -244,7 +264,14 @@ def description_matches_product(description: str, query: str) -> bool:
             return True
         # Token della query tutti presenti (ordine libero) nella descrizione.
         term_tokens = [t for t in term_n.split() if len(t) >= 3]
-        if term_tokens and all(any(w.startswith(t) or (len(t) >= 6 and t in w) or w.startswith(t[: max(4, len(t) - 1)]) for w in words) for t in term_tokens):
+        def _word_has(t: str) -> bool:
+            options = PRODUCT_FAMILY_ALIASES.get(t) or (t,)
+            return any(
+                w.startswith(o) or (len(o) >= 6 and o in w) or w.startswith(o[: max(4, len(o) - 1)])
+                for o in options for w in words if " " not in o
+            )
+
+        if term_tokens and all(_word_has(t) for t in term_tokens):
             return True
         # Parola composta: limoncello ⊂ minilimoncello / limoncello70cl
         if len(term_n) >= 5 and any(term_n in w or (len(term_n) >= 6 and term_n[:-1] in w) for w in words):
@@ -357,10 +384,20 @@ def is_product_search_match(description: str, query: str) -> bool:
         if query_text in {"c igienica", "carta igienica", "c ig"}:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
         return is_family_match(description, query_text)
-    terms = search_terms(query_text)
+    terms = match_terms(query_text)
 
     def matches(token: str) -> bool:
+        # Più parole: ognuna vale anche con i suoi sinonimi (marmellata ≈ marm ≈ confettura).
+        variants = PRODUCT_FAMILY_ALIASES.get(token)
+        if variants and len(variants) > 1 and any(matches_one(v) for v in variants):
+            return True
+        return matches_one(token)
+
+    def matches_one(token: str) -> bool:
         if token in tokens:
+            return True
+        # Plurale/singolare: «crostata» ≈ «crostate» (radice senza ultima vocale, da 6 caratteri).
+        if len(token) >= 6 and token[-1] in "aeio" and any(c.startswith(token[:-1]) for c in tokens):
             return True
         # Ricerca per parte di parola: «bombo» trova «bombolino», «limon» trova «limoncello».
         # Sotto i 4 caratteri sarebbe troppo largo (es. «car», «ac»).

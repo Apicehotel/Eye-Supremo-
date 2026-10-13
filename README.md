@@ -336,3 +336,7 @@ Verificati banane, birra, caffè, latte, mozzarella, pomodori, prosciutto, uova,
 ### Ricerca esatta con le virgolette
 
 Scrivendo la parola tra virgolette (`"olio"`, anche in Ask: «chi mi vende "olio"?») la ricerca trova solo la **parola intera**: niente parti di parola, sinonimi o correzioni (`"olio"` non trova «gasolio»). Senza virgolette resta la ricerca flessibile. In più: «vino» non trova più «bovino/ovino», «olio» non trova «gasolio» (le parole corte contano solo a inizio parola) e i tovaglioli di carta sono «Monouso e tavola» e si uniscono in un solo prodotto, distinti dal servizio di lavanderia.
+
+### Ricerca a più parole («crostata marmellata»)
+
+Con due o più parole la ricerca richiede **tutte** le parole (plurali e sinonimi inclusi: crostata≈crostate, marmellata≈marm≈confettura) e non si riduce più al solo sinonimo «marmellata». Così «crostata marmellata» riunisce in un solo prodotto crostata/crostate alla marmellata/crostate marmellate e non mostra più confetture, cornetti o dosatori. Una parola sola funziona come prima.

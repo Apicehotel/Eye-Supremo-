@@ -72,3 +72,20 @@ def test_virgolette_ricerca_esatta():
         assert fn("OLIO EVO 5 L", '"olio"')
         assert not fn("GASOLIO AUTOTRAZIONE", '"olio"')
         assert not fn("OLIOSO", '"olio"')
+
+
+def test_crostata_marmellata_tutte_insieme_e_senza_confetture():
+    from app.product_recognition import collapse_to_product
+    from app.product_taxonomy import description_matches_product, is_product_search_match, merge_product_catalog
+    nomi = ["crostata marmellata", "crostate alla marmellata", "crostate alle marmellate", "crostate marmellate",
+            "crostata marm prugne", "cornetti marmellata", "nestle marmellata arance 120x25g it",
+            "tartelle medie miste marmellata da 15pezzi", "dosatore confetture mantea da kg 1 9"]
+    items = [{"nome_canonico": n, "purchases": 2, "avg_price": 5.0, "min_price": 5, "max_price": 5} for n in nomi]
+    for q in ("crostata marmellata", "crostate alla marmellata"):
+        trovati = [i for i in items if is_product_search_match(i["nome_canonico"], q)]
+        assert len(trovati) == 5
+        assert len(collapse_to_product(merge_product_catalog(trovati), q)) == 1
+        ask = [n for n in nomi if description_matches_product(n, q)]
+        assert len(ask) == 5 and "cornetti marmellata" not in ask
+    # una sola parola: i sinonimi restano
+    assert is_product_search_match("marm s day arance pvc 25gx100", "marmellata")
