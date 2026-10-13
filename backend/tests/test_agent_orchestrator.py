@@ -12,7 +12,7 @@ from app.agent_orchestrator import (
     _review_context,
     classify_intent,
 )
-from app.models import CentralInvoiceCache, CentralReviewCache, Hotel
+from app.models import AppSetting, CentralInvoiceCache, CentralReviewCache, Hotel
 
 
 def test_router_sends_price_question_to_product_price_and_verifier():
@@ -226,10 +226,11 @@ def test_product_context_uses_local_cache_not_supabase(db, monkeypatch):
         search_text="A-1 Acqua Spa ACQUA NATURALE 1.5L",
         payload_json=json.dumps(payload),
     ))
+    db.add(AppSetting(key="central_sync_complete", value="yes"))
     db.commit()
 
     async def boom(*_a, **_k):
-        raise AssertionError("Ask non deve chiamare Supabase se la cache locale ha dati")
+        raise AssertionError("Ask non deve chiamare Supabase se la cache locale è completa e ha dati")
 
     monkeypatch.setattr("app.central_service.central_invoice_search", boom)
     context = asyncio.run(_product_context("acqua naturale", "developer"))
@@ -261,3 +262,25 @@ def test_review_context_uses_local_review_cache(db, monkeypatch):
     assert context["reviews"]
     assert context["reviews"][0]["source_origin"] == "sqlite-cache"
     assert "pulizia" in context["reviews"][0]["text"].lower()
+
+
+def test_ask_supplements_from_central_when_cache_incomplete(db, monkeypatch):
+    db.add(CentralInvoiceCache(
+        source_hash="one-row", invoice_number="X-1", invoice_date=date(2023, 10, 12), supplier_name="CARTAA",
+        total=Decimal("47.99"), search_text="X-1 CARTAA CARTA IGIENICA",
+        payload_json=json.dumps({"rows": [{"original_description": "CARTA IGIENICA 96 ROTOLI", "quantity": 1, "unit_price": 47.99, "line_total": 47.99, "analysis_status": "product"}]}),
+    ))
+    db.add(AppSetting(key="central_sync_complete", value="no"))
+    db.commit()
+
+    async def fake_central(*_a, **_k):
+        return {"enabled": True, "items": [
+            {"id": "c1", "source_hash": "h1", "invoice_number": "9", "invoice_date": "2025-03-01", "supplier_name": "Lucart",
+             "original_description": "CARTA IGIENICA MAXI", "quantity": 10, "unit_price": 3.1, "line_total": 31, "analysis_status": "product"},
+        ]}
+
+    monkeypatch.setattr("app.agent_orchestrator.central_configured", lambda: True)
+    monkeypatch.setattr("app.agent_orchestrator.central_invoice_search", fake_central)
+    context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
+    assert context["supplier_count"] >= 2
+    assert "supabase" in context["data_sources"]

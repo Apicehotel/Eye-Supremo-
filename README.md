@@ -303,3 +303,6 @@ Ogni prodotto in elenco e nella selezione del report storico mostra categoria, m
 - Dizionario: `backend/app/data/off_categories_it.json`, rigenerabile con `python scripts/build_off_categories.py`.
 - Nessuna chiamata all'API di Open Food Facts a runtime (limiti di richieste e uso offline).
 - Marche e famiglie si estendono in `backend/app/product_recognition.py` (`BRANDS`, `NON_FOOD`, `EXTRA_FOODS`).
+
+### Ask Fatture: integrazione dalla centrale
+Se la cache PC non è verificata completa, Ask integra sempre i risultati locali con una ricerca su Supabase (timeout 25 s), così un prodotto presente solo nell'archivio centrale mostra tutti i fornitori e non una riga sola.
