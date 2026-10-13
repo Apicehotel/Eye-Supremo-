@@ -24,6 +24,11 @@ PRODUCT_FAMILY_ALIASES = {
     "c igienica": ("carta igienica", "c igienica"),
     "carta igienica": ("carta igienica", "c igienica"),
     "c ig": ("carta igienica", "c ig"),
+    # Sinonimi: in fattura la stessa cosa è «marmellata», «confettura» o «MARM.».
+    "marmellata": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "marmellate": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "confettura": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "confetture": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
     # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
     "bomboloni": (
         "bomboloni", "bombolino", "bombolini", "bombolone",
@@ -45,6 +50,10 @@ PRODUCT_FAMILY_STEMS = {
 
 # Famiglie con collisioni note: la riga deve contenere almeno uno di questi token.
 PRODUCT_REQUIRED_SUBSTRINGS = {
+    "marmellata": ("marmellat", "confettur", "marm "),
+    "marmellate": ("marmellat", "confettur", "marm "),
+    "confettura": ("marmellat", "confettur", "marm "),
+    "confetture": ("marmellat", "confettur", "marm "),
     "bomboloni": ("bombolin", "bombolon"),
     "bombolone": ("bombolin", "bombolon"),
 }

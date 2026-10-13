@@ -377,6 +377,11 @@ def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> lis
             continue
         if wanted["kind"] == "non_food" and got["kind"] == "non_food" and wanted["category"] != got["category"]:
             continue
+        # Cerco un alimento: scarto accessori/attrezzature (dispenser, dosatori) e dolci pronti (crostata alla marmellata).
+        if wanted["kind"] == "food" and got["kind"] == "non_food":
+            continue
+        if wanted["kind"] == "food" and got["kind"] == "food" and got["category"] == "Dolci e pasticceria" and wanted["category"] != "Dolci e pasticceria":
+            continue
         out.append(row)
     return out
 

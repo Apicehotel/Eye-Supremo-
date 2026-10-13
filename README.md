@@ -318,3 +318,6 @@ La sincronizzazione recensioni non invia più un checkpoint vuoto come data (err
 
 ### Ask Fatture: pertinenza dei risultati
 Ask tiene solo le righe la cui **descrizione** è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile, usando il riconoscimento prodotti: autofatture/voci contabili e accessori (es. «molla portacarta igienica») non finiscono più nel confronto prezzi. Se l'archivio centrale non risponde, Ask lo segnala con il motivo invece di mostrare un risultato parziale senza avvisi.
+
+### Sinonimi di prodotto
+La ricerca tratta «marmellata», «confettura» e la sigla «MARM.» come lo stesso prodotto (le righe di dolci pronti come «crostata alla marmellata» e gli accessori come dispenser o dosatori restano fuori dal confronto prezzi). Nuovi sinonimi si aggiungono in `PRODUCT_FAMILY_ALIASES` (`backend/app/product_taxonomy.py`).
