@@ -85,13 +85,13 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 non disponibile' }
           & $iscc 'installer\EyeSupremo.iss'
-          if (-not (Test-Path 'release\EyeSupremo-Setup.exe')) { throw 'Installer non prodotto' }
+          if (-not (Test-Path 'release\EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe')) { throw 'Installer con versione nel nome non prodotto (controlla OutputBaseFilename in installer\EyeSupremo.iss)' }
 
       - name: Pubblica GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Eye Supremo ${{ steps.version.outputs.name }}
-          files: release/EyeSupremo-Setup.exe
+          files: release/EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe
           generate_release_notes: true
           fail_on_unmatched_files: true

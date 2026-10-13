@@ -16,7 +16,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Versione applicativa:** `2.0.14`
 
-**Novità 2.0.14:** nella scheda prodotto del catalogo c'è «Pezzi per confezione» (es. 6 per un cartone): il report storico mostra prezzo e quantità al pezzo. Il numero vale per il prodotto ed è salvato in `product_configs` (campo `pieces_per_pack`).
+**Novità 2.0.14:** nella scheda prodotto del catalogo c'è «Pezzi per confezione» (es. 6 per un cartone): il report storico mostra prezzo e quantità al pezzo. Il numero vale per il prodotto ed è salvato in `product_configs` (campo `pieces_per_pack`). **Installer:** il file si chiama `EyeSupremo-Setup-<versione>.exe` (la versione è nel nome, non si sovrascrive nei download); per ogni release aggiornare anche `OutputBaseFilename` in `installer/EyeSupremo.iss`.
 
 **Novità 2.0.13:** il report storico mostra di nuovo il pulsante «fattura N» (apre la fattura con tutte le righe acquistate); ricerca provata su nomi reali delle fatture: «mozzarella» non lascia più passare tutto e il confronto a somiglianza non confonde più crostata/costa, succhi/sacchi, sfoglia/foglia. **Unisci prodotti:** nel catalogo spunta due o più voci e premi «Unisci»: la scelta viene salvata (tabella `settings`, chiave `product_groups`) e vale per catalogo e report storico; «separa» annulla. API: `GET/POST/DELETE /api/eye/product-groups`.
 
