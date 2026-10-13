@@ -73,7 +73,7 @@ def search_records(db: Session, query: str, limit=20):
     if text and not rows:
         candidates = db.execute(select(InvoiceRow, Invoice, Supplier).select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id).join(Supplier, Invoice.supplier_id == Supplier.id).limit(500)).all()
         rows = sorted(candidates, key=lambda x: fuzz.token_set_ratio(text, x[0].descrizione_originale), reverse=True)[:limit]
-    return [{"row_id": r.id, "descrizione": r.descrizione_originale, "quantita": float(r.quantita), "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unita": r.unita_normalizzata, "fattura_id": i.id, "fattura": i.numero, "data": i.data.isoformat(), "fornitore": s.ragione_sociale, "totale_fattura": float(i.totale)} for r, i, s in rows[:limit]]
+    return [{"row_id": r.id, "descrizione": r.descrizione_originale, "quantita": float(r.quantita), "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unita": r.unita_normalizzata, "totale_riga": float(r.totale_riga), "fattura_id": i.id, "fattura": i.numero, "data": i.data.isoformat(), "fornitore": s.ragione_sociale, "totale_fattura": float(i.totale)} for r, i, s in rows[:limit]]
 
 
 async def ollama_status(db=None):
@@ -97,11 +97,16 @@ async def answer_with_ollama(question: str, records: list[dict], db=None):
     runtime = resolve_ai_runtime(db)
     status = await ollama_status(db)
     if not status["available"]:
-        total = sum({r["fattura_id"]: r["totale_fattura"] for r in records}.values())
+        # Somma solo le righe trovate (non il totale intero delle fatture che le contengono).
+        row_total = sum(float(r.get("totale_riga") or 0) for r in records)
         year = re.search(r"\b(19|20)\d{2}\b", question)
         detail = f" per il {year.group(0)}" if year else ""
-        formatted_total = f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        answer = f"Ho trovato {len(records)} righe pertinenti{detail}, relative a {len(set(r['fattura_id'] for r in records))} fatture, per un totale documenti di € {formatted_total}."
+        formatted_total = f"{row_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        invoice_count = len({r["fattura_id"] for r in records})
+        answer = (
+            f"Ho trovato {len(records)} righe pertinenti{detail}, relative a {invoice_count} fatture, "
+            f"per un totale righe di € {formatted_total}."
+        )
         return {
             "mode": "deterministic",
             "answer": answer + " Ollama non è disponibile: il risultato è calcolato direttamente dall'archivio.",

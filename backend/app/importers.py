@@ -50,28 +50,60 @@ def parse_xml(path: Path) -> dict:
     return {"supplier": {"ragione_sociale": company or "Fornitore da verificare", "partita_iva": tag(supplier_node, "IdCodice"), "codice_fiscale": tag(supplier_node, "CodiceFiscale")}, "invoice": {"numero": tag(body, "Numero") or "SENZA-NUMERO", "data": raw_date, "imponibile": str(taxable), "iva": str(vat), "totale": str(total), "valuta": tag(body, "Divisa") or "EUR"}, "rows": rows, "confidence": 1.0, "warnings": []}
 
 
+def _parse_invoice_date(text: str) -> str:
+    raw_date = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\b", text)
+    if not raw_date:
+        return date.today().isoformat()
+    candidate = raw_date.group(1)
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d-%m-%y"):
+        try:
+            return datetime.strptime(candidate, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return date.today().isoformat()
+
+
 def parse_pdf(path: Path) -> dict:
     text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
     if not text.strip():
         return {"supplier": {"ragione_sociale": "Da riconoscere"}, "invoice": {"numero": "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": "0", "valuta": "EUR"}, "rows": [], "confidence": .15, "warnings": ["PDF senza testo: installare OCR opzionale"], "extracted_text": ""}
-    number = re.search(r"(?:fattura|n\.?)[\s:#-]*([A-Z0-9/-]+)", text, re.I)
+    number = re.search(
+        r"(?:fattura\s*(?:n[°º.]?|nr\.?|numero)?|n[°º.]|nr\.?|numero)[\s:#-]*([A-Z0-9][A-Z0-9/-]*)",
+        text,
+        re.I,
+    )
     total = re.findall(r"(?:totale\s+(?:documento|fattura)?)[\s€:]*([\d.,]+)", text, re.I)
-    return {"supplier": {"ragione_sociale": text.splitlines()[0][:180] or "Da verificare"}, "invoice": {"numero": number.group(1) if number else "DA-VERIFICARE", "data": date.today().isoformat(), "imponibile": "0", "iva": "0", "totale": str(decimal(total[-1])) if total else "0", "valuta": "EUR"}, "rows": [], "confidence": .45, "warnings": ["Controllare i campi estratti dal PDF"], "extracted_text": text}
+    imponibile_matches = re.findall(r"(?:imponibile|totale\s+imponibile)[\s€:]*([\d.,]+)", text, re.I)
+    iva_matches = re.findall(r"(?:totale\s+iva|iva\s+(?:a\s+debito)?)[\s€:]*([\d.,]+)", text, re.I)
+    parsed_date = _parse_invoice_date(text)
+    imponibile = str(decimal(imponibile_matches[-1])) if imponibile_matches else "0"
+    iva = str(decimal(iva_matches[-1])) if iva_matches else "0"
+    return {
+        "supplier": {"ragione_sociale": text.splitlines()[0][:180] or "Da verificare"},
+        "invoice": {
+            "numero": number.group(1) if number else "DA-VERIFICARE",
+            "data": parsed_date,
+            "imponibile": imponibile,
+            "iva": iva,
+            "totale": str(decimal(total[-1])) if total else "0",
+            "valuta": "EUR",
+        },
+        "rows": [],
+        "confidence": .45,
+        "warnings": ["Controllare i campi estratti dal PDF", "Righe prodotto non estratte dal PDF: preferire XML FatturaPA"],
+        "extracted_text": text,
+    }
 
 
 def parse_txt(path: Path) -> dict:
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = [x.strip() for x in text.splitlines() if x.strip()]
-    number = re.search(r"(?:fattura|documento|n\.?)[\s:#-]*([A-Z0-9/-]+)", text, re.I)
-    raw_date = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\b", text)
-    parsed_date = date.today().isoformat()
-    if raw_date:
-        candidate = raw_date.group(1)
-        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"):
-            try:
-                parsed_date = datetime.strptime(candidate, fmt).date().isoformat(); break
-            except ValueError:
-                pass
+    number = re.search(
+        r"(?:fattura\s*(?:n[°º.]?|nr\.?|numero)?|documento\s*(?:n[°º.]?|nr\.?|numero)?|n[°º.]|nr\.?|numero)[\s:#-]*([A-Z0-9][A-Z0-9/-]*)",
+        text,
+        re.I,
+    )
+    parsed_date = _parse_invoice_date(text)
     total_matches = re.findall(r"(?:totale\s+(?:documento|fattura)?)[\s€:]*([\d.,]+)", text, re.I)
     rows = []
     # Conservative generic parser: only lines ending with quantity/unit-price/total triplets become purchase rows.
