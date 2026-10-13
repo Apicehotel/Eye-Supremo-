@@ -8,7 +8,6 @@ from rapidfuzz import fuzz
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .auth_models import LocalCredential
-from .auth_service import DEFAULT_PIN, set_pin
 from .models import (
     Alert, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, InvoiceRowPolicy,
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
@@ -58,11 +57,11 @@ def seed_eye_supremo(db: Session) -> None:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
     db.flush()
-    # Permessi unificati: niente livelli; PIN standard 000000 per tutti i profili.
+    # Permessi unificati: niente livelli. Nessun PIN predefinito: al primo avvio
+    # si sceglie il PIN (bootstrap); i PIN esistenti non vengono mai toccati.
     for user in db.scalars(select(UserProfile)).all():
         user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
         user.can_manage_config = True
-        set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):
             db.add(ReviewCategory(name=name, auto_learned=False))
