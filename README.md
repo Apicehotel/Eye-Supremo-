@@ -40,7 +40,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `144 passed`;
+- backend: `140 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -66,7 +66,7 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-Al primo avvio ogni profilo usa un **PIN iniziale predefinito**, che va **cambiato subito** da **Sistema → Utenti e ruoli** (il valore non è riportato qui perché il repository è pubblico). I nuovi profili locali ereditano gli stessi permessi e il PIN iniziale predefinito, da cambiare al primo accesso.
+Il PIN predefinito di tutti i profili locali (Sviluppatore, Supremo e nuovi profili) è **`000000`**, ripristinato su richiesta del titolare; può essere cambiato da **Sistema → Utenti e ruoli**. Gli utenti centrali Supabase `supremo` e `sviluppatore` hanno anch’essi PIN `000000` (verificato). I PIN locali e quelli centrali sono sistemi distinti e **non si sincronizzano automaticamente**: se cambi il PIN dell’account centrale su Supabase, aggiorna anche `central_pin` (variabile `EYESUPREMO_CENTRAL_PIN`) su tutti i PC, altrimenti il download cache fallisce con «Credenziali non valide».
 
 Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
