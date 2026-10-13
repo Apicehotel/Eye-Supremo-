@@ -26,7 +26,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
 - recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
 - dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
-- login locale per profilo utente con PIN scelto dall'utente (nessun PIN predefinito); il login sviluppatore non è più obbligatorio;
+- login locale per profilo utente con PIN; il login sviluppatore non è più obbligatorio;
 - tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
@@ -66,7 +66,7 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
 
-**Non esiste un PIN predefinito.** Al primo avvio l'app chiede di scegliere il profilo e un PIN personale (6-12 cifre; sono rifiutate cifre tutte uguali e sequenze come `123456`). Gli altri profili ricevono il PIN da **Sistema → Utenti e ruoli**, dove ogni nuovo profilo richiede un PIN iniziale. I PIN esistenti non vengono mai sovrascritti all'avvio. Le installazioni precedenti che usano ancora il vecchio PIN banale devono sceglierne uno nuovo al prossimo accesso. I nuovi profili hanno gli stessi permessi degli altri.
+Al primo avvio ogni profilo usa un **PIN iniziale predefinito**, che va **cambiato subito** da **Sistema → Utenti e ruoli** (il valore non è riportato qui perché il repository è pubblico). I nuovi profili locali ereditano gli stessi permessi e il PIN iniziale predefinito, da cambiare al primo accesso.
 
 Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
 
@@ -269,7 +269,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 ## Sicurezza
 
 - dati reali locali per default;
-- autenticazione locale con PIN e sessione (nessun PIN predefinito, PIN banali rifiutati);
+- autenticazione locale con PIN e sessione (PIN iniziale da cambiare al primo accesso);
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
 - agenti con strumenti dichiarati e limitati;
