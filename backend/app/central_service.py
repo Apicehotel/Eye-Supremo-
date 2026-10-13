@@ -4,6 +4,25 @@ from rapidfuzz import fuzz
 from .config import settings
 
 
+def _check(response: httpx.Response) -> None:
+    """Come raise_for_status, ma include il motivo restituito dal server (es. 'Credenziali non valide')."""
+    if response.is_success:
+        return
+    detail = ""
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            detail = " - ".join(str(body[k]) for k in ("message", "details", "hint", "error", "msg") if body.get(k))
+    except Exception:  # noqa: BLE001
+        detail = (response.text or "")[:200]
+    path = response.request.url.path.rsplit("/", 1)[-1]
+    raise httpx.HTTPStatusError(
+        f"Supabase {response.status_code} su {path}: {detail or response.reason_phrase}",
+        request=response.request,
+        response=response,
+    )
+
+
 def configured() -> bool:
     return bool(settings.supabase_url and settings.supabase_publishable_key and settings.central_username and settings.central_pin)
 
@@ -39,7 +58,7 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
                     "limit": cap,
                 }
                 response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
+                _check(response)
                 data = response.json()
                 batch = data.get("items", []) if isinstance(data, dict) else []
                 for item in batch:
@@ -114,7 +133,7 @@ async def central_invoice_page(offset: int = 0, limit: int = 500, since: str | N
                         "line_total": row.get("line_total"), "analysis_status": row.get("analysis_status"),
                     })
             return {"items": list(grouped.values()), "offset": offset, "limit": limit, "total": len(grouped), "fallback": True}
-        response.raise_for_status()
+        _check(response)
 
 
 async def central_review_upsert(review: dict) -> dict:
@@ -123,7 +142,7 @@ async def central_review_upsert(review: dict) -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_review": review}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return {"enabled": True, "synced": True, "remote": response.json()}
 
 
@@ -133,7 +152,7 @@ async def central_review_page(offset: int = 0, limit: int = 500, since: str | No
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Authorization": f"Bearer {settings.supabase_publishable_key or ''}", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return response.json()
 
 
@@ -146,7 +165,7 @@ async def central_invoice_upsert(*, source_hash: str, source_filename: str, supp
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
+            _check(response)
         return {"enabled": True, "synced": True, "remote": response.json() if response.content else {}}
     except Exception as exc:
         return {"enabled": True, "synced": False, "message": str(exc)}
@@ -159,7 +178,7 @@ async def central_invoice_detail(source_hash: str) -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_source_hash": source_hash}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return response.json()
 
 
@@ -170,7 +189,7 @@ async def central_product_summary() -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin}
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return {"enabled": True, **(data if isinstance(data, dict) else {})}
 
@@ -183,7 +202,7 @@ async def central_product_page(query: str = "", limit: int = 200) -> dict:
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
+            _check(response)
             data = response.json()
         return {"enabled": True, **(data if isinstance(data, dict) else {})}
     except httpx.HTTPStatusError as exc:
@@ -202,7 +221,7 @@ async def central_product_detail(canonical_name: str) -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_canonical_name": canonical_name}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return data if isinstance(data, dict) else {"product": None, "history": []}
 
@@ -214,7 +233,7 @@ async def central_supplier_page(query: str = "", limit: int = 200) -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_query": query, "p_limit": max(1, min(limit, 2000))}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return {"enabled": True, **(data if isinstance(data, dict) else {"items": []})}
 
@@ -226,6 +245,6 @@ async def central_supplier_detail(supplier_id: str) -> dict:
     payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_supplier_id": supplier_id}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return data if isinstance(data, dict) else {"supplier": None, "invoices": [], "categories": []}
