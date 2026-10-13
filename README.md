@@ -42,7 +42,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `148 passed`;
+- backend: `152 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -178,6 +178,8 @@ Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere
 **Fattura di riferimento su ogni ricerca prodotto:** ogni riga prodotto (Fatture → risultati locali e cache/centrale, Prodotti → storico acquisti, Ask Fatture → «Dati fatture verificati») ha il pulsante **Apri** che mostra la fattura completa in un pannello laterale, con la riga cercata evidenziata e la fonte (archivio locale, cache del PC, archivio centrale). Backend: `GET /api/eye/invoice-ref/{ref}` dove `ref` è l’id fattura locale o lo `source_hash` centrale; ordine di ricerca: locale → cache PC → Supabase. Se la fattura non è disponibile (né locale né in cache né online) il pannello lo dice chiaramente.
 
 **Report storico completo (tutti i fornitori):** il report storico unisce le fatture importate in locale **e** quelle scaricate nella cache del PC (archivio centrale), senza doppioni (stessa fattura riconosciuta per hash o per fornitore+numero+data). Cercando ad esempio «bomboloni» compaiono tutti i fornitori che li hanno venduti, con prezzi confrontati sulla stessa unità. Ogni acquisto nella matrice ha il link «fattura N» che apre la fattura di riferimento. Se la cache è incompleta il report lo segnala. L’API `GET /api/eye/reports/history-product` include `sources` (righe locali/cache, numero fornitori, `cache_complete`).
+
+**Ricerca per parte di parola:** dal filtro nomi prodotto (elenco Prodotti, suggerimenti e report storico da archivio centrale) una parte di parola di almeno 4 caratteri trova le parole più lunghe: «bombo» trova «bombolino» e «minibombolini», «limon» trova «limoncello». Sotto i 4 caratteri la ricerca resta rigida. Corretto anche un crash del filtro su «carta igienica».
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 

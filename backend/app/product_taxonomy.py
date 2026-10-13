@@ -310,15 +310,19 @@ def is_product_search_match(description: str, query: str) -> bool:
         return True
     if is_non_product_query(query_text):
         return False
+    tokens = set(text.split())
     if query_text in PRODUCT_FAMILY_ALIASES:
         if query_text in {"c igienica", "carta igienica", "c ig"}:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
         return is_family_match(description, query_text)
     terms = search_terms(query_text)
-    tokens = set(text.split())
 
     def matches(token: str) -> bool:
         if token in tokens:
+            return True
+        # Ricerca per parte di parola: «bombo» trova «bombolino», «limon» trova «limoncello».
+        # Sotto i 4 caratteri sarebbe troppo largo (es. «car», «ac»).
+        if len(token) >= 4 and any(token in candidate for candidate in tokens):
             return True
         # Accept small typographical errors such as ``igenica``/``igienica``
         # without turning short or unrelated searches into broad matches.
