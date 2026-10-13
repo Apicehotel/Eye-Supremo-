@@ -15,7 +15,7 @@ from .database import SessionLocal
 from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
-from .report_service import historical_product_report
+from .report_service import _cache_complete, historical_product_report
 from .review_cache import cached_review_search
 from .product_taxonomy import (
     diversify_by_supplier,
@@ -460,9 +460,11 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         # 3) Se ancora vuoto dopo il filtro prodotto: stessa fonte delle Liste → Supabase.
         sources = {"local", "sqlite-cache"}
         filtered = _filter_product_rows(all_rows, product_needle)
-        if not filtered and central_configured():
+        # Anche con qualche riga locale: se la cache PC non è verificata completa, integra dalla centrale
+        # (altrimenti un prodotto presente solo su Supabase risulta con 1 fornitore o nessuno).
+        if central_configured() and (not filtered or _cache_complete(db) is not True):
             try:
-                central = await central_invoice_search(search_query, limit=500)
+                central = await asyncio.wait_for(central_invoice_search(search_query, limit=500), timeout=25)
             except Exception:
                 central = {"items": []}
             for item in central.get("items") or []:
@@ -635,7 +637,8 @@ def _deterministic_answer(
         return {
             "answer": (
                 f"Per {hist_summary.get('product') or product_label} ho confrontato "
-                f"{match_total} righe prodotto tra {len(supplier_blocks) or context.get('supplier_count') or 1} fornitori. "
+                f"{match_total} {'riga prodotto' if match_total == 1 else 'righe prodotto'} tra "
+                f"{(len(supplier_blocks) or context.get('supplier_count') or 1)} {'fornitore' if (len(supplier_blocks) or context.get('supplier_count') or 1) == 1 else 'fornitori'}. "
                 f"Il più conveniente è {hist_summary['best_supplier']} "
                 f"(media € {float(hist_summary['best_supplier_average']):.4f}/{unit} "
                 f"su {hist_summary['best_supplier_observations']} osservazioni; "

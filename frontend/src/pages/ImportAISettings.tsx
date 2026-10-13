@@ -449,7 +449,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
             </div>
             <p>{answer.answer}</p>
             {answer.agents?.length > 0 && (
-              <small>
+              <small style={{ display: "block", marginTop: 6 }}>
                 Agenti: {answer.agents.map((a: any) => a.name).join(" → ")}
                 {answer.ai_model ? ` · modello ${answer.ai_model}` : ""}
               </small>
