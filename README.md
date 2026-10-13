@@ -294,3 +294,12 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
 - il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;
 - `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.
+
+
+## Riconoscimento prodotti (Open Food Facts)
+
+Ogni prodotto in elenco e nella selezione del report storico mostra categoria, marca e provenienza riconosciute dalla descrizione di fattura. Il riconoscimento è **locale e offline**: usa un dizionario di categorie in italiano ricavato dalla tassonomia di [Open Food Facts](https://it.openfoodfacts.org/) (licenza ODbL, © contributori Open Food Facts), integrato con marche e voci non alimentari (energia, lavanderia, imposte…) tipiche delle fatture.
+
+- Dizionario: `backend/app/data/off_categories_it.json`, rigenerabile con `python scripts/build_off_categories.py`.
+- Nessuna chiamata all'API di Open Food Facts a runtime (limiti di richieste e uso offline).
+- Marche e famiglie si estendono in `backend/app/product_recognition.py` (`BRANDS`, `NON_FOOD`, `EXTRA_FOODS`).
