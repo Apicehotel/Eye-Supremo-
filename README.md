@@ -328,3 +328,7 @@ Cercando un prodotto (es. «crostata», «marmellata») l'elenco e la scelta del
 ### Simulazione su dati reali (ricerca prodotti)
 
 Verificati banane, birra, caffè, latte, mozzarella, pomodori, prosciutto, uova, yogurt: ogni prodotto resta una sola voce con tutti i produttori. Correzioni: la ricerca per parte di parola scatta in mezzo alla parola solo da 6 caratteri (così «uova» non trova «nuova»), parole di confezione (sgrassato, vassoio, busta) non escludono più un alimento, e «MOZZ.» è riconosciuto come mozzarella.
+
+### Ricerca esatta con le virgolette
+
+Scrivendo la parola tra virgolette (`"olio"`, anche in Ask: «chi mi vende "olio"?») la ricerca trova solo la **parola intera**: niente parti di parola, sinonimi o correzioni (`"olio"` non trova «gasolio»). Senza virgolette resta la ricerca flessibile. In più: «vino» non trova più «bovino/ovino», «olio» non trova «gasolio» (le parole corte contano solo a inizio parola) e i tovaglioli di carta sono «Monouso e tavola» e si uniscono in un solo prodotto, distinti dal servizio di lavanderia.

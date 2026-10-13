@@ -183,6 +183,10 @@ def _find_brand(tokens: list[str]) -> str | None:
 def _find_non_food(tokens: list[str]) -> str | None:
     token_set = set(tokens)
     joined = " ".join(tokens)
+    # Tovaglioli di carta (plurale o con «2V», «PZ», «CT») ≠ tovagliolo di stoffa a noleggio.
+    if token_set & {"tovagliolo", "tovaglioli"} and not token_set & {"lavanolo", "lavaggio", "servizio", "noleggio"}:
+        if "tovaglioli" in token_set or token_set & {"2v", "carta", "veline"} or any(t.endswith("pz") or t.startswith("ct") for t in token_set):
+            return "Monouso e tavola"
     for family, words in NON_FOOD:
         for word in words:
             if (" " in word and word in joined) or word in token_set:

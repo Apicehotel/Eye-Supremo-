@@ -47,3 +47,28 @@ def test_alimento_con_parola_di_confezione_resta():
     wanted = recognize("prosciutto")
     assert compatible(wanted, recognize("PROSCIUTTO COTTO SGRASSATO 1KG"))
     assert compatible(recognize("mozzarella"), recognize("MOZZARELLA IN BUSTA 125G"))
+
+
+def test_parole_corte_solo_a_inizio_parola():
+    from app.product_taxonomy import description_matches_product
+    assert not description_matches_product("MACINATO BOVINO ADULTO", "vino")
+    assert not description_matches_product("GASOLIO", "olio")
+    assert description_matches_product("VINO BIANCO UMBRIA 75CL", "vino")
+    assert description_matches_product("OLIO EVO 5 L", "olio")
+
+
+def test_tovaglioli_di_carta_sono_monouso():
+    from app.product_recognition import recognize
+    assert recognize("TOVAGLIOLO 33X33 2V BIANCO 2700PZ")["category"] == "Monouso e tavola"
+    assert recognize("Servizio di Lavanolo per TOVAGLIOLO CREMA")["category"] == "Lavanderia e biancheria a noleggio"
+
+
+def test_virgolette_ricerca_esatta():
+    from app.product_taxonomy import (description_matches_product, exact_phrases, extract_product_query,
+                                      is_product_search_match, row_matches_product_query)
+    assert exact_phrases('chi vende "olio"?') == ["olio"]
+    assert extract_product_query('chi vende "olio"?') == '"olio"'
+    for fn in (is_product_search_match, description_matches_product, row_matches_product_query):
+        assert fn("OLIO EVO 5 L", '"olio"')
+        assert not fn("GASOLIO AUTOTRAZIONE", '"olio"')
+        assert not fn("OLIOSO", '"olio"')
