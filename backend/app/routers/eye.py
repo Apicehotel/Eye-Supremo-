@@ -593,35 +593,10 @@ def central_sync_status(role: str = Depends(current_role)):
 
 @router.get("/central/summary")
 def central_summary(role: str = Depends(current_role), db: Session = Depends(get_db)):
-    """Dashboard KPIs backed by the complete central invoice cache."""
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
-    offline = False
-    if not records:
-        records = list(db.scalars(select(Invoice).order_by(Invoice.data.desc())).all())
-        offline = True
-    now = date.today()
-    monthly: dict[str, Decimal] = {}
-    suppliers = set()
-    recent = []
-    credits = Decimal("0")
-    credit_documents = 0
-    for record in records:
-        invoice_date = record.invoice_date if isinstance(record, CentralInvoiceCache) else record.data
-        total = record.total if isinstance(record, CentralInvoiceCache) else record.totale
-        supplier_name = record.supplier_name if isinstance(record, CentralInvoiceCache) else (record.supplier.ragione_sociale if record.supplier else "")
-        key = invoice_date.strftime("%Y-%m")
-        monthly[key] = monthly.get(key, Decimal("0")) + (total or Decimal("0"))
-        if (total or Decimal("0")) < 0:
-            credits += total or Decimal("0")
-            credit_documents += 1
-        suppliers.add(supplier_name)
-        if len(recent) < 6:
-            recent.append({"id": record.source_hash if isinstance(record, CentralInvoiceCache) else record.id, "numero": record.invoice_number if isinstance(record, CentralInvoiceCache) else record.numero, "data": invoice_date.isoformat(), "imponibile": None if isinstance(record, CentralInvoiceCache) else float(record.imponibile), "iva": None if isinstance(record, CentralInvoiceCache) else float(record.iva), "totale": float(total or 0), "valuta": "EUR", "stato_importazione": "Cache locale" if offline else "Supabase", "file_originale": record.payload_json if isinstance(record, CentralInvoiceCache) else record.file_originale, "supplier": {"id": supplier_name, "ragione_sociale": supplier_name}, "row_count": 0})
-    totals = sum(((r.total if isinstance(r, CentralInvoiceCache) else r.totale) or Decimal("0")) for r in records)
-    dates = [r.invoice_date if isinstance(r, CentralInvoiceCache) else r.data for r in records]
-    return {"offline": offline, "kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": min(dates).isoformat() if dates else None, "to": max(dates).isoformat() if dates else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
+    from ..dashboard_service import dashboard_snapshot
+    return {"offline": not central_configured(), **dashboard_snapshot(db), "anomalies": []}
 
 
 @router.get("/cache/bootstrap/status")
@@ -655,3 +630,4 @@ async def sync_push(payload: dict, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     return await push_to_supabase(payload)
+

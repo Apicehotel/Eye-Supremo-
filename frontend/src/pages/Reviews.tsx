@@ -1,3 +1,4 @@
+import {useLatestRequest} from '../hooks/useLatestRequest';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {MessageSquareText,MessageSquareWarning,Star,Search,UploadCloud,Trophy,TriangleAlert,Printer} from 'lucide-react';
 import {PageHeader,Status} from '../components/UI';
@@ -19,9 +20,10 @@ export default function Reviews(){
  const user=currentUser(); const canSeeAll=Boolean(user);
  const [hotels,setHotels]=useState<Hotel[]>([]),[hotel,setHotel]=useState(canSeeAll?'all':''),[view,setView]=useState<'overview'|'ranking'|'reviews'|'anonymous'|'anonymous-ranking'|'online'|'history'>('overview'),[query,setQuery]=useState(''),[sourceFilter,setSourceFilter]=useState('all'),[ratingFilter,setRatingFilter]=useState('all'),[sortBy,setSortBy]=useState('date_desc'),[reviews,setReviews]=useState<Review[]>([]),[rank,setRank]=useState<Ranking>({best_rooms:[],worst_rooms:[],best_services:[],worst_services:[]}),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[expanded,setExpanded]=useState<number|string|null>(null);
  const input=useRef<HTMLInputElement>(null); const selected=hotels.find(h=>h.code===hotel);
- const load=async()=>{const hotelParam=hotel&&hotel!=='all'?`?hotel_code=${hotel}`:'';const [r,k]=await Promise.all([eyeApi<Review[]>(`/reviews${hotelParam}`),eyeApi<Ranking>(`/rankings${hotelParam}`)]);setReviews(r);setRank(k)};
+ const requests=useLatestRequest();
+ const load=async()=>{const request=requests.start();const hotelParam=hotel&&hotel!=='all'?`?hotel_code=${hotel}`:'';const [r,k]=await Promise.all([eyeApi<Review[]>(`/reviews${hotelParam}`,{signal:request.signal}),eyeApi<Ranking>(`/rankings${hotelParam}`,{signal:request.signal})]);if(request.current()){setReviews(r);setRank(k)}};
  useEffect(()=>{eyeApi<Hotel[]>('/hotels').then(h=>{setHotels(h);if(!canSeeAll&&h[0])setHotel(h[0].code)})},[]);
- useEffect(()=>{if(hotel)load().catch(()=>{})},[hotel]);
+ useEffect(()=>{if(hotel)load().catch(()=>{});return()=>requests.cancel()},[hotel,requests]);
  useEffect(()=>{const onView=(e:Event)=>{const next=(e as CustomEvent).detail;if(next==='overview'||next==='ranking'||next==='reviews'||next==='anonymous'||next==='anonymous-ranking'||next==='online'||next==='history')setView(next)};window.addEventListener('eye-review-view',onView);return()=>window.removeEventListener('eye-review-view',onView)},[]);
  const visible=useMemo(()=>{const q=query.trim().toLowerCase();const isPositive=(r:Review)=>r.rating!==null&&(r.source==='Google'?r.rating>=4:r.rating>=6);const isNegative=(r:Review)=>r.rating!==null&&(r.source==='Google'?r.rating<=3:r.rating<=5);const filtered=reviews.filter(r=>{const haystack=(r.text+' '+(r.room||'')+' '+r.hotel+' '+r.tags.map(t=>t.category).join(' ')).toLowerCase();const ratingMatch=ratingFilter==='all'||(ratingFilter==='rated'?r.rating!==null:ratingFilter==='unrated'?r.rating===null:ratingFilter==='positive'?isPositive(r):isNegative(r));return (!q||haystack.includes(q))&&(sourceFilter==='all'||(r.source||'TXT')===sourceFilter)&&ratingMatch});return [...filtered].sort((a,b)=>{if(sortBy.startsWith('rating')){const ar=a.rating??(sortBy==='rating_desc'?-Infinity:Infinity),br=b.rating??(sortBy==='rating_desc'?-Infinity:Infinity);return sortBy==='rating_desc'?br-ar:ar-br}const cmp=a.date.localeCompare(b.date);return sortBy==='date_desc'?-cmp:cmp})},[reviews,query,sourceFilter,ratingFilter,sortBy]);
  const rated=visible.filter(r=>r.rating!==null); const avg=rated.length?rated.reduce((a,r)=>a+(r.rating||0),0)/rated.length:0; const anonymous=visible.filter(r=>!r.room?.trim()); const listed=view==='anonymous'?anonymous:visible;
@@ -47,3 +49,4 @@ export default function Reviews(){
  {view==='online'&&<>{onlineHotelsSection}{onlineRanking}</>}
  </>;
 }
+

@@ -1,4 +1,4 @@
-import hashlib, json, re, shutil, zipfile
+import hashlib, json, re, shutil, sqlite3, tempfile, uuid, zipfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -133,9 +133,39 @@ async def answer_with_ollama(question: str, records: list[dict], db=None):
 
 
 def create_backup() -> Path:
-    target = settings.data_dir / "backups" / f"randfatture-{datetime.now():%Y%m%d-%H%M%S}.zip"
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in settings.data_dir.rglob("*"):
-            if path.is_file() and path != target and "backups" not in path.parts:
-                archive.write(path, path.relative_to(settings.data_dir))
+    """Snapshot SQLite coerente anche con WAL e scritture concorrenti."""
+    data_dir = settings.data_dir.resolve()
+    backup_dir = data_dir / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    target = backup_dir / f"eyesupremo-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.zip"
+    partial = target.with_suffix(".zip.partial")
+    source = data_dir / "eye-supremo.db"
+    if not source.is_file():
+        raise RuntimeError("Database locale non disponibile per il backup")
+    try:
+        with tempfile.TemporaryDirectory(prefix="eye-backup-") as scratch:
+            snapshot = Path(scratch) / source.name
+            with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(snapshot) as dst:
+                src.backup(dst, pages=256)
+                result = dst.execute("PRAGMA integrity_check").fetchone()
+                if result != ("ok",):
+                    raise RuntimeError("La verifica del database di backup non è riuscita")
+            with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(snapshot, source.name)
+                for path in data_dir.rglob("*"):
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    relative = path.relative_to(data_dir)
+                    if relative.parts[0] in {"backups", "updates"} or path.name in {source.name, source.name+'-wal', source.name+'-shm', source.name+'-journal'}:
+                        continue
+                    archive.write(path, relative)
+                archive.writestr("backup-manifest.json", json.dumps({"app": "Eye Supremo", "database": source.name,
+                                  "created_at": datetime.now().isoformat(), "integrity_check": "ok"}))
+            with zipfile.ZipFile(partial) as archive:
+                if archive.testzip() is not None:
+                    raise RuntimeError("Archivio di backup non valido")
+            partial.replace(target)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
     return target

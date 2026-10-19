@@ -23,47 +23,9 @@ def health(): return {"status": "ok", "app": "Eye Supremo"}
 
 
 @router.get("/dashboard")
-async def dashboard(db: Session = Depends(get_db)):
-    central = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
-    if central:
-        now = date.today()
-        monthly: dict[str, float] = {}
-        annual: dict[str, dict[str, float]] = {}
-        suppliers = set()
-        for record in central:
-            if float(record.total or 0) < 0:
-                continue
-            key = record.invoice_date.strftime("%Y-%m")
-            monthly[key] = monthly.get(key, 0) + float(record.total or 0)
-            year = record.invoice_date.strftime("%Y")
-            annual.setdefault(year, {"total": 0, "invoices": 0})
-            annual[year]["total"] += float(record.total or 0)
-            annual[year]["invoices"] += 1
-            suppliers.add(record.supplier_name)
-        total_spent = sum(float(x.total or 0) for x in central if float(x.total or 0) >= 0)
-        credit_documents = sum(1 for x in central if float(x.total or 0) < 0)
-        credit_total = sum(float(x.total or 0) for x in central if float(x.total or 0) < 0)
-        def central_recent(record):
-            payload = json.loads(record.payload_json or "{}")
-            return {"id": record.source_hash, "numero": record.invoice_number, "data": record.invoice_date.isoformat(), "imponibile": float(payload.get("taxable") or 0), "iva": float(payload.get("vat") or 0), "totale": float(record.total or 0), "valuta": payload.get("currency") or "EUR", "stato_importazione": "Supabase", "file_originale": payload.get("source_filename") or "", "supplier": {"id": record.source_hash, "ragione_sociale": record.supplier_name}, "row_count": len(payload.get("rows") or [])}
-        latest_month = max(monthly) if monthly else None
-        try:
-            product_summary = await central_product_summary()
-            product_count = int(product_summary.get("distinct_products") or 0)
-        except Exception:
-            product_count = 0
-        spendable = [x for x in central if float(x.total or 0) >= 0]
-        return {"kpis": {"invoices": len(spendable), "total_spent": total_spent, "month_spent": monthly.get(now.strftime("%Y-%m"), 0), "suppliers": len(suppliers), "products": product_count}, "period": {"from": spendable[-1].invoice_date.isoformat(), "to": spendable[0].invoice_date.isoformat(), "latest_month": latest_month, "latest_month_spent": monthly.get(latest_month, 0) if latest_month else 0, "credit_documents": credit_documents, "credit_total": credit_total}, "annual": [{"year": k, **v} for k, v in sorted(annual.items())], "monthly": [{"month": k, "total": v} for k, v in sorted(monthly.items())[-24:]], "recent": [central_recent(x) for x in spendable[:6]], "anomalies": []}
-    invoices = db.scalar(select(func.count(Invoice.id))) or 0
-    spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0)).where(Invoice.totale >= 0)) or 0)
-    now = date.today()
-    month_spent = float(db.scalar(select(func.coalesce(func.sum(Invoice.totale), 0)).where(Invoice.totale >= 0, func.strftime("%Y-%m", Invoice.data) == now.strftime("%Y-%m"))) or 0)
-    supplier_count = db.scalar(select(func.count(Supplier.id))) or 0
-    product_count = db.scalar(select(func.count(Product.id))) or 0
-    monthly = db.execute(select(func.strftime("%Y-%m", Invoice.data), func.sum(Invoice.totale)).where(Invoice.totale >= 0).group_by(func.strftime("%Y-%m", Invoice.data)).order_by(func.strftime("%Y-%m", Invoice.data)).limit(24)).all()
-    annual = db.execute(select(func.strftime("%Y", Invoice.data), func.sum(Invoice.totale), func.count(Invoice.id)).where(Invoice.totale >= 0).group_by(func.strftime("%Y", Invoice.data)).order_by(func.strftime("%Y", Invoice.data))).all()
-    recent = db.scalars(select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).where(Invoice.totale >= 0).order_by(Invoice.created_at.desc()).limit(6)).all()
-    return {"kpis": {"invoices": invoices, "total_spent": spent, "month_spent": month_spent, "suppliers": supplier_count, "products": product_count}, "annual": [{"year": y, "total": float(total), "invoices": count} for y, total, count in annual], "monthly": [{"month": m, "total": float(v)} for m, v in monthly], "recent": [serialize_invoice(x) for x in recent], "anomalies": detect_anomalies(db)[:5]}
+def dashboard(db: Session = Depends(get_db)):
+    from ..dashboard_service import dashboard_snapshot
+    return {**dashboard_snapshot(db), "anomalies": detect_anomalies(db)[:5]}
 
 
 def serialize_invoice(i):
@@ -386,3 +348,4 @@ def spending_csv(db: Session = Depends(get_db)):
     rows = db.execute(select(func.strftime("%Y-%m", Invoice.data), func.sum(Invoice.totale)).group_by(func.strftime("%Y-%m", Invoice.data))).all()
     body = "mese;totale\n" + "\n".join(f"{m};{float(v):.2f}" for m, v in rows)
     return Response(body, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=spesa-mensile.csv"})
+

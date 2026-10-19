@@ -10,12 +10,15 @@ on:
   push:
     tags:
       - 'v*'
+    branches: [main]
+    paths: ['installer/EyeSupremo.iss']
 
 permissions:
   contents: write
 
 jobs:
   release-windows:
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[release]')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,15 +36,19 @@ jobs:
       - name: Risolvi versione
         id: version
         shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "name=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$RELEASE_VERSION_INPUT" ]; then
+            version="$RELEASE_VERSION_INPUT"
+          elif [ "$GITHUB_REF_TYPE" = 'tag' ]; then
+            version="${GITHUB_REF_NAME#v}"
           else
-            raw="${GITHUB_REF_NAME}"
-            echo "tag=${raw}" >> "$GITHUB_OUTPUT"
-            echo "name=${raw#v}" >> "$GITHUB_OUTPUT"
+            version=$(node -p 'JSON.parse(require("fs").readFileSync("frontend/package.json","utf8")).version')
           fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Versione non valida'; exit 1; }
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "name=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verifica versione installer
         shell: powershell
@@ -91,7 +98,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: Eye Supremo ${{ steps.version.outputs.name }}
           files: release/EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
+
