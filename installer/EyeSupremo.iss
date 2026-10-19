@@ -1,3 +1,4 @@
+; Release 2.0.15: servizi Eye Supremo attivati e verificati il 20 ottobre 2026.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo

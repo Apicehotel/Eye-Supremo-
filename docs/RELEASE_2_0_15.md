@@ -12,9 +12,19 @@ Lo schema è privato, con RLS e senza accesso `anon`/`authenticated`.
 Non contiene una copia delle fatture o delle recensioni, che la migrazione non
 modifica. Non sostituisce i backup completi del progetto Supabase.
 
-Migrazione e distribuzione delle funzioni non sono state eseguite: la revisione
-automatica richiede un'approvazione esplicita del cambiamento di autenticazione in
-produzione. Non pubblicare l'installer prima dell'attivazione e della verifica.
+Il 20 ottobre 2026 (Europe/Rome), dopo approvazione esplicita, sono state applicate
+la migrazione delle identità e le funzioni `eye-identity` (v1) e
+`eye-central-gateway` (v6). Le modifiche riguardano soltanto gli oggetti Eye Supremo:
+schema `eye_supremo` e wrapper `public.eye_central_*` già esistenti.
+
+Verifiche in produzione: disponibilità del servizio (HTTP 200), rifiuto delle
+richieste senza sessione o con credenziali non valide (HTTP 401), RLS attiva e
+assenza di lettura diretta delle sessioni da `anon`. I conteggi di utenti, fatture
+e recensioni sono rimasti invariati. Non sono stati creati profili di prova:
+la revisione automatica ha richiesto un'approvazione specifica per tale operazione.
+La verifica autenticata su due PC reali resta da completare durante il rollout.
+La CI sul commit integrato ha superato tutti i controlli; la build Windows della
+PR ha superato anche lo smoke test e la compilazione dell'installer.
 
 ## Sequenza di rilascio
 
