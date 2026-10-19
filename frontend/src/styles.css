@@ -213,3 +213,6 @@ body{background:#f7f8fa;color:var(--ink)}
 .invoice-ref-hit td{background:#fff4e5}
 
 .recognized-tag{display:block;color:var(--muted,#667085);font-size:11px;margin-top:2px}
+
+
+.offline-auth-banner{padding:8px 16px;background:#fff3cc;color:#624700;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;font-size:14px}.offline-auth-banner button{border:1px solid currentColor;background:transparent;border-radius:6px;padding:4px 10px;color:inherit;cursor:pointer}

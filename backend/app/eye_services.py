@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .auth_models import LocalCredential
 from .auth_service import DEFAULT_PIN, set_pin
+from .config import settings
 from .models import (
     Alert, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, InvoiceRowPolicy,
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
@@ -62,7 +63,7 @@ def seed_eye_supremo(db: Session) -> None:
     for user in db.scalars(select(UserProfile)).all():
         user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
         user.can_manage_config = True
-        if db.get(LocalCredential, user.id) is None:
+        if not settings.central_identity_enabled and db.get(LocalCredential, user.id) is None:
             set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 from .models import UserProfile
@@ -21,3 +21,14 @@ class LocalSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     user: Mapped[UserProfile] = relationship()
+
+
+class CentralAccount(Base):
+    """Solo metadati; il verificatore PIN resta in LocalCredential dopo login online."""
+    __tablename__ = "central_accounts"
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id", ondelete="CASCADE"), primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True)
+    auth_version: Mapped[int] = mapped_column(Integer, default=0)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    offline_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+

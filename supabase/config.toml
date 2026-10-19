@@ -1,0 +1,8 @@
+project_id = "eye-supremo"
+
+# Queste funzioni autenticano PIN/token personali nel proprio corpo.
+[functions.eye-identity]
+verify_jwt = false
+
+[functions.eye-central-gateway]
+verify_jwt = false

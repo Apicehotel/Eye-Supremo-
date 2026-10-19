@@ -42,7 +42,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
 - recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
 - dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
-- login locale per profilo utente con PIN; il login sviluppatore non è più obbligatorio;
+- login personale centrale con PIN e autorizzazione offline sul PC;
 - tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
@@ -52,7 +52,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
 - parsing XML FatturaPA dei riepiloghi fiscali tramite `DatiRiepilogo`, con imponibile, IVA e totale coerenti;
 - import PDF/TXT più affidabile e somma delle spese calcolata sulle righe pertinenti;
-- autenticazione centrale Supabase verificata per gli utenti `supremo` e `sviluppatore`; i PIN locali e centrali restano sistemi distinti.
+- profili centrali personali con cache del verificatore solo dopo un login online riuscito; modalità precedente disponibile esplicitamente per compatibilità.
 
 ### Verificato
 
@@ -65,7 +65,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Da completare
 
-- sicurezza accessi: rimuovere il PIN predefinito dalla UI e imporre il cambio PIN al primo accesso;
+- sicurezza accessi: imporre il cambio PIN al primo accesso (il PIN predefinito non è più mostrato dalla UI);
 - pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
 - verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
@@ -80,15 +80,21 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 
 ## Accesso e permessi
 
-Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea i profili **Sviluppatore** e **Supremo** con lo **stesso livello operativo** su tutti gli hotel e sulle funzioni dell'app (fatture, recensioni, configurazione, utenti). I livelli utente (Livello 1 / 2 / 3) sono stati eliminati.
+I profili sono condivisi su Supabase e usano username e PIN personali. Il primo
+accesso su ogni PC richiede Internet; dopo la verifica l'accesso offline è
+consentito per 7 giorni senza rinnovo automatico. Creazione utenti, cambio PIN e
+disattivazione avvengono nel centrale e richiedono Internet. Il riavvio del PC
+conserva il PIN scelto; nessun verificatore degli altri utenti viene scaricato.
 
-Al primo avvio i profili locali (Sviluppatore, Supremo e nuovi profili) usano un **PIN iniziale predefinito**, che il titolare comunica a voce e che si cambia da **Sistema → Utenti e ruoli** (il valore non è riportato qui né nei commit perché il repository è pubblico). I PIN locali e quelli dell’account centrale Supabase sono sistemi distinti e **non si sincronizzano automaticamente**: se cambi il PIN dell’account centrale su Supabase, aggiorna anche `central_pin` (variabile `EYESUPREMO_CENTRAL_PIN`) su tutti i PC, altrimenti il download cache fallisce con «Credenziali non valide».
+Gli utenti `developer` e `supremo` mantengono gli stessi permessi operativi. Per le
+recensioni ogni profilo vede tutti gli hotel; le fatture restano nell'archivio unico
+Apice. Gli account precedentemente creati solo sul PC vanno registrati nel centrale.
 
-**Regola di repository:** README, docs e messaggi di commit non contengono mai PIN, password, token o altri dati sensibili.
-
-Per le recensioni ogni profilo vede **Tutti gli hotel** oltre alle sezioni Giò / Choco / Brigantino.
-
-Per le fatture la visibilità resta aziendale Apice; le fatture **non vengono separate in tre archivi hotel**.
+**Attivazione:** prima di aggiornare i PC applicare la migrazione e distribuire le
+funzioni descritte in [docs/CENTRAL_IDENTITY.md](docs/CENTRAL_IDENTITY.md). La modalità
+locale precedente resta configurabile esplicitamente; la nuova autenticazione non
+usa credenziali centrali condivise. README, docs e commit non devono contenere
+credenziali reali o token.
 
 ## Fatture: archivio unico Apice
 
@@ -199,7 +205,7 @@ Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 
-**Bootstrap all’installazione:** al primo avvio (o con cache vuota) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
+**Bootstrap dopo il login online:** dopo la verifica personale (con cache vuota o incompleta) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
 
 **Stato cache a colpo d’occhio:** nella barra laterale c’è un indicatore (verde = completa, ambra = in corso/non verificata/parziale, rosso = errore o vuota) e nella Dashboard una scheda con barra di avanzamento («X di Y fatture · mancano N»). Il download confronta le fatture locali con il totale centrale: se mancano record (o il fallback ha scaricato solo le prime 500) la cache è marcata *incompleta*, non viene salvato il checkpoint e al prossimo avvio il download riprende da solo. Pulsante *Completa download* per forzarlo. Gli errori di Supabase mostrano il motivo restituito dal server (es. `Supabase 400 su eye_central_invoice_page: Credenziali non valide`) invece del solo «400 Bad Request». API: `GET /cache/bootstrap/status` → `health`, `headline`, `progress`, `invoices{local,remote_total,percent,missing}`, `ready_offline`.
 
@@ -247,7 +253,7 @@ EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
 EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 ```
 
-La replica centrale è disponibile con le credenziali Eye dell'utente centrale (non riportate qui; vanno impostate in locale tramite variabili d'ambiente). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
+La replica centrale usa il token personale ottenuto dal login online; nessun PIN centrale condiviso viene usato nella nuova modalità. L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
 
 ## Avvio sviluppo
 
@@ -302,7 +308,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 - upload con limiti e nomi generati;
 - hash duplicati;
 - audit log;
-- sync remota centrale autenticata con PIN e paginazione;
+- sync remota centrale con sessione personale revocabile e paginazione;
 - nessun token reale committato.
 
 ## Limitazioni note
@@ -324,9 +330,11 @@ Ogni prodotto in elenco e nella selezione del report storico mostra categoria, m
 ### Ask Fatture: integrazione dalla centrale
 Se la cache PC non è verificata completa, Ask integra sempre i risultati locali con una ricerca su Supabase (timeout 25 s), così un prodotto presente solo nell'archivio centrale mostra tutti i fornitori e non una riga sola.
 
-### Credenziali centrali e variabili d'ambiente
+### Credenziali centrali e variabili d'ambiente (modalità precedente)
+
+Queste variabili sono usate soltanto con `EYESUPREMO_CENTRAL_IDENTITY_ENABLED=false`. Nella modalità centrale personale si usa il login, senza override condivisi.
 Le vecchie variabili Windows `EYESUPREMO_CENTRAL_USERNAME` e `EYESUPREMO_CENTRAL_PIN` vengono ignorate (causavano «Credenziali non valide» dopo il ripristino del PIN predefinito). Per cambiare le credenziali centrali si usano `EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` e `EYESUPREMO_CENTRAL_PIN_OVERRIDE`.
-La sincronizzazione recensioni non invia più un checkpoint vuoto come data (errore «invalid input syntax for type timestamp»), e l'errore «Credenziali non valide» indica utente e lunghezza PIN usati (mai il PIN).
+La sincronizzazione recensioni non invia più un checkpoint vuoto come data (errore «invalid input syntax for type timestamp»), e l'errore «Credenziali non valide» indica l'utente, senza esporre PIN o token.
 
 ### Ask Fatture: pertinenza dei risultati
 Ask tiene solo le righe la cui **descrizione** è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile, usando il riconoscimento prodotti: autofatture/voci contabili e accessori (es. «molla portacarta igienica») non finiscono più nel confronto prezzi. Se l'archivio centrale non risponde, Ask lo segnala con il motivo invece di mostrare un risultato parziale senza avvisi.
@@ -356,3 +364,4 @@ Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la f
 ### Nomi equivalenti fusi anche nell'elenco catalogo
 
 Anche senza ricerca (elenco catalogo, suggerimenti) le voci che sono lo stesso prodotto scritto in modo diverso diventano **una sola riga** con tutti i produttori: «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate», «crostate marmellate». Si confrontano le parole utili senza articoli/preposizioni e senza desinenza (plurale/femminile), con «marm» = marmellata. Formati e misure restano nell'impronta (acqua 75x12 ≠ acqua 100x12) e si fondono solo voci della stessa famiglia riconosciuta. I nomi originali restano in `canonical_names` per storico e confronto fornitori.
+
