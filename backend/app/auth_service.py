@@ -1,11 +1,12 @@
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from .auth_models import LocalCredential, LocalSession
 from .models import UserProfile
+from .config import settings
 
 PBKDF2_ITERATIONS = 310_000
 SESSION_HOURS = 12
@@ -21,7 +22,7 @@ def hash_pin(pin: str, salt_hex: str) -> str:
 
 
 def validate_pin_format(pin: str) -> None:
-    if not pin.isdigit() or not (6 <= len(pin) <= 12):
+    if not pin.isascii() or not pin.isdigit() or not (6 <= len(pin) <= 12):
         raise ValueError("Il PIN deve contenere da 6 a 12 cifre")
 
 
@@ -68,7 +69,16 @@ def session_user(db: Session, raw_token: str | None) -> UserProfile | None:
         return None
     if session.expires_at < datetime.now():
         db.delete(session); db.commit(); return None
-    return db.get(UserProfile, session.user_id)
+    user = db.get(UserProfile, session.user_id)
+    if not user or not user.active:
+        return None
+    if settings.central_identity_enabled:
+        from .auth_models import CentralAccount
+        from .central_identity import _LOCAL_LOGINS
+        account = db.get(CentralAccount, user.id)
+        if digest not in _LOCAL_LOGINS or not account or not account.offline_until or account.offline_until <= datetime.now(UTC).replace(tzinfo=None):
+            db.delete(session); db.commit(); return None
+    return user
 
 
 def revoke_session(db: Session, raw_token: str | None) -> None:
@@ -78,3 +88,4 @@ def revoke_session(db: Session, raw_token: str | None) -> None:
     session = db.get(LocalSession, digest)
     if session:
         db.delete(session); db.commit()
+

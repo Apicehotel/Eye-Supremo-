@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     central_username: str = Field("supremo", validation_alias="EYESUPREMO_CENTRAL_USERNAME_OVERRIDE")
     central_pin: str = Field("000000", validation_alias="EYESUPREMO_CENTRAL_PIN_OVERRIDE")
     central_function: str = "eye-central-gateway"
+    central_identity_enabled: bool = True
+    central_identity_function: str = "eye-identity"
+    offline_access_days: int = Field(7, ge=1, le=30)
     sync_enabled: bool = False
     # Al primo avvio/installazione scarica fatture+recensioni in cache SQLite.
     cache_bootstrap_on_start: bool = True
@@ -49,3 +52,4 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "uploads").mkdir(exist_ok=True)
 (settings.data_dir / "backups").mkdir(exist_ok=True)
 (settings.data_dir / "reviews").mkdir(exist_ok=True)
+

@@ -62,11 +62,11 @@ Il punteggio camera applica un fattore di confidenza basato sul numero di recens
 
 ## Accesso
 
-Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, con il PIN iniziale predefinito (non riportato qui).
+Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, senza riscrivere le credenziali esistenti. La modalità locale inizializza il PIN solo dove manca; la modalità centrale lo verifica su Supabase al primo accesso.
 
 La tabella `role_exclusions` resta nel database per compatibilità storica ma non limita più l'accesso operativo.
 
-Qualsiasi accesso remoto usa JWT Supabase e membership server-side.
+Le operazioni centrali Eye usano sessioni personali revocabili; il bridge multi-hotel legacy usa JWT Supabase e membership server-side. Vedi [CENTRAL_IDENTITY.md](CENTRAL_IDENTITY.md) per cache di accesso offline e attivazione.
 
 ## Supabase bridge
 
@@ -83,3 +83,4 @@ La macchina finale non richiede Python o Node. I dati sono persistenti in LocalA
 ## Evoluzione senza parti zombie
 
 La API legacy resta temporaneamente per compatibilità, ma le nuove funzionalità vivono nei router modulari. Quando tutte le schermate usano le API `/api/eye/*`, il router legacy può essere ridotto alle sole API ancora necessarie e infine rimosso in una PR dedicata, dopo test di regressione.
+
