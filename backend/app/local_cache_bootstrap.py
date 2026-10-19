@@ -225,8 +225,20 @@ async def run_local_cache_bootstrap(*, force: bool = False, full: bool = False) 
         except Exception as exc:  # noqa: BLE001
             review_result = {"ok": False, "message": str(exc), "imported": 0}
 
+        # Aggiorna il conteggio catalogo in background: la dashboard non aspetta
+        # Supabase e conserva il conteggio verificato anche offline.
+        product_count = None
+        try:
+            from .central_service import central_product_summary
+            summary = await central_product_summary()
+            if summary.get("enabled"):
+                product_count = max(0, int(summary.get("distinct_products") or 0))
+        except Exception:
+            pass
         db = SessionLocal()
         try:
+            if product_count is not None:
+                _set(db, "dashboard_product_count", str(product_count))
             invoices = cache_status(db)
             reviews = review_cache_status(db)
             inv_ok = bool(invoice_result.get("ok"))
@@ -304,3 +316,4 @@ def maybe_schedule_on_startup() -> None:
     if not needs_bootstrap():
         return
     schedule_bootstrap(force=False, full=False)
+

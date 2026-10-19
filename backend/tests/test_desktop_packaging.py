@@ -49,3 +49,19 @@ def test_desktop_launcher_never_imports_webbrowser():
 def test_icon_asset_exists_for_packaging():
     icon = Path(__file__).resolve().parents[2] / "installer" / "assets" / "eye-supremo.ico"
     assert icon.is_file()
+
+
+
+def test_release_version_matches_frontend_api_updater_and_installer():
+    import json
+    import re
+    from app.main import app
+    from app.update_service import CURRENT_VERSION
+    root=Path(__file__).resolve().parents[2]
+    package=json.loads((root/'frontend/package.json').read_text())
+    lock=json.loads((root/'frontend/package-lock.json').read_text())
+    installer=(root/'installer/EyeSupremo.iss').read_text()
+    version=package['version']
+    assert app.version==CURRENT_VERSION==lock['version']==lock['packages']['']['version']==version
+    assert re.search(r'^AppVersion=(.+)$',installer,re.M).group(1)==version
+    assert f'OutputBaseFilename=EyeSupremo-Setup-{version}' in installer

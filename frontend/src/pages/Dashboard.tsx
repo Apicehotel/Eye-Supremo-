@@ -48,10 +48,15 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
   const [data, setData] = useState<Data>();
   const [ollama, setOllama] = useState(false);
   const [showAnnual, setShowAnnual] = useState(false);
+  const [error,setError]=useState('');
+  const [retry,setRetry]=useState(0);
   useEffect(() => {
-    api<Data>("/dashboard").then(setData);
-    api<any>("/ollama/status").then((x) => setOllama(x.available));
-  }, []);
+    let active=true;setError('');
+    api<Data>("/dashboard").then(value=>{if(active)setData(value)}).catch((e:Error)=>{if(active)setError(e.message)});
+    api<any>("/ollama/status").then(x=>{if(active)setOllama(x.available)}).catch(()=>{if(active)setOllama(false)});
+    return()=>{active=false};
+  }, [retry]);
+  if(error)return <section className="panel" role="alert"><p>{error}</p><button className="primary-btn" onClick={()=>setRetry(value=>value+1)}>Riprova</button></section>;
   if (!data) return <Loading />;
   const period =
     data.period?.from && data.period?.to
@@ -76,7 +81,7 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
       "Prodotti",
       data.kpis.products ? data.kpis.products.toLocaleString("it-IT") : "—",
       data.kpis.products
-        ? "Catalogo prodotti centrale"
+        ? "Ultimo conteggio disponibile"
         : "Catalogo prodotti da indicizzare",
     ],
   ] as const;
@@ -279,3 +284,4 @@ export default function Dashboard({ go }: { go: (p: Page) => void }) {
     </>
   );
 }
+

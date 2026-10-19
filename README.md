@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.14`
+**Versione applicativa:** `2.0.15`
+
+**Novità 2.0.15:** profili centrali condivisi con login personale e accesso offline autorizzato; PIN conservati al riavvio; dashboard unificata senza doppioni e valida anche con sole note di credito; backup SQLite coerente e verificato; ricerche con annullamento delle richieste superate; dipendenze frontend fissate alle versioni del lockfile. La pubblicazione richiede prima l'attivazione descritta in `docs/CENTRAL_IDENTITY.md`.
 
 **Novità 2.0.14:** nella scheda prodotto del catalogo c'è «Pezzi per confezione» (es. 6 per un cartone): il report storico mostra prezzo e quantità al pezzo. Il numero vale per il prodotto ed è salvato in `product_configs` (campo `pieces_per_pack`). **Installer:** il file si chiama `EyeSupremo-Setup-<versione>.exe` (la versione è nel nome, non si sovrascrive nei download); per ogni release aggiornare anche `OutputBaseFilename` in `installer/EyeSupremo.iss`.
 
@@ -257,7 +259,7 @@ La replica centrale usa il token personale ottenuto dal login online; nessun PIN
 
 ## Avvio sviluppo
 
-Requisiti: Python 3.11+ e Node 20+.
+Requisiti: Python 3.11+ e Node 22.12+.
 
 ```powershell
 setup.bat

@@ -14,8 +14,10 @@ const securedHeaders = (initial?:HeadersInit) => {
 
 export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
   try {
+    const sentSession=currentSession();
     const response = await fetch(`/api${path}`, {...options, headers:securedHeaders(options?.headers)});
-    if(response.status===401){clearAuth();window.dispatchEvent(new Event('eye-auth-expired'))}
+    if(options?.signal?.aborted)throw new DOMException('Richiesta annullata','AbortError');
+    if(response.status===401&&currentSession()===sentSession){clearAuth();window.dispatchEvent(new Event('eye-auth-expired'))}
     if(!response.ok) {const body=await response.json().catch(()=>null);throw new Error(typeof body?.detail==='string'?body.detail:'Operazione non riuscita')}
     return response.json();
   } catch(error) {
@@ -26,8 +28,10 @@ export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
 
 export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
   try {
+    const sentSession=currentSession();
     const response = await fetch(`/api/eye${path}`, {...options, headers:securedHeaders(options?.headers)});
-    if(response.status===401){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
+    if(options?.signal?.aborted)throw new DOMException('Richiesta annullata','AbortError');
+    if(response.status===401&&currentSession()===sentSession){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
     if(!response.ok) {const body=await response.json().catch(()=>null);throw new Error(typeof body?.detail==='string'?body.detail:'Operazione non riuscita')}
     return response.json();
   } catch(error) {

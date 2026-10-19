@@ -1,3 +1,4 @@
+import {useLatestRequest} from '../hooks/useLatestRequest';
 import {useMemo,useState,useEffect} from 'react';
 import {ArrowDown,ArrowRight,ArrowUp,Printer,Search,MapPin,RotateCcw} from 'lucide-react';
 import {api,eyeApi,euro,shortDate} from '../lib/api';
@@ -22,10 +23,17 @@ function Trend({point,onOpen,highlight}:{point?:Point;onOpen?:(t:InvoiceRefTarge
 
 export function HistoricalReportPage({embedded=false}:{embedded?:boolean}){
  const [q,setQ]=useState(''),[submitted,setSubmitted]=useState(''),[data,setData]=useState<Report>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const requests=useLatestRequest();
  const [invoiceRef,setInvoiceRef]=useState<InvoiceRefTarget>();
  const [supplierSort,setSupplierSort]=useState<'average'|'best'|'latest'|'name'>('average'),[dateDirection,setDateDirection]=useState<'asc'|'desc'>('asc');
- async function search(nextQuery=q){const value=nextQuery.trim();if(!value)return;setQ(value);setBusy(true);setError('');setSubmitted(value);setData(undefined);try{setData(await eyeApi<Report>(`/reports/history-product?q=${encodeURIComponent(value)}`))}catch(e:any){setError(e.message)}finally{setBusy(false)}}
- function clear(){setQ('');setSubmitted('');setData(undefined);setError('');}
+ async function search(nextQuery=q){
+  const value=nextQuery.trim();if(!value)return;
+  const request=requests.start();setQ(value);setBusy(true);setError('');setSubmitted(value);setData(undefined);
+  try {const result=await eyeApi<Report>(`/reports/history-product?q=${encodeURIComponent(value)}`,{signal:request.signal});if(request.current())setData(result);}
+  catch(e:any){if(request.current())setError(e.message);}
+  finally{if(request.current())setBusy(false);}
+ }
+ function clear(){requests.cancel();setBusy(false);setQ('');setSubmitted('');setData(undefined);setError('');}
  const comparable=useMemo(()=>data?.summary?data.suppliers.filter(s=>s.unit===data.summary.unit):[],[data]);
  const sortedSuppliers=useMemo(()=>[...comparable].sort((a,b)=>supplierSort==='name'?a.supplier.localeCompare(b.supplier):supplierSort==='best'?a.best_price-b.best_price:supplierSort==='latest'?a.latest_price-b.latest_price:a.average_price-b.average_price),[comparable,supplierSort]);
  const sortedMatches=useMemo(()=>data?.matches?[...data.matches].sort((a,b)=>{const pieces=(x:string)=>Number((x.match(/(?:^|\s)(\d+)\s*(?:pz|pezzi|pcs|bott)/i)||[])[1]||0);return pieces(a.canonical_name)-pieces(b.canonical_name)||a.canonical_name.localeCompare(b.canonical_name)}):[],[data]);
@@ -58,3 +66,4 @@ export function HistoricalReportPage({embedded=false}:{embedded?:boolean}){
 type Destination={id:number;number:string;date:string;supplier:string;total:number;destination:string|null;destination_name:string};
 type Hotel={id:number;code:string;name:string};
 export function InvoiceDestinationsPage(){const [items,setItems]=useState<Destination[]>(),[hotels,setHotels]=useState<Hotel[]>([]),[q,setQ]=useState('');const load=()=>eyeApi<Destination[]>('/invoice-destinations').then(setItems);useEffect(()=>{Promise.all([load(),eyeApi<Hotel[]>('/hotels').then(setHotels)])},[]);async function change(id:number,hotel_code:string){await eyeApi(`/invoice-destinations/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({hotel_code})});await load()}const visible=items?.filter(x=>(`${x.number} ${x.supplier} ${x.destination_name}`).toLowerCase().includes(q.toLowerCase()));return <><PageHeader title="Destinazione fattura" subtitle="Le fatture sono uniche per Apice; qui indichi solo la destinazione/centro di utilizzo"><SearchBox value={q} onChange={setQ} placeholder="Fattura, fornitore, destinazione…"/></PageHeader><section className="panel list-panel">{!visible?<Loading/>:visible.length?<div className="table-wrap"><table><thead><tr><th>Data</th><th>Fattura</th><th>Fornitore</th><th>Totale</th><th>Destinazione</th></tr></thead><tbody>{visible.map(i=><tr key={i.id}><td>{shortDate(i.date)}</td><td><b>{i.number}</b></td><td>{i.supplier}</td><td>{euro(i.total)}</td><td><label className="destination-select"><MapPin size={14}/><select value={i.destination||'general'} onChange={e=>change(i.id,e.target.value)}><option value="general">Generale / Apice</option>{hotels.map(h=><option key={h.code} value={h.code}>{h.name}</option>)}</select></label></td></tr>)}</tbody></table></div>:<Empty title="Nessuna fattura" text="Le fatture importate compariranno qui per l'assegnazione facoltativa della destinazione."/>}</section></>}
+
