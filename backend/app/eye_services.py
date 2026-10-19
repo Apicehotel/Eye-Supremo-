@@ -58,11 +58,12 @@ def seed_eye_supremo(db: Session) -> None:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
     db.flush()
-    # Permessi unificati: niente livelli; PIN standard 000000 per tutti i profili.
+    # Il seed viene eseguito a ogni avvio: preserva credenziali e sessioni esistenti.
     for user in db.scalars(select(UserProfile)).all():
         user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
         user.can_manage_config = True
-        set_pin(db, user, DEFAULT_PIN)
+        if db.get(LocalCredential, user.id) is None:
+            set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):
             db.add(ReviewCategory(name=name, auto_learned=False))
@@ -313,3 +314,4 @@ def create_price_alerts(db: Session, invoice: Invoice, threshold_pct: float = 20
                           entity_type="invoice_row", entity_id=row.id)
             db.add(alert); created.append(alert)
     return created
+
