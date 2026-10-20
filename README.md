@@ -168,6 +168,8 @@ Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi
 
 **Recensioni solo voto:** una recensione senza testo scritto dall'ospite (solo il punteggio) conta nelle medie, nei voti per fonte e nei ranking, ma non viene mostrata come riga nell'archivio, nello storico e nelle segnalazioni anonime. Al suo posto compare un riquadro «Recensioni solo voto» con una voce per fonte e voto (es. «5 ★ su 10 · Booking · 3 recensioni»).
 
+**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera (scala 10; Google e TripAdvisor ×2, recensioni solo voto incluse), numero di recensioni, minimo–massimo, ultimo voto e fonti. Si filtra per hotel, si cerca per camera/hotel e si ordina per media, numero di recensioni o numero camera. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`).
+
 ## Eye AI e agenti interni
 
 Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
