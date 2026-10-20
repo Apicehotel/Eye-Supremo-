@@ -832,3 +832,13 @@ def test_digest_blocks_without_room_do_not_inherit_the_wrong_room_of_the_whole_e
     rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
     assert "10" not in rooms
     assert rooms.count(None) >= 1
+
+
+def test_rooms_that_are_words_are_not_exposed_as_rooms(client, db):
+    from app.routers.eye import _valid_room
+    assert [_valid_room(x) for x in ("325", "4407", "1108A", " 126 ")] == ["325", "4407", "1108A", "126"]
+    assert [_valid_room(x) for x in ("pulita", "super", "ampia", "Superior", "e", "Numero", "", None)] == [None] * 8
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text="Camera pulita e spaziosa, personale gentile. Voto 5/5 su Google", review_date=date(2026, 8, 23), rating=Decimal("5"), room_code="pulita", source="Google")
+    rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
+    assert "pulita" not in rooms

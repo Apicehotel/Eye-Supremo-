@@ -1,4 +1,5 @@
 import json
+import re
 import hashlib
 import secrets
 from datetime import date
@@ -31,6 +32,12 @@ from ..sync_service import push_to_supabase, sync_configuration
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
 
 
+def _valid_room(code: str | None) -> str | None:
+    """Un numero camera è fatto di cifre (es. 325, 4407, 1108A): parole come «pulita» o «super» non lo sono."""
+    value = (code or "").strip()
+    return value if re.fullmatch(r"\d{1,4}[A-Za-z]?", value) else None
+
+
 def _review_payload(review: Review, *, review_id=None, text: str | None = None, date_value: str | None = None,
                     room_code: str | None = None, author: str | None = None, source: str | None = None,
                     rating: float | None = None, tags: list[dict] | None = None, inherit_room: bool = True) -> dict:
@@ -38,7 +45,7 @@ def _review_payload(review: Review, *, review_id=None, text: str | None = None, 
         "id": review.id if review_id is None else review_id,
         "hotel": review.hotel.name,
         "hotel_code": review.hotel.code,
-        "room": room_code if room_code is not None else (review.room.code if review.room and inherit_room else None),
+        "room": _valid_room(room_code if room_code is not None else (review.room.code if review.room and inherit_room else None)),
         "author": author if author is not None else review.author,
         "source": source if source is not None else review.source,
         "rating": rating if rating is not None else (float(review.rating) if review.rating is not None else None),

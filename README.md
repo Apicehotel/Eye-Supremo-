@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.20`
+**Versione applicativa:** `2.0.21`
+
+**Novità 2.0.21:** un numero camera è fatto di cifre (es. 325, 4407, 1108A): parole lette per errore dalle vecchie importazioni ("pulita", "super", "ampia", "Superior"…) non compaiono più come camere in Media camere, nello storico e nei ranking; quelle recensioni risultano senza camera. Controllo in `_valid_room` (`backend/app/routers/eye.py`) e in `frontend/src/lib/roomAverages.ts`.
 
 **Novità 2.0.20:** in Media camere i filtri **Zona** (Cantine Wine) e **Pavimento** (moquette) sono nella stessa riga degli altri filtri (ricerca, voto per tag, ordinamento, voti minimi) invece che in alto a destra.
 
