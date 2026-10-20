@@ -217,3 +217,4 @@ body{background:#f7f8fa;color:var(--ink)}
 
 
 .offline-auth-banner{padding:8px 16px;background:#fff3cc;color:#624700;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;font-size:14px}.offline-auth-banner button{border:1px solid currentColor;background:transparent;border-radius:6px;padding:4px 10px;color:inherit;cursor:pointer}
+.rating-only-panel{margin-bottom:16px}.rating-only-list{display:flex;flex-wrap:wrap;gap:10px;list-style:none;margin:12px 0 0;padding:0}.rating-only-list li{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border:1px solid var(--line,#e5e7eb);border-radius:10px;background:#fafafa}.rating-only-list li b small{font-weight:400;color:#6b7280}.rating-only-list li span{font-size:.85rem;color:#6b7280}
