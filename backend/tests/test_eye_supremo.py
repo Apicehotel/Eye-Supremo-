@@ -734,3 +734,19 @@ Camere economy non all'altezza <https://www.tripadvisor.it/Profile/Abc> Abc ha s
     assert [str(b["rating"]) for b in blocks][-2:] == ["5", "2"]
     # il footer che cita altre piattaforme non cambia la fonte di una recensione Booking
     assert blocks[2]["source"] == "Booking"
+
+
+def test_import_ignores_the_same_file_selected_twice(client, db):
+    content = BOOKING_DIGEST.encode("utf-8")
+    files = [("files", ("a.txt", content, "text/plain")), ("files", ("b.txt", content, "text/plain"))]
+    body = client.post("/api/eye/reviews/import/gio", files=files).json()
+    assert body["imported"] == 3 and body["skipped_duplicate_files"] == 1
+    assert len(db.scalars(select(Review)).all()) == 3
+
+
+def test_import_skips_review_already_stored_inside_a_legacy_whole_email(client, db):
+    # Archivio vecchio: tutta l'email salvata in un solo record.
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text=BOOKING_DIGEST, review_date=date(2024, 10, 27), rating=None, source="Booking")
+    body = _import_digest(client).json()
+    assert body["imported"] == 0 and body["skipped_duplicates"] == 3
