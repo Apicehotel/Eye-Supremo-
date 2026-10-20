@@ -1,13 +1,14 @@
 import {useMemo, useState} from 'react';
 import {BedDouble, Search, TriangleAlert} from 'lucide-react';
 import {Status} from '../components/UI';
+import {GIO_ROOM_GROUPS, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
 import {SOURCES, roomStatus, sourceOverview, type RoomAverage, type SourceKey} from '../lib/roomAverages';
 
 type Sort = 'room_asc' | `${'Booking' | 'Google' | 'TripAdvisor'}_${'desc' | 'asc'}` | 'count_desc';
 const fmt = (value: number) => value.toFixed(2).replace('.', ',');
 const scaleOf = (key: SourceKey) => SOURCES.find(s => s.key === key)!.scale;
 
-export default function RoomAverages({rows, invalid, scopeLabel, categories, category, onCategory}: {rows: RoomAverage[]; invalid: number; scopeLabel: string; categories: string[]; category: string; onCategory: (value: string) => void}) {
+export default function RoomAverages({rows, invalid, scopeLabel, categories, category, onCategory, group, onGroup, floor, onFloor}: {rows: RoomAverage[]; invalid: number; scopeLabel: string; categories: string[]; category: string; onCategory: (value: string) => void; group: RoomGroupKey; onGroup: (value: RoomGroupKey) => void; floor: FloorFilter; onFloor: (value: FloorFilter) => void}) {
   const [query, setQuery] = useState(''), [sort, setSort] = useState<Sort>('room_asc'), [minReviews, setMinReviews] = useState(1);
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -36,6 +37,16 @@ export default function RoomAverages({rows, invalid, scopeLabel, categories, cat
       {invalid > 0 && <p className="room-averages-warning"><TriangleAlert size={15}/> {invalid} {invalid === 1 ? 'voto fuori scala ignorato' : 'voti fuori scala ignorati'}: probabile errore di lettura in importazione (per esempio un giorno della data scambiato per voto).</p>}
       <div className="room-averages-tools">
         <label className="global-search review-search"><Search/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca camera o hotel…"/></label>
+        <select className="review-control" aria-label="Filtra per zona camere" value={group} onChange={e => onGroup(e.target.value as RoomGroupKey)}>
+          <option value="all">Tutte le camere</option>
+          <option value="cantine">Tutte le Cantine Wine</option>
+          {GIO_ROOM_GROUPS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+        </select>
+        <select className="review-control" aria-label="Filtra per pavimento" value={floor} onChange={e => onFloor(e.target.value as FloorFilter)}>
+          <option value="all">Moquette e non</option>
+          <option value="moquette">Con moquette</option>
+          <option value="no-moquette">Senza moquette</option>
+        </select>
         <select className="review-control" aria-label="Voto per tag" value={category} onChange={e => onCategory(e.target.value)}>
           <option value="">Voto generale</option>
           {categories.map(name => <option key={name} value={name}>{name}</option>)}
