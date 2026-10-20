@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # Al primo avvio/installazione scarica fatture+recensioni in cache SQLite.
     cache_bootstrap_on_start: bool = True
     live_search_debounce_ms: int = 180
+    api_version: str = "v1"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8765"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
     model_config = SettingsConfigDict(env_prefix="EYESUPREMO_", env_file=".env", extra="ignore")
 
     @property

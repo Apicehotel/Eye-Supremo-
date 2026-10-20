@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  apiUrl,
   currentRole,
   currentSession,
   currentUser,
@@ -56,7 +57,7 @@ export function ImportPage() {
     try {
       const headers: Record<string, string> = { "X-Eye-Role": currentRole() };
       if (currentSession()) headers["X-Eye-Session"] = currentSession();
-      const res = await fetch("/api/eye/invoices/import/preview-batch", {
+      const res = await fetch(apiUrl("eye", "/invoices/import/preview-batch"), {
         method: "POST",
         headers,
         body,
@@ -926,7 +927,7 @@ export function SystemPage() {
         link.remove();
         return;
       }
-      const response = await fetch("/api/eye/updates/download?mode=proxy", {
+      const response = await fetch(`${apiUrl("eye", "/updates/download")}?mode=proxy`, {
         headers: {
           "X-Eye-Session": currentSession(),
           "X-Eye-Role": currentRole(),

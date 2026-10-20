@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .auth_service import auth_configured, session_user
 from .database import Base, SessionLocal, engine
+from .config import settings
 from .db_migrations import run_safe_migrations
 from .eye_services import seed_eye_supremo
 from .local_cache_bootstrap import maybe_schedule_on_startup
@@ -21,6 +22,7 @@ from .routers.agents_eye import router as agents_router
 from .routers.sync_eye import router as sync_router
 from .routers.updates_eye import router as updates_router
 from . import central_identity
+from .api_versioning import legacy_path
 
 
 @asynccontextmanager
@@ -49,7 +51,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Eye Supremo API", version="2.0.27", docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:8765"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,6 +97,15 @@ async def local_auth_guard(request: Request, call_next):
     finally:
         if identity_context is not None:
             central_identity.current_identity.reset(identity_context)
+
+
+@app.middleware("http")
+async def api_v1_compatibility(request: Request, call_next):
+    translated = legacy_path(request.scope.get("path", ""))
+    if translated:
+        request.scope["path"] = translated
+        request.scope["raw_path"] = translated.encode("utf-8")
+    return await call_next(request)
 
 
 app.include_router(auth_router)

@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 .pytest-local/
 .pytest-installer*/
+.pytest-cloud*/
 *.pyc
 *.log
 .env

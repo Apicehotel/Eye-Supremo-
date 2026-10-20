@@ -309,7 +309,7 @@ setup.bat
 start.bat
 ```
 
-API: `http://127.0.0.1:8000/api/docs`
+API locale compatibile: `http://127.0.0.1:8000/api/docs`. Il frontend usa la facciata versionata `/api/v1` per impostazione predefinita; in futuro può puntare a un servizio remoto impostando `VITE_EYE_API_URL` e `VITE_EYE_API_PREFIX` senza modificare il codice React.
 UI dev: `http://127.0.0.1:5173`
 
 ## Installer Windows (app nativa)
