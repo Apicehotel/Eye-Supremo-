@@ -1,7 +1,8 @@
 export type ApiArea = "core" | "eye";
 
-const configuredOrigin = String(import.meta.env.VITE_EYE_API_URL || "").replace(/\/+$/, "");
-export const apiPrefix = String(import.meta.env.VITE_EYE_API_PREFIX || "/api/v1").replace(/\/+$/, "");
+const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+const configuredOrigin = String(runtimeEnv.VITE_EYE_API_URL || "").replace(/\/+$/, "");
+export const apiPrefix = String(runtimeEnv.VITE_EYE_API_PREFIX || "/api/v1").replace(/\/+$/, "");
 
 export function apiUrl(area: ApiArea, path: string): string {
   const cleanPath = `/${path}`.replace(/\/+/g, "/");

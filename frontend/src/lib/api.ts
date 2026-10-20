@@ -51,6 +51,6 @@ export const clearAuth=()=>{localStorage.removeItem('eye-supremo.session');local
 export const euro = (value:number|null|undefined) => new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(value || 0);
 export const shortDate = (value:string) => new Intl.DateTimeFormat('it-IT').format(new Date(value));
 
-import { apiUrl, httpDataService } from './dataService';
-export { apiUrl, apiPrefix } from './dataService';
+import { apiUrl, httpDataService } from './dataService.ts';
+export { apiUrl, apiPrefix } from './dataService.ts';
 
