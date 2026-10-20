@@ -13,6 +13,7 @@ from ..central_cache import cache_status, cached_row_search, cached_search, refr
 from ..central_service import central_review_upsert
 from ..local_cache_bootstrap import bootstrap_status, run_local_cache_bootstrap, schedule_bootstrap
 from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
+from ..review_sheet_sync import sync_review_defects
 from ..database import SessionLocal, get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata,
@@ -199,6 +200,9 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                                     rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
                                     room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
                 imported.append(review.id); file_count += 1
+                sheet_result = await sync_review_defects(db, review)
+                if sheet_result.get("enabled") and not sheet_result.get("sent"):
+                    errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
                 try:
                     await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
                 except Exception as sync_exc:
