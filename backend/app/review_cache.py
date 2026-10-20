@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from .central_service import central_review_page
+from .central_service import central_review_page, central_review_upsert
 from .database import SessionLocal
 from .eye_services import classify_review_text
 from .models import AppSetting, CentralReviewCache, Hotel, Review, ReviewTag, Room
@@ -231,3 +231,46 @@ async def refresh_review_cache() -> dict:
     finally:
         db.close()
 
+
+
+async def push_local_reviews(db: Session) -> dict:
+    """Invia a Supabase le recensioni presenti solo in locale (mai sincronizzate).
+
+    L'upsert centrale e' idempotente su sync_uuid; in piu' saltiamo le recensioni
+    che hanno gia' una copia centrale con stessa data, fonte e testo, per non
+    creare doppioni.
+    """
+    cached_uuids = set(db.scalars(select(CentralReviewCache.sync_uuid)).all())
+    central_keys = {(c.hotel_code, c.review_date, (c.source or "").lower(), re.sub(r"\s+", " ", c.text or "").strip().lower()[:300])
+                    for c in db.scalars(select(CentralReviewCache)).all()}
+    pending = pushed = skipped = 0
+    errors: list[str] = []
+    for review in db.scalars(select(Review).order_by(Review.id)).all():
+        if review.sync_uuid in cached_uuids:
+            continue
+        hotel = db.get(Hotel, review.hotel_id)
+        if hotel is None:
+            continue
+        key = (hotel.code, review.date, (review.source or "").lower(), re.sub(r"\s+", " ", review.text or "").strip().lower()[:300])
+        if key in central_keys:
+            skipped += 1
+            continue
+        pending += 1
+        room = db.get(Room, review.room_id) if review.room_id else None
+        try:
+            result = await central_review_upsert({
+                "sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(),
+                "source": review.source, "author": review.author,
+                "rating": float(review.rating) if review.rating is not None else None,
+                "room_code": getattr(room, "code", None) if room else None, "text": review.text,
+            })
+            if not result.get("synced"):
+                errors.append("Supabase centrale non configurato o sessione scaduta")
+                break
+            pushed += 1
+            central_keys.add(key)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc)[:160])
+            if len(errors) >= 3:
+                break
+    return {"pending": pending, "pushed": pushed, "skipped_already_central": skipped, "errors": errors}
