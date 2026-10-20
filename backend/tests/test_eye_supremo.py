@@ -750,3 +750,24 @@ def test_import_skips_review_already_stored_inside_a_legacy_whole_email(client, 
     add_review(db, hotel_id=hotel.id, text=BOOKING_DIGEST, review_date=date(2024, 10, 27), rating=None, source="Booking")
     body = _import_digest(client).json()
     assert body["imported"] == 0 and body["skipped_duplicates"] == 3
+
+
+def _polarities(db, text):
+    return {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+
+
+def test_review_classifier_negated_negative_words_become_positive(db):
+    # "non lontano" / "non è per nulla lontano": la negazione ribalta la parola negativa
+    assert ("Posizione", "positive") in _polarities(db, "La posizione non è lontano dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione per niente lontana dal centro.")
+    assert ("Posizione", "negative") not in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    # senza negazione resta negativo
+    assert ("Posizione", "negative") in _polarities(db, "Posizione lontana dal centro.")
+
+
+def test_review_classifier_understands_empty_buffet_and_its_negation(db):
+    assert ("Colazione", "negative") in _polarities(db, "Il buffet della colazione era vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "negative") not in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Il buffet della colazione non era vuoto, anzi ricco.")
