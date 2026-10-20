@@ -1,14 +1,14 @@
-; Release 2.0.21: parole lette per errore come numero camera non compaiono più.
+; Release 2.0.22: il pulsante Carica file spiega che serve scegliere un hotel.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.21
+AppVersion=2.0.22
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.21
+OutputBaseFilename=EyeSupremo-Setup-2.0.22
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
