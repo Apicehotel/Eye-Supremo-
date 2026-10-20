@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.19`
+**Versione applicativa:** `2.0.20`
+
+**Novità 2.0.20:** in Media camere i filtri **Zona** (Cantine Wine) e **Pavimento** (moquette) sono nella stessa riga degli altri filtri (ricerca, voto per tag, ordinamento, voti minimi) invece che in alto a destra.
 
 **Novità 2.0.19:** nelle email con più ospiti, un ospite senza numero camera non eredita più la camera salvata sull'intera email (che poteva essere un numero letto male, es. "10" al posto di "325"): resta senza camera invece di sporcare le medie di una camera inesistente.
 

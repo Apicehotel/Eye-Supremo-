@@ -1,14 +1,14 @@
-; Release 2.0.19: camere sbagliate nelle email con più ospiti.
+; Release 2.0.20: filtri Zona e Pavimento accanto agli altri filtri in Media camere.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.19
+AppVersion=2.0.20
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.19
+OutputBaseFilename=EyeSupremo-Setup-2.0.20
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
