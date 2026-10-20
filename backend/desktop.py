@@ -7,13 +7,14 @@ Il server FastAPI resta locale in background; la UI è incorporata nella finestr
 from __future__ import annotations
 
 import ctypes
+import json
 import os
-import socket
 import sys
 import threading
 import time
 import traceback
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 # Prima dell'import dell'app: abilita bootstrap cache offline sull'EXE.
 os.environ.setdefault("EYESUPREMO_CACHE_BOOTSTRAP_ON_START", "1")
@@ -68,9 +69,12 @@ def wait_for_server(timeout: float = 30.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with socket.create_connection((HOST, PORT), timeout=0.5):
+            request = Request(f"{URL}/api/health", headers={"Accept": "application/json"})
+            with urlopen(request, timeout=0.5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if payload.get("app") == "Eye Supremo" and payload.get("status") == "ok" and payload.get("database") == "ok":
                 return True
-        except OSError:
+        except (OSError, ValueError, json.JSONDecodeError):
             time.sleep(0.25)
     return False
 

@@ -1,5 +1,6 @@
 import hashlib, json, secrets
 from datetime import date
+import sqlite3
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -19,7 +20,18 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/health")
-def health(): return {"status": "ok", "app": "Eye Supremo"}
+def health():
+    """Read-only local readiness check used by the desktop launcher."""
+    database = settings.data_dir / "eye-supremo.db"
+    db_status = "missing"
+    if database.is_file():
+        try:
+            with sqlite3.connect(database, timeout=2) as connection:
+                check = connection.execute("PRAGMA quick_check").fetchone()
+            db_status = "ok" if check == ("ok",) else "degraded"
+        except sqlite3.Error:
+            db_status = "degraded"
+    return {"status": "ok" if db_status == "ok" else "degraded", "app": "Eye Supremo", "database": db_status}
 
 
 @router.get("/dashboard")
