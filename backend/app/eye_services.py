@@ -2,7 +2,7 @@ import json
 import re
 import uuid
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, or_, select
@@ -286,6 +286,91 @@ def review_rankings(db: Session, hotel_id: int | None = None, limit: int = 5) ->
         "best_services": services[:limit],
         "worst_services": list(reversed(services[-limit:])),
     }
+
+
+ROOM_RANKING_CATEGORIES = {"Camere / Arredi", "Letti", "Pulizia"}
+
+
+def _room_review_score(review: Review) -> tuple[float | None, int, int]:
+    """Normalise one room review to a comparable 0–10 score.
+
+    The guest's score remains the strongest signal.  When room-specific tags
+    are available, they temper it so a new negative defect is visible in the
+    timeline even if the source score is not yet present.
+    """
+    tags = [tag for tag in review.tags if tag.category and tag.category.name in ROOM_RANKING_CATEGORIES]
+    positive = sum(tag.polarity != "negative" for tag in tags)
+    negative = sum(tag.polarity == "negative" for tag in tags)
+    source = (review.source or "").strip().casefold()
+    score = None
+    if review.rating is not None:
+        scale = 2 if source in {"google", "tripadvisor"} else 1
+        score = float(review.rating) * scale
+    if positive or negative:
+        tag_score = positive / (positive + negative) * 10
+        score = tag_score if score is None else (score * 2 + tag_score) / 3
+    return (round(score, 2) if score is not None else None, positive, negative)
+
+
+def room_rating_timeline(db: Session, hotel_id: int | None = None) -> list[dict]:
+    """Return ranking periods that change only when the room's state changes.
+
+    A period starts with the first dated signal and remains valid until the
+    day before a material change.  This keeps a past good period visible when
+    later negative feedback lowers the current room score.
+    """
+    rows = db.scalars(
+        select(Review)
+        .options(selectinload(Review.room), selectinload(Review.hotel), selectinload(Review.tags).selectinload(ReviewTag.category))
+        .where(Review.room_id.is_not(None), *([Review.hotel_id == hotel_id] if hotel_id else []))
+        .order_by(Review.date, Review.id)
+    ).unique().all()
+    grouped: dict[tuple[int, int], list[Review]] = defaultdict(list)
+    for review in rows:
+        if review.room is not None:
+            grouped[(review.hotel_id, review.room_id)].append(review)
+
+    result = []
+    for _, reviews in grouped.items():
+        periods: list[dict] = []
+        window: list[float] = []
+        for review in reviews:
+            score, positive, negative = _room_review_score(review)
+            if score is None:
+                continue
+            window.append(score)
+            window = window[-3:]
+            # The newest feedback weighs more: a fresh defect must not be
+            # hidden by an old favourable stay.
+            weights = list(range(1, len(window) + 1))
+            dynamic_score = round(sum(value * weight for value, weight in zip(window, weights)) / sum(weights), 2)
+            status = "attenzione" if dynamic_score < 6 else "monitorare" if dynamic_score < 7.5 else "ok"
+            causes = sorted({tag.category.name for tag in review.tags if tag.polarity == "negative" and tag.category and tag.category.name in ROOM_RANKING_CATEGORIES})
+            previous = periods[-1] if periods else None
+            changed = previous is None or previous["status"] != status or abs(dynamic_score - previous["score"]) >= 1
+            if changed:
+                if previous:
+                    previous["to"] = (review.date - timedelta(days=1)).isoformat()
+                periods.append({
+                    "from": review.date.isoformat(), "to": None, "score": dynamic_score,
+                    "status": status, "reviews": 1, "positive": positive,
+                    "negative": negative, "causes": causes,
+                })
+            else:
+                previous["reviews"] += 1
+                previous["positive"] += positive
+                previous["negative"] += negative
+                previous["causes"] = sorted(set(previous["causes"]) | set(causes))
+
+        if periods:
+            room = reviews[0].room
+            hotel = reviews[0].hotel
+            result.append({
+                "hotel": hotel.name, "hotel_code": hotel.code, "room": room.code,
+                "current_score": periods[-1]["score"], "current_status": periods[-1]["status"],
+                "periods": periods,
+            })
+    return sorted(result, key=lambda item: (item["current_score"], item["hotel"], item["room"]))
 
 
 def create_price_alerts(db: Session, invoice: Invoice, threshold_pct: float = 20.0) -> list[Alert]:
