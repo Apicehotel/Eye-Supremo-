@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import select
 from app.eye_services import add_review, classify_review_text, invoice_search_summary
 from app.search_index import invoice_search
-from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Review, Supplier, UserProfile
+from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Review, Supplier, SyncState, UserProfile
 from app.agent_orchestrator import _max_invoice_context
 from app.report_service import historical_product_report
 from app.review_importers import _author, _rating, _room, _source, clean_review_text, split_review_blocks
@@ -850,6 +850,43 @@ def test_review_stats_separate_raw_valid_excluded_and_duplicates(client, db):
         "duplicates": 1,
         "valid_votes": 1,
     }
+
+
+def test_review_sync_is_local_first_and_exposes_a_durable_queue(client, monkeypatch):
+    monkeypatch.setattr("app.routers.eye.central_configured", lambda: False)
+    body = _import_digest(client).json()
+    assert body["imported"] == 3
+
+    status = client.get("/api/eye/reviews/sync/status")
+
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["configured"] is False
+    assert payload["review_sync"]["supabase_optional"] is True
+    assert payload["review_sync"]["counts"]["local"] == 3
+    assert payload["review_sync"]["queue_size"] == 3
+
+
+def test_review_sync_marks_remote_divergence_as_conflict_without_overwriting_local(db):
+    from app.review_cache import _upsert_review_mirror
+
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    review = add_review(db, hotel_id=hotel.id, text="Recensione locale Camera 101", review_date=date(2026, 9, 1), rating=Decimal("8"), room_code="101", source="Booking")
+    _upsert_review_mirror(db, {
+        "sync_uuid": review.sync_uuid,
+        "hotel_code": "gio",
+        "review_date": date(2026, 9, 1),
+        "source": "Booking",
+        "author": None,
+        "rating": Decimal("7"),
+        "room_code": "101",
+        "text": "Versione Supabase diversa",
+    })
+
+    state = db.scalar(select(SyncState).where(SyncState.entity_type == "review", SyncState.entity_uuid == review.sync_uuid))
+    db.refresh(review)
+    assert state.status == "conflitto"
+    assert review.text == "Recensione locale Camera 101"
 
 
 def _polarities(db, text):

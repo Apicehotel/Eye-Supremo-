@@ -10,6 +10,7 @@ from .central_service import central_review_page, central_review_upsert
 from .database import SessionLocal
 from .eye_services import classify_review_text
 from .models import AppSetting, CentralReviewCache, Hotel, Review, ReviewTag, Room
+from .review_sync import ensure_review_state, set_review_state
 
 _STOP = {
     "quanto", "quale", "quali", "cosa", "come", "nel", "nella", "da", "di", "il", "la", "le", "i",
@@ -138,6 +139,11 @@ def _upsert_review_mirror(db: Session, values: dict) -> Review | None:
         db.add(review)
         db.flush()
 
+    state = ensure_review_state(db, review)
+    remote_differs = review.text != values["text"] or review.date != values["review_date"] or review.source != values["source"] or review.rating != values["rating"]
+    if not created and remote_differs and state.status in {"local", "inviato"}:
+        set_review_state(db, review, "conflitto", error="Versione locale e versione Supabase divergono")
+        return review
     text_changed = review.text != values["text"]
     review.hotel_id = hotel.id
     review.room_id = room.id if room else None
@@ -146,6 +152,7 @@ def _upsert_review_mirror(db: Session, values: dict) -> Review | None:
     review.rating = values["rating"]
     review.date = values["review_date"]
     review.text = values["text"]
+    set_review_state(db, review, "sincronizzato")
 
     if created or text_changed or not review.tags:
         review.tags.clear()
@@ -243,10 +250,15 @@ async def push_local_reviews(db: Session) -> dict:
     cached_uuids = set(db.scalars(select(CentralReviewCache.sync_uuid)).all())
     central_keys = {(c.hotel_code, c.review_date, (c.source or "").lower(), re.sub(r"\s+", " ", c.text or "").strip().lower()[:300])
                     for c in db.scalars(select(CentralReviewCache)).all()}
-    pending = pushed = skipped = 0
+    pending = pushed = skipped = conflicts = 0
     errors: list[str] = []
     for review in db.scalars(select(Review).order_by(Review.id)).all():
+        state = ensure_review_state(db, review)
+        if state.status == "conflitto":
+            conflicts += 1
+            continue
         if review.sync_uuid in cached_uuids:
+            set_review_state(db, review, "sincronizzato")
             continue
         hotel = db.get(Hotel, review.hotel_id)
         if hotel is None:
@@ -254,8 +266,11 @@ async def push_local_reviews(db: Session) -> dict:
         key = (hotel.code, review.date, (review.source or "").lower(), re.sub(r"\s+", " ", review.text or "").strip().lower()[:300])
         if key in central_keys:
             skipped += 1
+            set_review_state(db, review, "sincronizzato")
             continue
         pending += 1
+        set_review_state(db, review, "inviato")
+        db.commit()
         room = db.get(Room, review.room_id) if review.room_id else None
         try:
             result = await central_review_upsert({
@@ -265,12 +280,21 @@ async def push_local_reviews(db: Session) -> dict:
                 "room_code": getattr(room, "code", None) if room else None, "text": review.text,
             })
             if not result.get("synced"):
-                errors.append("Supabase centrale non configurato o sessione scaduta")
-                break
+                message = result.get("message") or "Supabase centrale non configurato o sessione scaduta"
+                set_review_state(db, review, "inviato", error=message)
+                db.commit()
+                errors.append(message)
+                continue
             pushed += 1
             central_keys.add(key)
+            set_review_state(db, review, "sincronizzato")
+            db.commit()
         except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc)[:160])
+            message = str(exc)[:160]
+            set_review_state(db, review, "inviato", error=message)
+            db.commit()
+            errors.append(message)
             if len(errors) >= 3:
                 break
-    return {"pending": pending, "pushed": pushed, "skipped_already_central": skipped, "errors": errors}
+    db.commit()
+    return {"pending": pending, "pushed": pushed, "skipped_already_central": skipped, "conflicts": conflicts, "errors": errors}

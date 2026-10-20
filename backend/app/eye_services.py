@@ -15,6 +15,7 @@ from .models import (
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
 )
 from .normalization import normalize_text
+from .review_sync import ensure_review_state
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -236,7 +237,7 @@ def add_review(db: Session, *, hotel_id: int, text: str, review_date: date, rati
             room = Room(hotel_id=hotel_id, code=room_code); db.add(room); db.flush()
     review = Review(hotel_id=hotel_id, room_id=room.id if room else None, source=source, author=author,
                     rating=rating, date=review_date, text=text, raw_file=raw_file, sync_uuid=str(uuid.uuid4()))
-    db.add(review); db.flush()
+    db.add(review); db.flush(); ensure_review_state(db, review)
     tags = classify_review_text(db, text, hotel_id)
     for tag in tags:
         db.add(ReviewTag(review_id=review.id, category_id=tag["category_id"], polarity=tag["polarity"], confidence=tag["confidence"], excerpt=tag.get("excerpt")))
