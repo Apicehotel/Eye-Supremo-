@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import date, datetime
 from email import policy
 from email.parser import BytesParser
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+
+from .normalization import normalize_text
 
 
 def _parse_date(value: str | None, fallback: str) -> str:
@@ -248,6 +251,43 @@ def clean_review_text(text: str) -> str:
         value = re.sub(r"^(?:Camere|Attività nelle vicinanze|Sicurezza|Percorribilità a piedi|Mangiare e bere|Dettagli importanti)\s*", "", value, flags=re.I)
         lines.append(value)
     return "\n".join(lines).strip()
+
+
+REVIEW_SCALES = {"Booking": 10, "Google": 5, "TripAdvisor": 5}
+
+
+def normalized_source(source: str | None) -> str | None:
+    value = (source or "").strip()
+    if not value:
+        return None
+    aliases = {"booking.com": "Booking", "google maps": "Google", "trip advisor": "TripAdvisor"}
+    return aliases.get(value.casefold(), value)
+
+
+def normalized_review_rating(value, source: str | None) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        number = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    scale = REVIEW_SCALES.get(normalized_source(source), 10)
+    return number if number == number and 0 <= number <= scale else None
+
+
+def review_identity(*, hotel_code: str | None, review_date: str | None, room_code: str | None,
+                    source: str | None, rating, text: str) -> str:
+    """Stable identity shared by import, API normalization and duplicate checks."""
+    rating_value = normalized_review_rating(rating, source)
+    parts = (
+        (hotel_code or "").strip().casefold(),
+        (review_date or "").strip(),
+        (room_code or "").strip().casefold(),
+        (normalized_source(source) or "").casefold(),
+        "" if rating_value is None else f"{rating_value:.4f}",
+        normalize_text(clean_review_text(text)),
+    )
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _markitdown_text(path: Path) -> str | None:

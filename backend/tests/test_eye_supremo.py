@@ -832,6 +832,26 @@ def test_import_skips_review_already_stored_inside_a_legacy_whole_email(client, 
     assert body["imported"] == 0 and body["skipped_duplicates"] == 3
 
 
+def test_review_stats_separate_raw_valid_excluded_and_duplicates(client, db):
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text="Recensione Camera 101 pulita e silenziosa", review_date=date(2026, 9, 1), rating=Decimal("8"), room_code="101", source="Booking")
+    add_review(db, hotel_id=hotel.id, text="Recensione Camera 101 pulita e silenziosa", review_date=date(2026, 9, 1), rating=Decimal("8"), room_code="101", source="Booking")
+    add_review(db, hotel_id=hotel.id, text="Recensione Camera 102 voto non leggibile", review_date=date(2026, 9, 2), rating=Decimal("6"), room_code="102", source="Google")
+
+    response = client.get("/api/eye/reviews/stats", params={"hotel_code": "gio"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "raw": 3,
+        "expanded": 3,
+        "normalized": 1,
+        "valid": 1,
+        "excluded": 1,
+        "duplicates": 1,
+        "valid_votes": 1,
+    }
+
+
 def _polarities(db, text):
     return {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
 
