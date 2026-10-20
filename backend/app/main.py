@@ -21,6 +21,7 @@ from .routers.agents_eye import router as agents_router
 from .routers.sync_eye import router as sync_router
 from .routers.updates_eye import router as updates_router
 from . import central_identity
+from .api_versioning import legacy_path
 
 
 @asynccontextmanager
@@ -95,6 +96,15 @@ async def local_auth_guard(request: Request, call_next):
     finally:
         if identity_context is not None:
             central_identity.current_identity.reset(identity_context)
+
+
+@app.middleware("http")
+async def api_v1_compatibility(request: Request, call_next):
+    translated = legacy_path(request.scope.get("path", ""))
+    if translated:
+        request.scope["path"] = translated
+        request.scope["raw_path"] = translated.encode("utf-8")
+    return await call_next(request)
 
 
 app.include_router(auth_router)

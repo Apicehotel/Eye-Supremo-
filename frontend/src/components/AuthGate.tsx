@@ -1,6 +1,6 @@
 import {FormEvent, useEffect, useState} from 'react';
 import {LockKeyhole, ShieldCheck} from 'lucide-react';
-import {clearAuth, currentSession, eyeApi, saveAuth} from '../lib/api';
+import {clearAuth, currentSession, eyeApi, publicApi, saveAuth} from '../lib/api';
 
 type LoginUser = {username: string; display_name: string};
 type AuthStatus = {configured: boolean; central: boolean};
@@ -8,9 +8,7 @@ type IdentityStatus = {offline?: boolean; offline_until?: string | null};
 type LoginResponse = IdentityStatus & {session: string; user: {id: number; username: string; display_name: string; role_name: string}};
 
 async function publicJson<T>(path: string): Promise<T> {
-  const response = await fetch(`/api/eye/auth/${path}`);
-  if (!response.ok) throw new Error('Servizio di accesso non disponibile. Riprova.');
-  return response.json();
+  return publicApi<T>(`/${path}`);
 }
 
 export function AuthGate({children}: {children: React.ReactNode}) {
@@ -63,12 +61,10 @@ export function AuthGate({children}: {children: React.ReactNode}) {
     setError('');
     try {
       const endpoint = status?.configured ? 'login' : 'bootstrap';
-      const response = await fetch(`/api/eye/auth/${endpoint}`, {
+      const payload = await publicApi<LoginResponse>(`/${endpoint}`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({username: username.trim(), pin}),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Accesso non riuscito');
       const login = payload as LoginResponse;
       saveAuth(login);
       setIdentity(login);
