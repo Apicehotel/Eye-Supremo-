@@ -223,3 +223,5 @@ body{background:#f7f8fa;color:var(--ink)}
 .room-averages .review-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}.room-averages-warning{display:flex;align-items:center;gap:8px;margin:0;padding:10px 17px;background:#fff9e8;border-bottom:1px solid var(--border);font-size:12px;color:#8a6500}.room-average-cell{display:flex;flex-direction:column;gap:1px;min-width:90px}.room-average-cell small{font-size:10px;color:var(--muted)}.room-average-empty{color:#b6bcc6}
 
 .score-chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}.score-chips span{border:1px solid var(--line,#d9dee7);border-radius:999px;padding:2px 9px;font-size:12px;color:var(--muted,#5b6472);white-space:nowrap}.score-chips b{color:inherit;font-weight:700}
+
+.ranking-fold{margin-top:15px}.ranking-fold>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px}.ranking-fold>summary::-webkit-details-marker{display:none}.ranking-fold>summary::after{content:'▾';color:var(--muted);margin-left:8px}.ranking-fold[open]>summary::after{content:'▴'}.ranking-fold:not([open])>summary{border-bottom:0!important}
