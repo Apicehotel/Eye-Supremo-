@@ -24,6 +24,7 @@ import {
   Trophy,
   MessageSquareWarning,
   Globe2,
+  BedDouble,
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
@@ -88,7 +89,7 @@ export function Shell({
   const user = currentUser();
   // Permessi unificati: ogni profilo autenticato ha accesso completo.
   const isFullAccess = Boolean(user);
-  const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history">("overview");
+  const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history" | "room-averages">("overview");
   const visibleNav = nav.filter(
     ([id]) => isFullAccess || !["settings", "system"].includes(id),
   );
@@ -183,6 +184,18 @@ export function Shell({
             >
               <Trophy size={19} />
               <span>Ranking</span>
+            </button>
+            <button
+              aria-label="Media voti per camera"
+              className={reviewPage === "reviews" && reviewView === "room-averages" ? "active" : ""}
+              onClick={() => {
+                setReviewPage("reviews");
+                setReviewView("room-averages");
+                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "room-averages" }));
+              }}
+            >
+              <BedDouble size={19} />
+              <span>Media camere</span>
             </button>
             <button
               aria-label="Recensioni"

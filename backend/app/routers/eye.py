@@ -1,7 +1,7 @@
 import json
 import secrets
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
@@ -20,7 +20,7 @@ from ..eye_services import (
     review_rankings, room_rating_timeline, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
-    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
+    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Room, Supplier,
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
@@ -64,7 +64,8 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
             rating=block_rating,
             date_value=block.get("date") or review.date.isoformat(),
         )
-        payload["rating"] = block_rating
+        # Il voto nel testo ha la precedenza; se manca (recensione già separata) vale quello salvato.
+        payload["rating"] = block_rating if block_rating is not None else (float(review.rating) if review.rating is not None else None)
         return [payload]
     expanded = []
     for index, block in enumerate(blocks, start=1):
@@ -177,10 +178,38 @@ def assign_invoice_hotel(invoice_id: int, hotel_code: str, role: str = Depends(c
     return {"ok": True, "invoice_id": invoice_id, "destination": hotel.name, "sync_uuid": meta.sync_uuid}
 
 
+RATING_SCALE = {"booking": 10, "google": 5, "tripadvisor": 5}
+
+
+def _parse_rating(value, source: str | None) -> Decimal | None:
+    """Voto da testo: accetta la virgola decimale e scarta valori illeggibili o fuori scala."""
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        rating = Decimal(str(value).strip().replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return None
+    scale = RATING_SCALE.get((source or "").strip().lower(), 10)
+    return rating if rating.is_finite() and 0 <= rating <= scale else None
+
+
+def _already_imported(db: Session, hotel_id: int, review_date: date, room_code: str | None, source: str | None, text: str) -> bool:
+    """Una recensione identica (hotel, data, camera, fonte e testo) non viene importata due volte."""
+    stmt = select(Review.id).where(
+        Review.hotel_id == hotel_id, Review.date == review_date, Review.text == text,
+        (Review.source == source) if source else Review.source.is_(None),
+    )
+    if room_code:
+        stmt = stmt.join(Room, Review.room_id == Room.id).where(Room.code == room_code)
+    else:
+        stmt = stmt.where(Review.room_id.is_(None))
+    return db.scalar(stmt.limit(1)) is not None
+
+
 @router.post("/reviews/import/{hotel_code}")
 async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username)
-    imported, errors = [], []
+    imported, errors, skipped = [], [], 0
     for file in files[:200]:
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in {".msg", ".eml", ".txt"}:
@@ -195,21 +224,32 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
             if not parsed_reviews:
                 errors.append({"file": file.filename, "error": "Nessuna recensione riconosciuta nel messaggio"}); continue
             file_count = 0
-            for parsed in parsed_reviews:
-                review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=date.fromisoformat(parsed["date"]),
-                                    rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
-                                    room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
-                imported.append(review.id); file_count += 1
-                sheet_result = await sync_review_defects(db, review)
-                if sheet_result.get("enabled") and not sheet_result.get("sent"):
-                    errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
+            for index, parsed in enumerate(parsed_reviews, start=1):
+                # Un blocco difettoso non deve far perdere le altre recensioni dello stesso file.
                 try:
-                    await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
-                except Exception as sync_exc:
-                    errors.append({"file": file.filename, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
+                    review_date = date.fromisoformat(parsed["date"])
+                    rating = _parse_rating(parsed.get("rating"), parsed.get("source"))
+                    if parsed.get("rating") and rating is None:
+                        errors.append({"file": file.filename, "error": f"Recensione {index}: voto «{parsed['rating']}» non valido, salvata senza voto"})
+                    if _already_imported(db, hotel.id, review_date, parsed.get("room_code"), parsed.get("source"), parsed["text"]):
+                        skipped += 1
+                        continue
+                    review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=review_date, rating=rating,
+                                        room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
+                    imported.append(review.id); file_count += 1
+                    sheet_result = await sync_review_defects(db, review)
+                    if sheet_result.get("enabled") and not sheet_result.get("sent"):
+                        errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
+                    try:
+                        await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
+                    except Exception as sync_exc:
+                        errors.append({"file": file.filename, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
+                except Exception as block_exc:
+                    db.rollback()
+                    errors.append({"file": file.filename, "error": f"Recensione {index} non importata: {block_exc}"})
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
-    return {"hotel": hotel.name, "imported": len(imported), "review_ids": imported, "errors": errors}
+    return {"hotel": hotel.name, "imported": len(imported), "skipped_duplicates": skipped, "review_ids": imported, "errors": errors}
 
 
 @router.get("/reviews")

@@ -166,6 +166,12 @@ Formati supportati:
 
 Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
 
+**Importazione affidabile:** i voti con la virgola (`8,0`, `7,5`) sono accettati; un voto fuori scala (oltre 10 per Booking, oltre 5 per Google e TripAdvisor) viene scartato e la recensione è salvata senza voto, con avviso; un blocco difettoso non ferma le altre recensioni dello stesso file; una recensione identica (hotel, data, camera, fonte e testo) già presente non viene importata di nuovo e l'interfaccia indica quante sono state saltate. Il voto salvato resta visibile anche quando il testo non lo contiene.
+
+**Recensioni solo voto:** una recensione senza testo scritto dall'ospite (solo il punteggio) conta nelle medie, nei voti per fonte e nei ranking, ma non viene mostrata come riga nell'archivio, nello storico e nelle segnalazioni anonime. Al suo posto compare un riquadro «Recensioni solo voto» con una voce per fonte e voto (es. «5 ★ su 10 · Booking · 3 recensioni»).
+
+**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera, **separata per fonte** e senza mescolare le scale: Booking su 10, Google e TripAdvisor su 5 (recensioni solo voto incluse). Per ogni fonte mostra media, numero di voti e minimo–massimo; in alto la media generale per fonte. Si filtra per hotel, si cerca per camera/hotel e si ordina per numero camera, media di una fonte o numero di voti. I voti fuori scala (es. 26 su Booking, causato da un giorno di calendario letto come voto) sono ignorati e segnalati con un avviso. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`).
+
 ## Eye AI e agenti interni
 
 Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
