@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.15`
+**Versione applicativa:** `2.0.16`
+
+**Novità 2.0.16:** nella sezione Recensioni → Ranking ogni camera mostra l’andamento del voto nel tempo: i periodi positivi restano nello storico, mentre una nuova segnalazione negativa apre un nuovo intervallo con le cause rilevate. Le recensioni con difetti possono inoltre essere sincronizzate nel foglio camere senza sovrascritture o doppioni.
 
 **Novità 2.0.15:** profili centrali condivisi con login personale e accesso offline autorizzato; PIN conservati al riavvio; dashboard unificata senza doppioni e valida anche con sole note di credito; backup SQLite coerente e verificato; ricerche con annullamento delle richieste superate; dipendenze frontend fissate alle versioni del lockfile. La pubblicazione richiede prima l'attivazione descritta in `docs/CENTRAL_IDENTITY.md`.
 
