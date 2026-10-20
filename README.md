@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.21`
+**Versione applicativa:** `2.0.22`
+
+**Novità 2.0.22:** il pulsante **Carica file** delle Recensioni non è più muto con "Tutti gli hotel" selezionato: spiega di scegliere prima un singolo hotel nelle schede in alto, poi apre la selezione file.
 
 **Novità 2.0.21:** un numero camera è fatto di cifre (es. 325, 4407, 1108A): parole lette per errore dalle vecchie importazioni ("pulita", "super", "ampia", "Superior"…) non compaiono più come camere in Media camere, nello storico e nei ranking; quelle recensioni risultano senza camera. Controllo in `_valid_room` (`backend/app/routers/eye.py`) e in `frontend/src/lib/roomAverages.ts`.
 
