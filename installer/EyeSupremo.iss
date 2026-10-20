@@ -8,6 +8,7 @@ AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel brow
 AppPublisherURL=https://github.com/Apicehotel/Eye-Supremo-
 AppSupportURL=https://github.com/Apicehotel/Eye-Supremo-/issues
 AppUpdatesURL=https://github.com/Apicehotel/Eye-Supremo-/releases
+AppMutex=EyeSupremoApplication
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
@@ -22,6 +23,7 @@ Uninstallable=yes
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
+UninstallDisplayName=Eye Supremo
 VersionInfoCompany=Apicehotel
 VersionInfoDescription=Eye Supremo - gestione locale hotel
 VersionInfoProductName=Eye Supremo
@@ -49,6 +51,10 @@ Name: "localai"; Description: "Installa Ollama e i modelli IA locali"; GroupDesc
 [Run]
 Filename: "{cmd}"; Parameters: "/c ""{app}\scarica-modelli-ia.bat"" /silent"; Description: "Installa Ollama e i modelli IA locali (Qwen + Llama)"; StatusMsg: "Installazione modelli IA in corso..."; Tasks: localai; Flags: waituntilterminated
 Filename: "{app}\EyeSupremo.exe"; Description: "Avvia Eye Supremo"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; I dati utente sono in %LOCALAPPDATA%\EyeSupremo e non vengono rimossi dagli aggiornamenti.
+Type: filesandordirs; Name: "{app}\logs"
 
 [Code]
 function WebView2Installed: Boolean;

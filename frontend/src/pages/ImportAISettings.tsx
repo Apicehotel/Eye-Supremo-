@@ -890,6 +890,7 @@ export function SystemPage() {
   const user = currentUser();
   const canManage = Boolean(user);
   const [logs, setLogs] = useState<any[]>();
+  const [launcherLogs, setLauncherLogs] = useState<string[]>([]);
   const [update, setUpdate] = useState<any>();
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -948,8 +949,37 @@ export function SystemPage() {
       setUpdateBusy(false);
     }
   }
+  async function stageAndApplyUpdate() {
+    setUpdateBusy(true);
+    setUpdateError("");
+    try {
+      await eyeApi<any>("/updates/stage", { method: "POST" });
+      await eyeApi<any>("/updates/apply", { method: "POST" });
+      setUpdateError("Aggiornamento avviato. Eye Supremo si chiuderà e verrà aggiornato automaticamente.");
+    } catch (error: any) {
+      setUpdateError(updateErrorMessage(error) || "Aggiornamento automatico non riuscito");
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+  async function rollbackUpdate() {
+    if (!window.confirm("Ripristinare il database al punto precedente all’ultimo aggiornamento?")) return;
+    setUpdateBusy(true);
+    setUpdateError("");
+    try {
+      await eyeApi<any>("/updates/rollback", { method: "POST" });
+      setUpdateError("Ripristino completato. Riavvia Eye Supremo per ricaricare i dati.");
+    } catch (error: any) {
+      setUpdateError(updateErrorMessage(error) || "Ripristino non riuscito");
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
   useEffect(() => {
-    if (canManage) api<any[]>("/logs").then(setLogs);
+    if (canManage) {
+      api<any[]>("/logs").then(setLogs);
+      api<{ lines: string[] }>("/logs/launcher").then((value) => setLauncherLogs(value.lines || [])).catch(() => undefined);
+    }
     checkForUpdate();
   }, []);
   const updatePanel = (
@@ -974,6 +1004,9 @@ export function SystemPage() {
             </button>
             <button className="secondary-btn" onClick={() => downloadUpdate(true)} disabled={updateBusy}>
               Download via Eye (fallback)
+            </button>
+            <button className="secondary-btn" onClick={stageAndApplyUpdate} disabled={updateBusy}>
+              Aggiorna automaticamente
             </button>
           </div>
           {update.release_url && (
@@ -1035,6 +1068,10 @@ export function SystemPage() {
             text="Le operazioni importanti verranno registrate qui."
           />
         )}
+      </section>
+      <section className="panel list-panel">
+        <div className="panel-title"><h2>Log launcher</h2><button className="secondary-btn" onClick={rollbackUpdate} disabled={updateBusy}>Ripristina ultimo punto</button></div>
+        {launcherLogs.length ? <pre className="system-log">{launcherLogs.join("\n")}</pre> : <Empty title="Nessun log launcher" text="Il registro di avvio sarà disponibile dopo il primo avvio dell’app desktop." />}
       </section>
     </>
   );

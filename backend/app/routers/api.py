@@ -318,6 +318,16 @@ async def history(db: Session = Depends(get_db)):
 def logs(limit: int = Query(100, le=500), db: Session = Depends(get_db)): return db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)).all()
 
 
+@router.get("/logs/launcher")
+def launcher_logs(limit: int = Query(200, le=1000)):
+    """Tail del log desktop, senza esporre il percorso interno all'interfaccia."""
+    path = settings.data_dir / "logs" / "launcher.log"
+    if not path.exists():
+        return {"available": False, "lines": []}
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return {"available": True, "lines": lines[-limit:]}
+
+
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
     stored = {x.key: x.value for x in db.scalars(select(AppSetting)).all()}
