@@ -39,7 +39,9 @@ export function AuthGate({children}: {children: React.ReactNode}) {
         if (!active) return;
         setStatus(nextStatus);
         setUsers(options);
-        if (!nextStatus.central && options.length) setUsername(current => current || options[0].username);
+        // Anche con identità centrale il profilo locale può essere preselezionato:
+        // il campo resta modificabile e il PIN non viene mai memorizzato.
+        if (options.length) setUsername(current => current || options[0].username);
         if (currentSession()) {
           try {
             const me = await eyeApi<IdentityStatus>('/auth/me');
@@ -65,7 +67,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({username: username.trim(), pin}),
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Accesso non riuscito');
       const login = payload as LoginResponse;
       saveAuth(login);

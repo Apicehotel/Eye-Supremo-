@@ -21,7 +21,10 @@ def test_xml_parser_uses_fiscal_summary_for_taxable_and_vat():
     assert result["invoice"]["totale"] == "122.00"
 
 def test_health_and_empty_search(client):
-    assert client.get("/api/health").status_code == 200
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["app"] == "Eye Supremo"
+    assert response.json()["database"] == "ok"
     assert client.get("/api/search", params={"q":"lampadina"}).json()["results"] == []
 
 def test_database_and_duplicates(db):

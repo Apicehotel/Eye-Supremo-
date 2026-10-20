@@ -46,6 +46,16 @@ def test_desktop_launcher_never_imports_webbrowser():
     assert 'gui="edgechromium"' in source or "gui='edgechromium'" in source
 
 
+def test_desktop_launcher_waits_for_eye_health(monkeypatch):
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def read(self): return b'{"status":"ok","app":"Eye Supremo","database":"ok"}'
+
+    monkeypatch.setattr(desktop_launcher, "urlopen", lambda *args, **kwargs: Response())
+    assert desktop_launcher.wait_for_server(timeout=0.01) is True
+
+
 def test_icon_asset_exists_for_packaging():
     icon = Path(__file__).resolve().parents[2] / "installer" / "assets" / "eye-supremo.ico"
     assert icon.is_file()
