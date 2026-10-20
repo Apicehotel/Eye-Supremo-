@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.23`
+**Versione applicativa:** `2.0.24`
+
+**Novità 2.0.24:** pagina Ranking più focalizzata: prima le quattro classifiche (top 5), poi lo storico delle sole camere sotto soglia e le segnalazioni anonime, entrambi richiudibili. Verificati i duplicati: nessun doppione creato dai caricamenti recenti.
 
 **Novità 2.0.23:** l'app installata è una cartella (`EyeSupremo.exe` + file di supporto) invece di un unico `.exe` che si estraeva in Temp: risolve l'errore «Failed to load Python DLL … python312.dll» all'avvio dopo l'installazione. L'installer sostituisce il vecchio `.exe` senza perdere i dati (sono in `%LOCALAPPDATA%\EyeSupremo`).
 
