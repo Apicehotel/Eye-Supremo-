@@ -27,8 +27,8 @@ def test_review_defects_keeps_each_negative_category_once():
 def test_review_sheet_event_is_idempotent_and_skips_positive_only_reviews(db):
     hotel = db.query(Hotel).filter(Hotel.code == "choco").one()
     room = Room(hotel_id=hotel.id, code="201")
-    category = ReviewCategory(name="Pulizia")
-    db.add_all([room, category])
+    category = db.query(ReviewCategory).filter(ReviewCategory.name == "Pulizia").one()
+    db.add(room)
     db.flush()
     review = Review(hotel_id=hotel.id, room_id=room.id, date=date(2026, 10, 20), text="Camera sporca", rating=Decimal("4"), sync_uuid="event-201")
     db.add(review)
