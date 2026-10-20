@@ -59,6 +59,16 @@ export function roomStatus(average: number, scale: 5 | 10): RoomStatus {
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
+/**
+ * Codici camera plausibili nei digest Booking/hotel Apice: 3–4 cifre
+ * (es. 217, 4411). Valori come ``10`` sono quasi sempre voti Booking
+ * letti da ``Vista dalla camera 10``, non camere reali.
+ */
+export function isPlausibleRoomCode(room: string | null | undefined): boolean {
+  const clean = (room || '').trim();
+  return /^\d{3,4}[A-Za-z]?$/.test(clean) || (/^[A-Za-z0-9-]{2,12}$/.test(clean) && !/^\d{1,2}$/.test(clean));
+}
+
 /** Medie per camera, tenute separate per fonte: nessun voto di scale diverse viene mescolato. */
 export function roomAverages(items: RoomRatingInput[], category: string | null = null): RoomAveragesResult {
   type Group = {hotel: string; hotel_code: string; room: string; lastDate: string; scores: Record<SourceKey, number[]>};
@@ -70,6 +80,7 @@ export function roomAverages(items: RoomRatingInput[], category: string | null =
     // Con un tag scelto vale il voto di quel tag, altrimenti il voto generale.
     const value = category ? (item.scores?.[category] ?? null) : item.rating;
     if (!room || !key || value === null || !Number.isFinite(value)) continue;
+    if (!isPlausibleRoomCode(room)) { invalid += 1; continue; }
     const scale = SOURCES.find(s => s.key === key)!.scale;
     if (value < 0 || value > scale) { invalid += 1; continue; }
     const id = `${item.hotel_code}:${room}`;
