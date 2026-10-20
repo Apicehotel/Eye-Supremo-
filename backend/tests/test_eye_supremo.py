@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from sqlalchemy import select
 from app.eye_services import add_review, classify_review_text, invoice_search_summary
 from app.search_index import invoice_search
@@ -380,6 +381,18 @@ def test_clean_review_text_removes_booking_metadata_and_keeps_guest_text():
     assert clean_review_text("Ottimo soggiorno\nEugenio, it in 03/04/24 out 05/04/24") == "Ottimo soggiorno"
 
 
+def test_clean_review_text_keeps_guest_text_from_multiple_digest_sections():
+    text = """Booking.com recensioni
+    ________________________________
+    Prima recensione: camera pulita e staff gentile
+    ________________________________
+    Seconda recensione: colazione ottima e posizione comoda
+    """
+    cleaned = clean_review_text(text)
+    assert "Prima recensione" in cleaned
+    assert "Seconda recensione" in cleaned
+
+
 def test_review_digest_supports_cam_dot_without_inventing_room_numbers():
     text = """Recensioni Hotel
     7,0
@@ -537,6 +550,39 @@ def test_review_txt_import_endpoint(client):
     assert response.json()["imported"] == 1
     items = client.get("/api/eye/reviews", params={"hotel_code": "choco"}).json()
     assert len(items) == 1
+
+
+def test_review_import_reports_central_sync_failure_without_losing_local_review(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.eye.central_review_upsert",
+        AsyncMock(return_value={"enabled": True, "synced": False, "message": "offline"}),
+    )
+    response = client.post(
+        "/api/eye/reviews/import/choco",
+        files=[("files", ("review.txt", b"Recensione - Camera 102 pulita e staff gentile", "text/plain"))],
+    )
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["imported"] == 1
+    assert payload["errors"][0]["review_id"] == payload["review_ids"][0]
+    assert "offline" in payload["errors"][0]["error"]
+    assert len(client.get("/api/eye/reviews", params={"hotel_code": "choco"}).json()) == 1
+
+
+def test_reviews_sync_retries_all_local_reviews_before_pull(client, db, monkeypatch):
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "choco"))
+    add_review(db, hotel_id=hotel.id, text="Camera 103 pulita", review_date=date(2026, 9, 1), room_code="103")
+    monkeypatch.setattr("app.routers.eye.central_configured", lambda: True)
+    push = AsyncMock(return_value={"enabled": True, "synced": True})
+    monkeypatch.setattr("app.routers.eye.central_review_upsert", push)
+    monkeypatch.setattr("app.routers.eye.refresh_review_cache", AsyncMock(return_value={"ok": True, "imported": 0}))
+    response = client.post("/api/eye/reviews/sync")
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["push"]["attempted"] >= 1
+    assert payload["push"]["synced"] == payload["push"]["attempted"]
+    assert push.await_count == payload["push"]["attempted"]
+    assert payload["pull"]["ok"] is True
 
 
 def test_created_profiles_share_full_access(client):

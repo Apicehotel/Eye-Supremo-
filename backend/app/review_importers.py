@@ -108,9 +108,10 @@ def clean_review_text(text: str) -> str:
     cleaned = re.sub(r"<https?://[^>]+>|<mailto:[^>]+>|https?://\S+", " ", cleaned, flags=re.I)
     cleaned = re.sub(r"<[^>]+>", " ", cleaned)
     google_mode = bool(re.search(r"\bgoogle\b", cleaned, re.I))
-    sections = re.split(r"(?im)^\s*_{10,}\s*$", cleaned)
-    if len(sections) > 1:
-        cleaned = sections[-1]
+    # A digest can use an underline separator before every review.  Keeping
+    # only the last section silently discarded all previous guest text.
+    # Preserve every section and let the metadata filter below remove headers.
+    cleaned = re.sub(r"(?im)^\s*_{10,}\s*$", "\n", cleaned)
     # Inline Booking separators often put the guest text after the
     # translation/footer marker on the same line.
     cleaned = re.sub(r"(?is)^.*?tradotto .*?vedi l['’]originale\s*", "", cleaned)
