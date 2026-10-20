@@ -26,7 +26,8 @@ from ..models import (
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
-from ..review_importers import clean_review_text, extract_category_scores, parse_review_document, split_review_blocks
+from ..review_importers import (clean_review_text, extract_category_scores, normalized_review_rating,
+                                normalized_source, parse_review_document, review_identity, split_review_blocks)
 from ..sync_service import push_to_supabase, sync_configuration
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
@@ -75,7 +76,7 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
         )
         # Il voto nel testo ha la precedenza; se manca (recensione già separata) vale quello salvato.
         payload["rating"] = block_rating if block_rating is not None else (float(review.rating) if review.rating is not None else None)
-        return [payload]
+        return [_finalize_review_payload(payload, review.id)]
     expanded = []
     for index, block in enumerate(blocks, start=1):
         try:
@@ -97,26 +98,54 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
         # ``None`` means the individual block has no recognized score; do not
         # inherit the digest-level score from the parent email.
         payload["rating"] = block_rating
-        expanded.append(payload)
+        expanded.append(_finalize_review_payload(payload, review.id))
     return expanded
 
 
-def _expanded_review_key(payload: dict) -> tuple:
-    """Stable identity for exact duplicate blocks produced by legacy digests."""
-    text = normalize_text(str(payload.get("text") or ""))
-    rating = payload.get("rating")
-    try:
-        rating = round(float(rating), 4) if rating is not None else None
-    except (TypeError, ValueError):
-        rating = None
-    return (
-        payload.get("hotel_code"),
-        payload.get("date"),
-        payload.get("room"),
-        (payload.get("source") or "").strip().lower(),
-        rating,
-        text,
+def _finalize_review_payload(payload: dict, raw_review_id: int) -> dict:
+    source = normalized_source(payload.get("source"))
+    raw_rating = payload.get("rating")
+    rating = normalized_review_rating(raw_rating, source)
+    payload["source"] = source
+    payload["rating"] = rating
+    payload["raw_review_id"] = raw_review_id
+    payload["normalized_key"] = review_identity(
+        hotel_code=payload.get("hotel_code"), review_date=payload.get("date"),
+        room_code=payload.get("room"), source=source, rating=rating,
+        text=payload.get("text") or "",
     )
+    payload["valid"] = bool(clean_review_text(payload.get("text") or "")) and source is not None
+    payload["excluded_reason"] = None if payload["valid"] else "testo o fonte non riconosciuti"
+    if raw_rating is not None and rating is None:
+        payload["valid"] = False
+        payload["excluded_reason"] = "voto fuori scala o non leggibile"
+    return payload
+
+
+def _review_stats(db: Session, hotel_code: str | None = None) -> dict:
+    stmt = select(Review).options(selectinload(Review.hotel), selectinload(Review.room))
+    if hotel_code:
+        stmt = stmt.join(Hotel, Review.hotel_id == Hotel.id).where(Hotel.code == hotel_code)
+    raw_reviews = db.scalars(stmt).all()
+    seen: set[str] = set()
+    expanded = normalized = duplicates = excluded = valid_votes = 0
+    for review in raw_reviews:
+        for payload in _expanded_review_payloads(review):
+            expanded += 1
+            if not payload.get("valid"):
+                excluded += 1
+                continue
+            key = payload["normalized_key"]
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+            normalized += 1
+            if payload.get("rating") is not None:
+                valid_votes += 1
+    return {"raw": len(raw_reviews), "expanded": expanded, "normalized": normalized,
+            "valid": normalized, "excluded": excluded, "duplicates": duplicates,
+            "valid_votes": valid_votes}
 
 
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
@@ -146,6 +175,13 @@ def require_hotel_access(db: Session, hotel: Hotel, role: str, username: str):
     allowed = allowed_hotel_ids(db, role, username)
     if allowed is not None and hotel.id not in allowed:
         raise HTTPException(403, "Hotel non assegnato a questo utente")
+
+
+@router.get("/reviews/stats")
+def review_stats(hotel_code: str | None = None, role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    if hotel_code:
+        require_hotel_access(db, hotel_from_code(db, hotel_code), role, username)
+    return _review_stats(db, hotel_code)
 
 
 @router.get("/hotels")
@@ -247,6 +283,12 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
     hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username)
     imported, errors, skipped, skipped_files = [], [], 0, 0
     seen_files: set[str] = set()
+    existing_keys = {
+        payload["normalized_key"]
+        for review in db.scalars(select(Review).where(Review.hotel_id == hotel.id)).all()
+        for payload in _expanded_review_payloads(review)
+        if payload.get("valid")
+    }
     if len(files) > 200:
         errors.append({"file": None, "error": f"Caricati al massimo 200 file per volta: {len(files) - 200} non elaborati, ricaricali separatamente"})
     for file in files[:200]:
@@ -275,12 +317,15 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                     rating = _parse_rating(parsed.get("rating"), parsed.get("source"))
                     if parsed.get("rating") and rating is None:
                         errors.append({"file": file.filename, "error": f"Recensione {index}: voto «{parsed['rating']}» non valido, salvata senza voto"})
-                    if _already_imported(db, hotel.id, review_date, parsed.get("room_code"), parsed.get("source"), parsed["text"]):
+                    key = review_identity(hotel_code=hotel.code, review_date=review_date.isoformat(),
+                                          room_code=parsed.get("room_code"), source=parsed.get("source"),
+                                          rating=rating, text=parsed["text"])
+                    if key in existing_keys or _already_imported(db, hotel.id, review_date, parsed.get("room_code"), parsed.get("source"), parsed["text"]):
                         skipped += 1
                         continue
                     review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=review_date, rating=rating,
                                         room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
-                    imported.append(review.id); file_count += 1
+                    imported.append(review.id); file_count += 1; existing_keys.add(key)
                     sheet_result = await sync_review_defects(db, review)
                     if sheet_result.get("enabled") and not sheet_result.get("sent"):
                         errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
@@ -315,7 +360,7 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
     # contain many reviews and would otherwise hide them from the archive.
     items = db.scalars(ordered).unique().all()
     result = []
-    seen_expanded: set[tuple] = set()
+    seen_expanded: set[str] = set()
     for review in items:
         for payload in _expanded_review_payloads(review):
             # Legacy archives may not have persisted ReviewTag rows yet. Keep
@@ -330,7 +375,9 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
                 haystack = f"{payload['text']} {payload.get('room') or ''} {payload['hotel']}".lower()
                 if q.lower() not in haystack:
                     continue
-            identity = _expanded_review_key(payload)
+            if not payload.get("valid"):
+                continue
+            identity = payload["normalized_key"]
             if identity in seen_expanded:
                 continue
             seen_expanded.add(identity)
@@ -361,7 +408,7 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
         for item in cached_items:
             if allowed_codes is not None and item.get("hotel_code") not in allowed_codes:
                 continue
-            result.append({
+            cache_payload = _finalize_review_payload({
                 "id": f"cache:{item['sync_uuid']}",
                 "hotel": item.get("hotel") or item.get("hotel_code"),
                 "hotel_code": item.get("hotel_code"),
@@ -373,7 +420,11 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
                 "text": item.get("text"),
                 "tags": [],
                 "origin": "sqlite-cache",
-            })
+            }, 0)
+            if not cache_payload["valid"] or cache_payload["normalized_key"] in seen_expanded:
+                continue
+            seen_expanded.add(cache_payload["normalized_key"])
+            result.append(cache_payload)
     return result[:limit] if limit is not None else result
 
 
