@@ -21,3 +21,18 @@ export function matchesRoomGroup(filter: RoomGroupKey, hotelCode: string, room: 
   const key = roomGroupKey(hotelCode, room);
   return filter === 'cantine' ? key !== 'other' : key === filter;
 }
+
+// Camere con moquette dell'Hotel Giò (filtro "Pavimento", indipendente dalla zona).
+export const GIO_MOQUETTE_ROOMS = ['125', '211', '218', '221', '224', '312', '323', '412'] as const;
+
+export type FloorFilter = 'all' | 'moquette' | 'no-moquette';
+
+export function hasMoquette(hotelCode: string, room: string | null | undefined): boolean {
+  return hotelCode === 'gio' && (GIO_MOQUETTE_ROOMS as readonly string[]).includes((room || '').trim());
+}
+
+export function matchesFloor(filter: FloorFilter, hotelCode: string, room: string | null | undefined): boolean {
+  if (filter === 'all') return true;
+  if (!(room || '').trim()) return false;
+  return (filter === 'moquette') === hasMoquette(hotelCode, room);
+}
