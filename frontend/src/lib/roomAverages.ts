@@ -21,7 +21,16 @@ export type RoomRatingInput = {
   date: string;
   /** Voto originale, sulla scala della sua fonte (Booking 0–10, Google/TripAdvisor 0–5). */
   rating: number | null;
+  /** Voti per tag letti nella recensione (Staff, Pulizia, Colazione…), stessa scala del voto. */
+  scores?: Record<string, number> | null;
 };
+
+/** Tag con almeno un voto, in ordine alfabetico. */
+export function scoreCategories(items: {scores?: Record<string, number> | null}[]): string[] {
+  const names = new Set<string>();
+  for (const item of items) for (const name of Object.keys(item.scores || {})) names.add(name);
+  return [...names].sort((a, b) => a.localeCompare(b, 'it'));
+}
 
 export type SourceAverage = {average: number; count: number; min: number; max: number};
 
@@ -51,19 +60,21 @@ export function roomStatus(average: number, scale: 5 | 10): RoomStatus {
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 /** Medie per camera, tenute separate per fonte: nessun voto di scale diverse viene mescolato. */
-export function roomAverages(items: RoomRatingInput[]): RoomAveragesResult {
+export function roomAverages(items: RoomRatingInput[], category: string | null = null): RoomAveragesResult {
   type Group = {hotel: string; hotel_code: string; room: string; lastDate: string; scores: Record<SourceKey, number[]>};
   const groups = new Map<string, Group>();
   let invalid = 0;
   for (const item of items) {
     const room = (item.room || '').trim();
     const key = sourceKey(item.source);
-    if (!room || !key || item.rating === null || !Number.isFinite(item.rating)) continue;
+    // Con un tag scelto vale il voto di quel tag, altrimenti il voto generale.
+    const value = category ? (item.scores?.[category] ?? null) : item.rating;
+    if (!room || !key || value === null || !Number.isFinite(value)) continue;
     const scale = SOURCES.find(s => s.key === key)!.scale;
-    if (item.rating < 0 || item.rating > scale) { invalid += 1; continue; }
+    if (value < 0 || value > scale) { invalid += 1; continue; }
     const id = `${item.hotel_code}:${room}`;
     const group: Group = groups.get(id) || {hotel: item.hotel, hotel_code: item.hotel_code, room, lastDate: '', scores: {Booking: [], Google: [], TripAdvisor: []}};
-    group.scores[key].push(item.rating);
+    group.scores[key].push(value);
     if (item.date > group.lastDate) group.lastDate = item.date;
     groups.set(id, group);
   }

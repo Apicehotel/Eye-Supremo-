@@ -25,7 +25,7 @@ from ..models import (
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
-from ..review_importers import clean_review_text, parse_review_document, split_review_blocks
+from ..review_importers import clean_review_text, extract_category_scores, parse_review_document, split_review_blocks
 from ..sync_service import push_to_supabase, sync_configuration
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
@@ -44,6 +44,7 @@ def _review_payload(review: Review, *, review_id=None, text: str | None = None, 
         "rating": rating if rating is not None else (float(review.rating) if review.rating is not None else None),
         "date": date_value or review.date.isoformat(),
         "text": clean_review_text(text if text is not None else review.text),
+        "scores": extract_category_scores(text if text is not None else review.text, source if source is not None else review.source),
         "tags": tags if tags is not None else [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in review.tags],
     }
 
