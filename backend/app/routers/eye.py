@@ -17,7 +17,7 @@ from ..review_sheet_sync import sync_review_defects
 from ..database import SessionLocal, get_db
 from ..eye_services import (
     add_review, ensure_invoice_metadata,
-    review_rankings, seed_eye_supremo, classify_review_text,
+    review_rankings, room_rating_timeline, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
     Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
@@ -317,6 +317,14 @@ def rankings_by_hotel(limit: int = Query(5, ge=1, le=25), role: str = Depends(cu
     for hotel in db.scalars(stmt).all():
         result[hotel.code] = {"hotel": hotel.name, **review_rankings(db, hotel_id=hotel.id, limit=limit)}
     return result
+
+
+@router.get("/rankings/timeline")
+def rankings_timeline(hotel_code: str | None = None, role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    hotel_id = None
+    if hotel_code:
+        hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
+    return {"rooms": room_rating_timeline(db, hotel_id=hotel_id)}
 
 
 @router.get("/emerging-themes")
