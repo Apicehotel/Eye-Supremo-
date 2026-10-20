@@ -24,9 +24,44 @@ PRODUCT_FAMILY_ALIASES = {
     "c igienica": ("carta igienica", "c igienica"),
     "carta igienica": ("carta igienica", "c igienica"),
     "c ig": ("carta igienica", "c ig"),
-    "bomboloni": ("bomboloni", "bombolino", "bombolini", "bombolone"),
-    "bombolone": ("bomboloni", "bombolino", "bombolini", "bombolone"),
+    # Sinonimi: in fattura la stessa cosa è «marmellata», «confettura» o «MARM.».
+    "marmellata": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "marmellate": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "mozzarella": ("mozzarella", "mozzarelle", "mozz"),
+    "mozzarelle": ("mozzarella", "mozzarelle", "mozz"),
+    "confettura": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "confetture": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
+    "bomboloni": (
+        "bomboloni", "bombolino", "bombolini", "bombolone",
+        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
+        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
+    ),
+    "bombolone": (
+        "bomboloni", "bombolino", "bombolini", "bombolone",
+        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
+        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
+    ),
 }
+
+# Stem sicuri per match substring (es. minibomboloni). Mai "bombol": matcherebbe bombola.
+PRODUCT_FAMILY_STEMS = {
+    "bomboloni": "bombolon",
+    "bombolone": "bombolon",
+}
+
+# Famiglie con collisioni note: la riga deve contenere almeno uno di questi token.
+PRODUCT_REQUIRED_SUBSTRINGS = {
+    "marmellata": ("marmellat", "confettur", "marm "),
+    "marmellate": ("marmellat", "confettur", "marm "),
+    "confettura": ("marmellat", "confettur", "marm "),
+    "confetture": ("marmellat", "confettur", "marm "),
+    "bomboloni": ("bombolin", "bombolon"),
+    "bombolone": ("bombolin", "bombolon"),
+}
+
+# Stem generici troppo corti/ambigui: non usarli in ILIKE substring.
+UNSAFE_GENERIC_STEMS = {"bombol", "lamp", "acqu", "cart"}
 
 # These are invoice line items, not products. Keep them available to the
 # supplier/expense views, but out of the product catalogue and its search.
@@ -60,9 +95,241 @@ def is_non_product_query(query: str) -> bool:
     return any(token in NON_PRODUCT_TOKENS or token.startswith(NON_PRODUCT_PREFIXES) for token in tokens)
 
 
-def search_terms(query: str) -> tuple[str, ...]:
+# Parole tipiche delle domande Ask: non devono entrare in FTS/ILIKE come AND.
+QUESTION_FILLERS = {
+    "quanto", "quale", "quali", "chi", "cosa", "come", "dove", "quando", "perche", "perché",
+    "ho", "hai", "abbiamo", "hanno", "mi", "ti", "ci", "si", "lo", "la", "le", "li", "gli",
+    "il", "i", "un", "una", "uno", "del", "della", "dei", "delle", "degli", "dal", "dalla",
+    "da", "di", "in", "nel", "nella", "nei", "negli", "nelle", "su", "sul", "sulla", "per",
+    "con", "tra", "fra", "e", "o", "a", "al", "alla", "ai", "alle",
+    "speso", "pagato", "costo", "costa", "costano", "prezzo", "prezzi", "media", "medio",
+    "vende", "vendono", "fornitore", "fornitori", "fornisce", "meglio", "peggio", "migliore",
+    "migliori", "peggiore", "peggiori", "confronta", "confronto", "storico", "totale",
+    "fattura", "fatture", "prodotto", "prodotti", "acquisto", "acquisti", "acquistato",
+    "fammi", "vedere", "mostra", "dimmi", "trova", "cerca", "elenco", "lista", "classifica",
+    "analizza", "analisi", "risulta", "archivio", "locale", "tutti", "tutte", "piu", "più",
+    "meno", "alto", "alta", "basso", "bassa", "ultimo", "ultima", "recente",
+}
+
+
+_QUOTED = re.compile(r'["“”«»]([^"“”«»]+)["“”«»]')
+
+
+def exact_phrases(query: str) -> list[str]:
+    """Parole tra virgolette ("olio") = ricerca esatta: parola intera, niente varianti né parti di parola."""
+    return [p for p in (normalize_text(m).strip() for m in _QUOTED.findall(query or "")) if p]
+
+
+def _has_exact_phrases(description: str, phrases: list[str]) -> bool:
+    text = " " + normalize_text(description).strip() + " "
+    return all(f" {p} " in text for p in phrases)
+
+
+def extract_product_query(query: str) -> str:
+    """Estrae il prodotto da una domanda in linguaggio naturale.
+
+    Senza questo, Ask manda in ricerca tutta la frase
+    («chi mi vende meglio i bomboloni») e FTS/ILIKE richiedono
+    anche «chi»/«vende»/«meglio» sulla riga fattura → zero risultati.
+    """
+    exact = exact_phrases(query)
+    if exact:
+        return " ".join(f'"{p}"' for p in exact)
     normalized = normalize_text(query).strip()
-    return PRODUCT_FAMILY_ALIASES.get(normalized, (query.strip(),))
+    if not normalized:
+        return ""
+    # Alias multi-parola noti (es. «carta igienica») hanno priorità.
+    for alias in sorted(PRODUCT_FAMILY_ALIASES, key=len, reverse=True):
+        if " " not in alias:
+            continue
+        if re.search(rf"\b{re.escape(alias)}\b", normalized):
+            return alias
+    tokens = [t for t in normalized.split() if t not in QUESTION_FILLERS and len(t) >= 3]
+    # Più parole («crostata marmellata»): sono tutte parte del prodotto, non si riduce a un solo sinonimo.
+    if len(tokens) > 1:
+        return " ".join(tokens)
+    # Singolo token che coincide con un alias o una sua variante.
+    for token in tokens:
+        if token in PRODUCT_FAMILY_ALIASES:
+            return token
+        for key, variants in PRODUCT_FAMILY_ALIASES.items():
+            if token in variants:
+                return key
+            if any(token.startswith(v[: max(4, len(v) - 1)]) for v in variants if len(v) >= 4):
+                return key
+    return " ".join(tokens) if tokens else normalized
+
+
+def search_terms(query: str) -> tuple[str, ...]:
+    """Varianti di ricerca per QUALSIASI prodotto in fattura, non solo alias noti."""
+    needle = extract_product_query(query)
+    normalized = normalize_text(needle).strip()
+    if exact_phrases(needle):
+        return tuple(exact_phrases(needle))
+    if not normalized:
+        return (query.strip(),) if query.strip() else ()
+    if normalized in PRODUCT_FAMILY_ALIASES:
+        return PRODUCT_FAMILY_ALIASES[normalized]
+    # Prodotti fuori tassonomia: tieni il needle + forma senza ultima vocale
+    # (limoncelli←limoncello, pavimenti←pavimento) senza aprire substring pericolose.
+    variants = [normalized]
+    for token in normalized.split():
+        if len(token) >= 6 and token[-1] in "aeiou":
+            stem = token[:-1]
+            if stem not in UNSAFE_GENERIC_STEMS and stem not in variants:
+                variants.append(stem)
+        if token not in variants:
+            variants.append(token)
+    return tuple(dict.fromkeys(variants))
+
+
+def match_terms(query: str) -> tuple[str, ...]:
+    """Termini per decidere se una riga è il prodotto cercato.
+
+    Una ricerca a più parole («crostata marmellata») deve avere TUTTE le parole (con plurali e sinonimi);
+    ``search_terms`` resta largo perché serve a recuperare le righe candidate da centrale/cache.
+    """
+    needle = normalize_text(extract_product_query(query)).strip()
+    if needle and not exact_phrases(query) and needle not in PRODUCT_FAMILY_ALIASES and len(needle.split()) > 1:
+        return (needle,)
+    return search_terms(query)
+
+
+def product_stem(query: str) -> str | None:
+    """Stem per match substring su ogni prodotto (minibomboloni, minilimoncello, …)."""
+    needle = normalize_text(extract_product_query(query) or query).strip()
+    if not needle:
+        return None
+    if needle in PRODUCT_FAMILY_STEMS:
+        return PRODUCT_FAMILY_STEMS[needle]
+    for key, stem in PRODUCT_FAMILY_STEMS.items():
+        if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
+            return stem
+    # Più parole: servono tutte (match_terms); lo stem della parola più lunga farebbe passare tutto.
+    if len(needle.split()) > 1:
+        return None
+    # Stem generico: token più lungo, togli desinenza plurale/vocale finale.
+    token = max(needle.split(), key=len)
+    if len(token) < 7:
+        return None
+    stem = token
+    for suffix in ("zioni", "ioni", "oni", "ini", "ina", "one", "ani", "i", "e", "a", "o"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 6:
+            stem = token[: -len(suffix)]
+            break
+    if len(stem) < 6 or stem in UNSAFE_GENERIC_STEMS:
+        return None
+    return stem
+
+
+def required_substrings(query: str) -> tuple[str, ...] | None:
+    """Token obbligatori anti-collisione (bomboloni≠bombola). None = nessun vincolo extra."""
+    needle = normalize_text(extract_product_query(query) or query).strip()
+    if needle in PRODUCT_REQUIRED_SUBSTRINGS:
+        return PRODUCT_REQUIRED_SUBSTRINGS[needle]
+    for key, required in PRODUCT_REQUIRED_SUBSTRINGS.items():
+        if needle in PRODUCT_FAMILY_ALIASES.get(key, ()):
+            return required
+    return None
+
+
+def description_matches_product(description: str, query: str) -> bool:
+    """True se la descrizione riga fattura appartiene al prodotto cercato (qualsiasi)."""
+    text = normalize_text(description)
+    if not text:
+        return False
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
+    compact = text.replace(" ", "")
+    words = text.split()
+    required = required_substrings(query)
+    if required and not any(token in text or token in compact for token in required):
+        return False
+    stem = product_stem(query)
+    if stem and (stem in compact or stem in text):
+        return True
+    needle = normalize_text(extract_product_query(query) or query)
+    if not needle:
+        return False
+    for term in match_terms(needle):
+        term_n = normalize_text(term)
+        if not term_n:
+            continue
+        # Parole corte solo a inizio parola: «vino» non deve trovare «bovino», «olio» non «gasolio».
+        if len(term_n) >= 6:
+            if term_n in text or term_n.replace(" ", "") in compact:
+                return True
+        elif re.search(r"(?<![a-z0-9])" + re.escape(term_n), text):
+            return True
+        # Token della query tutti presenti (ordine libero) nella descrizione.
+        term_tokens = [t for t in term_n.split() if len(t) >= 3]
+        def _word_has(t: str) -> bool:
+            options = PRODUCT_FAMILY_ALIASES.get(t) or (t,)
+            return any(
+                w.startswith(o) or (len(o) >= 6 and o in w) or w.startswith(o[: max(4, len(o) - 1)])
+                for o in options for w in words if " " not in o
+            )
+
+        if term_tokens and all(_word_has(t) for t in term_tokens):
+            return True
+        # Parola composta: limoncello ⊂ minilimoncello / limoncello70cl
+        if len(term_n) >= 5 and any(term_n in w or (len(term_n) >= 6 and term_n[:-1] in w) for w in words):
+            return True
+    return False
+
+
+def row_matches_product_query(description: str, query: str) -> bool:
+    """Filtro post-ricerca: anti-collisione se serve, altrimenti accetta match motore."""
+    if not (query or "").strip():
+        return bool(str(description or "").strip())
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
+    required = required_substrings(query)
+    if not required:
+        # Nessuna collisione nota: tieni i hit di FTS/cache/centrale.
+        return bool(str(description or "").strip())
+    text = normalize_text(description)
+    compact = text.replace(" ", "")
+    return any(token in text or token in compact for token in required)
+
+
+def diversify_by_supplier(
+    records: list[dict],
+    *,
+    supplier_key: str = "supplier",
+    limit: int | None = None,
+) -> list[dict]:
+    """Interleave per fornitore: la prima pagina non è monopolizzata da un solo vendor."""
+    buckets: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for row in records:
+        key = str(row.get(supplier_key) or "—")
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(row)
+    out: list[dict] = []
+    while any(buckets.values()):
+        for key in order:
+            if buckets.get(key):
+                out.append(buckets[key].pop(0))
+                if limit is not None and len(out) >= limit:
+                    return out
+    return out
+
+
+def supplier_breakdown(records: list[dict], *, supplier_key: str = "supplier") -> list[dict]:
+    """Conteggio fornitori sul match set completo (per UI/Ask)."""
+    counts: dict[str, int] = {}
+    for row in records:
+        key = str(row.get(supplier_key) or "—")
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        {"supplier": name, "rows": count}
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
 
 
 def is_family_match(description: str, query: str) -> bool:
@@ -104,26 +371,48 @@ def is_family_match(description: str, query: str) -> bool:
 def is_product_search_match(description: str, query: str) -> bool:
     """Reject broad central-search hits unrelated to the displayed name."""
     text = normalize_text(description)
+    exact = exact_phrases(query)
+    if exact:
+        return _has_exact_phrases(description, exact)
     query_text = normalize_text(query).strip()
     if not query_text:
         return True
     if is_non_product_query(query_text):
         return False
+    tokens = set(text.split())
     if query_text in PRODUCT_FAMILY_ALIASES:
         if query_text in {"c igienica", "carta igienica", "c ig"}:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
-        return is_family_match(description, query_text)
-    terms = search_terms(query_text)
-    tokens = set(text.split())
+        if query_text in {"acqua", "acque", "lampadine", "lamp", "lampada", "a4", "carta a4"}:
+            return is_family_match(description, query_text)
+    terms = match_terms(query_text)
 
     def matches(token: str) -> bool:
+        # Più parole: ognuna vale anche con i suoi sinonimi (marmellata ≈ marm ≈ confettura).
+        variants = PRODUCT_FAMILY_ALIASES.get(token)
+        if variants and len(variants) > 1 and any(matches_one(v) for v in variants):
+            return True
+        return matches_one(token)
+
+    def matches_one(token: str) -> bool:
         if token in tokens:
+            return True
+        # Plurale/singolare: «crostata» ≈ «crostate» (radice senza ultima vocale, da 6 caratteri).
+        if len(token) >= 6 and token[-1] in "aeio" and any(c.startswith(token[:-1]) for c in tokens):
+            return True
+        # Ricerca per parte di parola: «bombo» trova «bombolino», «limon» trova «limoncello».
+        # Sotto i 4 caratteri sarebbe troppo largo (es. «car», «ac»).
+        # In mezzo alla parola solo da 6 caratteri: «uova» non deve trovare «nuova».
+        if len(token) >= 4 and any(
+            candidate.startswith(token) or (len(token) >= 6 and token in candidate) for candidate in tokens
+        ):
             return True
         # Accept small typographical errors such as ``igenica``/``igienica``
         # without turning short or unrelated searches into broad matches.
         return any(
-            len(token) >= 5 and abs(len(candidate) - len(token)) <= 2
-            and fuzz.ratio(token, candidate) >= 82
+            len(token) >= 6 and abs(len(candidate) - len(token)) <= 1
+            and candidate[:1] == token[:1]
+            and fuzz.ratio(token, candidate) >= 85
             for candidate in tokens
         )
 

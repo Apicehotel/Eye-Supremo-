@@ -2,19 +2,19 @@ import json
 import re
 import uuid
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from .auth_models import LocalCredential
 from .auth_service import DEFAULT_PIN, set_pin
+from .config import settings
 from .models import (
     Alert, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, InvoiceRowPolicy,
     Review, ReviewCategory, ReviewTag, RoleExclusion, Room, Supplier, UserProfile,
 )
 from .normalization import normalize_text
-from .product_taxonomy import search_terms
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -46,8 +46,11 @@ CATEGORY_KEYWORDS = {
     "Cuscini": ["cuscino", "cuscini"],
 }
 POSITIVE_WORDS = {"ottimo", "ottima", "ottimi", "ottime", "eccellente", "pulito", "pulita", "pulitissimo", "pulitissima", "pulitissimi", "pulitissime", "gentile", "gentilissimo", "gentilissima", "comodo", "comoda", "confortevole", "confortevoli", "agevole", "agevoli", "funzionale", "funzionali", "spazioso", "spaziosa", "silenzioso", "silenziosa", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica", "fantastiche", "super", "ricca", "ricco", "abbondante", "abbondanti", "accettabile", "cordiale", "cordialissimo", "cordialissima", "disponibile", "accogliente", "divina", "bello", "bella", "belle", "bravo", "bravissimi", "onesto", "onestissimo", "ampio", "ampia", "ampi", "ampie", "vicino", "vicina", "vicini", "innovativa", "garantiti", "molta", "molte", "scelta", "varietà", "varieta", "ok"}
-NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rumorosa", "rotto", "rotta", "scomodo", "scomoda", "disagio", "disagevole", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi", "stretto", "stretta", "vecchio", "vecchia", "datato", "datata", "datate", "distante", "lontano", "lontana", "pochi", "poche", "poco", "poca", "limitato", "limitata", "limitate", "deludente", "neo"}
-NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza"}
+NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rumorosa", "rotto", "rotta", "scomodo", "scomoda", "disagio", "disagevole", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi", "stretto", "stretta", "vecchio", "vecchia", "datato", "datata", "datate", "distante", "lontano", "lontana", "pochi", "poche", "poco", "poca", "limitato", "limitata", "limitate", "deludente", "neo", "vuoto", "vuota", "vuoti", "vuote", "lontani", "lontane"}
+# "non è per nulla lontano": la negazione può essere rinforzata (per nulla, affatto, per niente);
+# più marcatori nella stessa finestra valgono come una sola negazione, non si annullano a vicenda.
+NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza", "nulla", "niente", "affatto", "nemmeno", "neanche", "mica", "privo", "priva"}
+NEGATION_WINDOW = 4
 
 
 def seed_eye_supremo(db: Session) -> None:
@@ -59,12 +62,12 @@ def seed_eye_supremo(db: Session) -> None:
         if not db.scalar(select(UserProfile).where(UserProfile.username == username)):
             db.add(UserProfile(username=username, display_name=display, role_name=role, can_manage_config=can_manage))
     db.flush()
-    # Temporarily keep every local profile at the same full-access level and
-    # PIN for the current PC rollout.
+    # Il seed viene eseguito a ogni avvio: preserva credenziali e sessioni esistenti.
     for user in db.scalars(select(UserProfile)).all():
         user.role_name = "developer" if user.username == "sviluppatore" else "supremo"
         user.can_manage_config = True
-        set_pin(db, user, DEFAULT_PIN)
+        if not settings.central_identity_enabled and db.get(LocalCredential, user.id) is None:
+            set_pin(db, user, DEFAULT_PIN)
     for name in REVIEW_CATEGORY_SEEDS:
         if not db.scalar(select(ReviewCategory).where(ReviewCategory.name == name)):
             db.add(ReviewCategory(name=name, auto_learned=False))
@@ -100,9 +103,8 @@ def apply_row_policies(db: Session, invoice: Invoice) -> None:
 
 
 def role_exclusions(db: Session, role_name: str) -> list[RoleExclusion]:
-    if role_name in {"developer", "supremo"}:
-        return []
-    return list(db.scalars(select(RoleExclusion).where(RoleExclusion.role_name == role_name, RoleExclusion.enabled.is_(True))).all())
+    # Livelli eliminati: nessun profilo attivo usa più le esclusioni per ruolo.
+    return []
 
 
 def row_visible_to_role(db: Session, role_name: str, row: InvoiceRow, supplier: Supplier | None = None) -> bool:
@@ -125,49 +127,10 @@ def row_visible_to_role(db: Session, role_name: str, row: InvoiceRow, supplier: 
     return True
 
 
-def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int = 50) -> list[dict]:
-    q = normalize_text(query).strip()
-    terms = [x for x in q.split() if x not in {"quanto", "speso", "pagato", "abbiamo", "ho", "per", "il", "la", "le", "i", "un", "una", "di", "da"}]
-    needle = " ".join(terms).strip()
-    year = re.search(r"\b(19|20)\d{2}\b", q)
-    stmt = (select(InvoiceRow, Invoice, Supplier)
-            .select_from(InvoiceRow)
-            .join(Invoice, InvoiceRow.invoice_id == Invoice.id)
-            .join(Supplier, Invoice.supplier_id == Supplier.id)
-            .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product)))
-    if year:
-        stmt = stmt.where(func.strftime("%Y", Invoice.data) == year.group(0))
-        needle = needle.replace(year.group(0), " ").strip()
-    if needle:
-        fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata, Supplier.ragione_sociale, Invoice.numero)
-        clauses = []
-        for term in tuple(dict.fromkeys(search_terms(needle) + (needle,))):
-            clauses.append(and_(*[or_(*[field.ilike(f"%{token}%") for field in fields]) for token in normalize_text(term).split()]))
-        stmt = stmt.where(or_(*clauses))
-    rows = db.execute(stmt.order_by(Invoice.data.desc()).limit(max(limit * 4, 100))).all()
-    if needle and not rows:
-        candidates = db.execute((select(InvoiceRow, Invoice, Supplier)
-            .select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id)
-            .join(Supplier, Invoice.supplier_id == Supplier.id)
-            .options(selectinload(InvoiceRow.policy), selectinload(InvoiceRow.product))
-            .order_by(Invoice.data.desc()).limit(1500))).all()
-        scored = [(fuzz.WRatio(needle, normalize_text(r.descrizione_originale)), (r, i, s)) for r, i, s in candidates]
-        rows = [item for score, item in sorted(scored, key=lambda x: x[0], reverse=True) if score >= 55][:limit * 2]
-    result = []
-    for row, inv, supplier in rows:
-        if not row_visible_to_role(db, role_name, row, supplier):
-            continue
-        result.append({
-            "row_id": row.id, "invoice_id": inv.id, "invoice": inv.numero,
-            "date": inv.data.isoformat(), "supplier": supplier.ragione_sociale,
-            "description": row.descrizione_originale, "quantity": float(row.quantita),
-            "unit_price": float(row.prezzo_unitario), "row_total": float(row.totale_riga),
-            "normalized_price": float(row.prezzo_normalizzato) if row.prezzo_normalizzato is not None else None,
-            "unit": row.unita_normalizzata, "analysis_status": row.policy.analysis_status if row.policy else "product",
-        })
-        if len(result) >= limit:
-            break
-    return result
+def invoice_search(db: Session, query: str, role_name: str = "developer", limit: int | None = None) -> list[dict]:
+    """Delega all'indice FTS: ricerca estesa a tutto l'archivio, senza tetti nascosti."""
+    from .search_index import invoice_search as fts_invoice_search
+    return fts_invoice_search(db, query, role_name=role_name, limit=limit)
 
 
 def invoice_search_summary(records: list[dict]) -> dict:
@@ -199,7 +162,7 @@ def classify_review_text(db: Session, text: str, hotel_id: int | None = None) ->
             negative = 0
             ordered_tokens = re.findall(r"[a-zà-ÿ]+", sentence)
             for index, token in enumerate(ordered_tokens):
-                window = ordered_tokens[max(0, index - 3):index]
+                window = ordered_tokens[max(0, index - NEGATION_WINDOW):index]
                 inverted = any(negation in window for negation in NEGATIONS)
                 if token in POSITIVE_WORDS:
                     negative += 1 if inverted else 0
@@ -328,6 +291,91 @@ def review_rankings(db: Session, hotel_id: int | None = None, limit: int = 5) ->
     }
 
 
+ROOM_RANKING_CATEGORIES = {"Camere / Arredi", "Letti", "Pulizia"}
+
+
+def _room_review_score(review: Review) -> tuple[float | None, int, int]:
+    """Normalise one room review to a comparable 0–10 score.
+
+    The guest's score remains the strongest signal.  When room-specific tags
+    are available, they temper it so a new negative defect is visible in the
+    timeline even if the source score is not yet present.
+    """
+    tags = [tag for tag in review.tags if tag.category and tag.category.name in ROOM_RANKING_CATEGORIES]
+    positive = sum(tag.polarity != "negative" for tag in tags)
+    negative = sum(tag.polarity == "negative" for tag in tags)
+    source = (review.source or "").strip().casefold()
+    score = None
+    if review.rating is not None:
+        scale = 2 if source in {"google", "tripadvisor"} else 1
+        score = float(review.rating) * scale
+    if positive or negative:
+        tag_score = positive / (positive + negative) * 10
+        score = tag_score if score is None else (score * 2 + tag_score) / 3
+    return (round(score, 2) if score is not None else None, positive, negative)
+
+
+def room_rating_timeline(db: Session, hotel_id: int | None = None) -> list[dict]:
+    """Return ranking periods that change only when the room's state changes.
+
+    A period starts with the first dated signal and remains valid until the
+    day before a material change.  This keeps a past good period visible when
+    later negative feedback lowers the current room score.
+    """
+    rows = db.scalars(
+        select(Review)
+        .options(selectinload(Review.room), selectinload(Review.hotel), selectinload(Review.tags).selectinload(ReviewTag.category))
+        .where(Review.room_id.is_not(None), *([Review.hotel_id == hotel_id] if hotel_id else []))
+        .order_by(Review.date, Review.id)
+    ).unique().all()
+    grouped: dict[tuple[int, int], list[Review]] = defaultdict(list)
+    for review in rows:
+        if review.room is not None:
+            grouped[(review.hotel_id, review.room_id)].append(review)
+
+    result = []
+    for _, reviews in grouped.items():
+        periods: list[dict] = []
+        window: list[float] = []
+        for review in reviews:
+            score, positive, negative = _room_review_score(review)
+            if score is None:
+                continue
+            window.append(score)
+            window = window[-3:]
+            # The newest feedback weighs more: a fresh defect must not be
+            # hidden by an old favourable stay.
+            weights = list(range(1, len(window) + 1))
+            dynamic_score = round(sum(value * weight for value, weight in zip(window, weights)) / sum(weights), 2)
+            status = "attenzione" if dynamic_score < 6 else "monitorare" if dynamic_score < 7.5 else "ok"
+            causes = sorted({tag.category.name for tag in review.tags if tag.polarity == "negative" and tag.category and tag.category.name in ROOM_RANKING_CATEGORIES})
+            previous = periods[-1] if periods else None
+            changed = previous is None or previous["status"] != status or abs(dynamic_score - previous["score"]) >= 1
+            if changed:
+                if previous:
+                    previous["to"] = (review.date - timedelta(days=1)).isoformat()
+                periods.append({
+                    "from": review.date.isoformat(), "to": None, "score": dynamic_score,
+                    "status": status, "reviews": 1, "positive": positive,
+                    "negative": negative, "causes": causes,
+                })
+            else:
+                previous["reviews"] += 1
+                previous["positive"] += positive
+                previous["negative"] += negative
+                previous["causes"] = sorted(set(previous["causes"]) | set(causes))
+
+        if periods:
+            room = reviews[0].room
+            hotel = reviews[0].hotel
+            result.append({
+                "hotel": hotel.name, "hotel_code": hotel.code, "room": room.code,
+                "current_score": periods[-1]["score"], "current_status": periods[-1]["status"],
+                "periods": periods,
+            })
+    return sorted(result, key=lambda item: (item["current_score"], item["hotel"], item["room"]))
+
+
 def create_price_alerts(db: Session, invoice: Invoice, threshold_pct: float = 20.0) -> list[Alert]:
     created = []
     for row in invoice.rows:
@@ -355,3 +403,4 @@ def create_price_alerts(db: Session, invoice: Invoice, threshold_pct: float = 20
                           entity_type="invoice_row", entity_id=row.id)
             db.add(alert); created.append(alert)
     return created
+

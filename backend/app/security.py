@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from .auth_service import auth_configured, session_user
 from .database import get_db
 
-VALID_ROLES = {"developer", "supremo", "level1", "level2", "level3"}
+VALID_ROLES = {"developer", "supremo"}
 
 
 def current_role(

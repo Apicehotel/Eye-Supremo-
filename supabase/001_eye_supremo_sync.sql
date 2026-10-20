@@ -1,6 +1,6 @@
 create table if not exists public.eye_sync_memberships (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  role_name text not null check (role_name in ('developer','supremo','level1','level2','level3')),
+  role_name text not null check (role_name in ('developer','supremo')),
   hotel_codes text[] not null default '{}',
   can_read_all boolean not null default false,
   active boolean not null default true,

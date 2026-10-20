@@ -10,12 +10,36 @@ on:
   push:
     tags:
       - 'v*'
+    branches: [main]
+    paths: ['installer/EyeSupremo.iss']
 
 permissions:
   contents: write
 
 jobs:
+  # Su main la release parte da sola quando cambia installer/EyeSupremo.iss (filtro `paths` sopra)
+  # e la versione non è già stata pubblicata; resta possibile avviarla a mano o con `[release]`.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ] || [ "$GITHUB_REF_TYPE" = 'tag' ]; then echo run=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          version=$(sed -n 's/^AppVersion=//p' installer/EyeSupremo.iss | head -1 | tr -d '\r ')
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Release v$version già pubblicata: nessuna nuova build."; echo run=false >> "$GITHUB_OUTPUT"
+          else
+            echo run=true >> "$GITHUB_OUTPUT"
+          fi
+
   release-windows:
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,15 +57,19 @@ jobs:
       - name: Risolvi versione
         id: version
         shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "name=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$RELEASE_VERSION_INPUT" ]; then
+            version="$RELEASE_VERSION_INPUT"
+          elif [ "$GITHUB_REF_TYPE" = 'tag' ]; then
+            version="${GITHUB_REF_NAME#v}"
           else
-            raw="${GITHUB_REF_NAME}"
-            echo "tag=${raw}" >> "$GITHUB_OUTPUT"
-            echo "name=${raw#v}" >> "$GITHUB_OUTPUT"
+            version=$(node -p 'JSON.parse(require("fs").readFileSync("frontend/package.json","utf8")).version')
           fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Versione non valida'; exit 1; }
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "name=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verifica versione installer
         shell: powershell
@@ -60,8 +88,9 @@ jobs:
       - name: Smoke test eseguibile
         shell: powershell
         run: |
+          $env:EYE_SUPREMO_HEADLESS = '1'
           $env:EYE_SUPREMO_NO_BROWSER = '1'
-          $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo.exe" -PassThru
+          $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo\EyeSupremo.exe" -PassThru
           $ok = $false
           try {
             for ($i = 0; $i -lt 60; $i++) {
@@ -84,13 +113,15 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 non disponibile' }
           & $iscc 'installer\EyeSupremo.iss'
-          if (-not (Test-Path 'release\EyeSupremo-Setup.exe')) { throw 'Installer non prodotto' }
+          if (-not (Test-Path 'release\EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe')) { throw 'Installer con versione nel nome non prodotto (controlla OutputBaseFilename in installer\EyeSupremo.iss)' }
 
       - name: Pubblica GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: Eye Supremo ${{ steps.version.outputs.name }}
-          files: release/EyeSupremo-Setup.exe
+          files: release/EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
+

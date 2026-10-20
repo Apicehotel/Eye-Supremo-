@@ -12,7 +12,7 @@ from app.agent_orchestrator import (
     _review_context,
     classify_intent,
 )
-from app.models import CentralInvoiceCache, CentralReviewCache, Hotel
+from app.models import AppSetting, CentralInvoiceCache, CentralReviewCache, Hotel
 
 
 def test_router_sends_price_question_to_product_price_and_verifier():
@@ -31,6 +31,20 @@ def test_ask_default_area_includes_reviews_for_ambiguous_questions():
     plan = classify_intent("Cosa risulta dall'archivio?", area="all")
     assert "products" in plan
     assert "reviews" in plan
+
+
+def test_ask_invoices_area_skips_reviews():
+    plan = classify_intent("Quanto abbiamo speso per limoncello?", area="invoices")
+    assert "products" in plan
+    assert "prices" in plan
+    assert "invoices" in plan
+    assert "reviews" not in plan
+
+
+def test_ask_invoices_area_ignores_review_words():
+    plan = classify_intent("Quanto costa la colazione in fattura?", area="invoices")
+    assert "products" in plan
+    assert "reviews" not in plan
 
 
 def test_ask_review_area_forces_reviews_agent():
@@ -91,10 +105,82 @@ def test_compact_context_limits_rows_and_text():
         "invoice_summary": {"rows": 30, "invoices": 3, "row_total": 10},
         "reviews": [{"text": "y" * 500, "hotel": "Giò"} for _ in range(20)],
     })
-    assert len(compact["invoice_rows"]) <= 12
+    assert len(compact["invoice_rows"]) <= 24
     assert len(compact["invoice_rows"][0]["description"]) <= 140
     assert len(compact["reviews"]) <= 8
     assert len(compact["reviews"][0]["text"]) <= 220
+
+
+def test_deterministic_best_supplier_from_history():
+    from app.agent_orchestrator import _deterministic_answer
+    result = _deterministic_answer(
+        "Chi mi vende meglio i bomboloni?",
+        {
+            "product_query": "bomboloni",
+            "historical_product": {
+                "summary": {
+                    "product": "Bombolone crema",
+                    "unit": "pz",
+                    "best_supplier": "MARR",
+                    "best_supplier_average": 0.875,
+                    "best_supplier_observations": 4,
+                    "best_price": 0.85,
+                    "best_date": "2025-02-01",
+                }
+            },
+        },
+        {"ok": True, "warnings": []},
+    )
+    assert result is not None
+    assert "MARR" in result["answer"]
+    assert result["confidence"] == "high"
+
+
+def test_ask_finds_bomboloni_across_natural_language(db):
+    from datetime import date
+    from decimal import Decimal
+    from app.models import Invoice, InvoiceRow, InvoiceRowPolicy, Supplier
+    from app.search_index import invoice_search
+
+    s1 = Supplier(ragione_sociale="Fornitore Vecchio")
+    s2 = Supplier(ragione_sociale="MARR")
+    db.add_all([s1, s2])
+    db.flush()
+    for supplier, number, when, price, desc in [
+        (s1, "OLD1", date(2020, 1, 1), Decimal("1.20"), "Bombolone crema"),
+        (s2, "NEW1", date(2025, 6, 1), Decimal("0.90"), "BOMBOLONI CREMA X12"),
+    ]:
+        inv = Invoice(supplier_id=supplier.id, numero=number, data=when, imponibile=price, iva=0, totale=price)
+        db.add(inv)
+        db.flush()
+        row = InvoiceRow(
+            invoice_id=inv.id,
+            descrizione_originale=desc,
+            descrizione_normalizzata=desc.lower(),
+            quantita=1,
+            unita_normalizzata="pz",
+            prezzo_unitario=price,
+            totale_riga=price,
+            confidence=1,
+        )
+        db.add(row)
+        db.flush()
+        db.add(InvoiceRowPolicy(row_id=row.id, analysis_status="product"))
+    db.commit()
+
+    rows = invoice_search(db, "Chi mi vende meglio i bomboloni?", limit=20)
+    assert rows, "la ricerca NL deve trovare bomboloni su tutto l'indice, non solo parole della domanda"
+    assert any("bombol" in r["description"].lower() for r in rows)
+
+    context = asyncio.run(_product_context("Chi mi vende meglio i bomboloni?", "developer"))
+    assert context.get("historical_product", {}).get("summary", {}).get("best_supplier") == "MARR"
+    answer = _deterministic_answer(
+        "Chi mi vende meglio i bomboloni?",
+        context,
+        {"ok": True, "warnings": []},
+    )
+    assert answer is not None
+    assert "MARR" in answer["answer"]
 
 
 def test_deterministic_short_circuit_for_max_invoice():
@@ -140,10 +226,11 @@ def test_product_context_uses_local_cache_not_supabase(db, monkeypatch):
         search_text="A-1 Acqua Spa ACQUA NATURALE 1.5L",
         payload_json=json.dumps(payload),
     ))
+    db.add(AppSetting(key="central_sync_complete", value="yes"))
     db.commit()
 
     async def boom(*_a, **_k):
-        raise AssertionError("Ask non deve chiamare Supabase se la cache locale ha dati")
+        raise AssertionError("Ask non deve chiamare Supabase se la cache locale è completa e ha dati")
 
     monkeypatch.setattr("app.central_service.central_invoice_search", boom)
     context = asyncio.run(_product_context("acqua naturale", "developer"))
@@ -175,3 +262,73 @@ def test_review_context_uses_local_review_cache(db, monkeypatch):
     assert context["reviews"]
     assert context["reviews"][0]["source_origin"] == "sqlite-cache"
     assert "pulizia" in context["reviews"][0]["text"].lower()
+
+
+def test_ask_supplements_from_central_when_cache_incomplete(db, monkeypatch):
+    db.add(CentralInvoiceCache(
+        source_hash="one-row", invoice_number="X-1", invoice_date=date(2023, 10, 12), supplier_name="CARTAA",
+        total=Decimal("47.99"), search_text="X-1 CARTAA CARTA IGIENICA",
+        payload_json=json.dumps({"rows": [{"original_description": "CARTA IGIENICA 96 ROTOLI", "quantity": 1, "unit_price": 47.99, "line_total": 47.99, "analysis_status": "product"}]}),
+    ))
+    db.add(AppSetting(key="central_sync_complete", value="no"))
+    db.commit()
+
+    async def fake_central(*_a, **_k):
+        return {"enabled": True, "items": [
+            {"id": "c1", "source_hash": "h1", "invoice_number": "9", "invoice_date": "2025-03-01", "supplier_name": "Lucart",
+             "original_description": "CARTA IGIENICA MAXI", "quantity": 10, "unit_price": 3.1, "line_total": 31, "analysis_status": "product"},
+        ]}
+
+    monkeypatch.setattr("app.agent_orchestrator.central_configured", lambda: True)
+    monkeypatch.setattr("app.agent_orchestrator.central_invoice_search", fake_central)
+    context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
+    assert context["supplier_count"] >= 2
+    assert "supabase" in context["data_sources"]
+
+
+def _add_cache(db, h, supplier, desc, price):
+    db.add(CentralInvoiceCache(
+        source_hash=h, invoice_number=h, invoice_date=date(2025, 1, 1), supplier_name=supplier, total=Decimal(str(price)),
+        search_text=f"{h} {supplier} {desc}",
+        payload_json=json.dumps({"rows": [{"original_description": desc, "quantity": 1, "unit_price": price, "line_total": price, "analysis_status": "product"}]}),
+    ))
+
+
+def test_ask_ignores_supplier_name_matches_and_wrong_family(db):
+    _add_cache(db, "a", "MAGRIS S.P.A.", "CARTA IGIENICA 500 CF10X4RT", 23.3)
+    _add_cache(db, "b", "Cinque P srl", "CARTA IGIENICA PROF 6 ROTOLI 4 VELI", 1.55)
+    _add_cache(db, "c", "CARTAA", "Autofattura Art.17, c.2 DPR 633/72 - Beni", 39.34)
+    _add_cache(db, "d", "FERRAMENTA TEI", "MOLLE PORTACARTA IGIENICA B.", 0.82)
+    db.add(AppSetting(key="central_sync_complete", value="yes"))
+    db.commit()
+    context = asyncio.run(_product_context("Qual è il prezzo medio della carta igienica?", "developer"))
+    suppliers = {r["supplier"] for r in context["invoice_rows"]}
+    assert suppliers == {"MAGRIS S.P.A.", "Cinque P srl"}
+
+
+def test_ask_reports_central_error(db, monkeypatch):
+    db.add(AppSetting(key="central_sync_complete", value="no"))
+    db.commit()
+
+    async def failing(*_a, **_k):
+        return {"enabled": True, "items": [], "message": "Supabase 400 su x: Credenziali non valide"}
+
+    monkeypatch.setattr("app.agent_orchestrator.central_configured", lambda: True)
+    monkeypatch.setattr("app.agent_orchestrator.central_invoice_search", failing)
+    from app.agent_orchestrator import _verify
+    context = asyncio.run(_product_context("prezzo medio carta igienica", "developer"))
+    assert "Credenziali non valide" in context["central_error"]
+    assert any("Archivio centrale" in w for w in _verify(context)["warnings"])
+
+
+def test_marmellata_and_confettura_are_the_same_product_without_pastries():
+    from app.agent_orchestrator import _filter_product_rows
+
+    rows = [{"description": d} for d in [
+        "NESTLE Marmellata Arance 120x25g IT", "NESTLE Confettura Extra Frag 120x25g IT", "MARM.HERO ARANCE A.ALL.25gX120",
+        "CONFETTURA DI SAMBUCO", "CROSTATA MARM. PRUGNE", "CORNETTI MARMELLATA", "TARTELLE MEDIE MISTE MARMELLATA DA 15PEZZI",
+        "DISPENSER VASO CONFETTURA 3 PZ", "DOSATORE CONFETTURE MANTEA", "MARMO BIANCO",
+    ]]
+    for query in ("marmellata", "marmellate", "confettura"):
+        kept = {r["description"] for r in _filter_product_rows(rows, query)}
+        assert kept == {"NESTLE Marmellata Arance 120x25g IT", "NESTLE Confettura Extra Frag 120x25g IT", "MARM.HERO ARANCE A.ALL.25gX120", "CONFETTURA DI SAMBUCO"}, query

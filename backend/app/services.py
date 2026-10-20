@@ -1,4 +1,4 @@
-import hashlib, json, re, shutil, zipfile
+import hashlib, json, re, shutil, sqlite3, tempfile, uuid, zipfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -73,7 +73,7 @@ def search_records(db: Session, query: str, limit=20):
     if text and not rows:
         candidates = db.execute(select(InvoiceRow, Invoice, Supplier).select_from(InvoiceRow).join(Invoice, InvoiceRow.invoice_id == Invoice.id).join(Supplier, Invoice.supplier_id == Supplier.id).limit(500)).all()
         rows = sorted(candidates, key=lambda x: fuzz.token_set_ratio(text, x[0].descrizione_originale), reverse=True)[:limit]
-    return [{"row_id": r.id, "descrizione": r.descrizione_originale, "quantita": float(r.quantita), "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unita": r.unita_normalizzata, "fattura_id": i.id, "fattura": i.numero, "data": i.data.isoformat(), "fornitore": s.ragione_sociale, "totale_fattura": float(i.totale)} for r, i, s in rows[:limit]]
+    return [{"row_id": r.id, "descrizione": r.descrizione_originale, "quantita": float(r.quantita), "prezzo_unitario": float(r.prezzo_unitario), "prezzo_normalizzato": float(r.prezzo_normalizzato) if r.prezzo_normalizzato else None, "unita": r.unita_normalizzata, "totale_riga": float(r.totale_riga), "fattura_id": i.id, "fattura": i.numero, "data": i.data.isoformat(), "fornitore": s.ragione_sociale, "totale_fattura": float(i.totale)} for r, i, s in rows[:limit]]
 
 
 async def ollama_status(db=None):
@@ -97,11 +97,16 @@ async def answer_with_ollama(question: str, records: list[dict], db=None):
     runtime = resolve_ai_runtime(db)
     status = await ollama_status(db)
     if not status["available"]:
-        total = sum({r["fattura_id"]: r["totale_fattura"] for r in records}.values())
+        # Somma solo le righe trovate (non il totale intero delle fatture che le contengono).
+        row_total = sum(float(r.get("totale_riga") or 0) for r in records)
         year = re.search(r"\b(19|20)\d{2}\b", question)
         detail = f" per il {year.group(0)}" if year else ""
-        formatted_total = f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        answer = f"Ho trovato {len(records)} righe pertinenti{detail}, relative a {len(set(r['fattura_id'] for r in records))} fatture, per un totale documenti di € {formatted_total}."
+        formatted_total = f"{row_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        invoice_count = len({r["fattura_id"] for r in records})
+        answer = (
+            f"Ho trovato {len(records)} righe pertinenti{detail}, relative a {invoice_count} fatture, "
+            f"per un totale righe di € {formatted_total}."
+        )
         return {
             "mode": "deterministic",
             "answer": answer + " Ollama non è disponibile: il risultato è calcolato direttamente dall'archivio.",
@@ -128,9 +133,39 @@ async def answer_with_ollama(question: str, records: list[dict], db=None):
 
 
 def create_backup() -> Path:
-    target = settings.data_dir / "backups" / f"randfatture-{datetime.now():%Y%m%d-%H%M%S}.zip"
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in settings.data_dir.rglob("*"):
-            if path.is_file() and path != target and "backups" not in path.parts:
-                archive.write(path, path.relative_to(settings.data_dir))
+    """Snapshot SQLite coerente anche con WAL e scritture concorrenti."""
+    data_dir = settings.data_dir.resolve()
+    backup_dir = data_dir / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    target = backup_dir / f"eyesupremo-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.zip"
+    partial = target.with_suffix(".zip.partial")
+    source = data_dir / "eye-supremo.db"
+    if not source.is_file():
+        raise RuntimeError("Database locale non disponibile per il backup")
+    try:
+        with tempfile.TemporaryDirectory(prefix="eye-backup-") as scratch:
+            snapshot = Path(scratch) / source.name
+            with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(snapshot) as dst:
+                src.backup(dst, pages=256)
+                result = dst.execute("PRAGMA integrity_check").fetchone()
+                if result != ("ok",):
+                    raise RuntimeError("La verifica del database di backup non è riuscita")
+            with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(snapshot, source.name)
+                for path in data_dir.rglob("*"):
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    relative = path.relative_to(data_dir)
+                    if relative.parts[0] in {"backups", "updates"} or path.name in {source.name, source.name+'-wal', source.name+'-shm', source.name+'-journal'}:
+                        continue
+                    archive.write(path, relative)
+                archive.writestr("backup-manifest.json", json.dumps({"app": "Eye Supremo", "database": source.name,
+                                  "created_at": datetime.now().isoformat(), "integrity_check": "ok"}))
+            with zipfile.ZipFile(partial) as archive:
+                if archive.testzip() is not None:
+                    raise RuntimeError("Archivio di backup non valido")
+            partial.replace(target)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
     return target

@@ -7,6 +7,7 @@ dist/
 release/
 work/
 data/
+!backend/app/data/
 __pycache__/
 .pytest_cache/
 *.pyc

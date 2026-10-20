@@ -17,6 +17,7 @@ import {
 } from "../lib/api";
 import { Empty, PageHeader, Status } from "../components/UI";
 import { UserAdmin } from "../components/UserAdmin";
+import { InvoiceViewer, OpenInvoiceButton, type InvoiceRefTarget } from "../components/InvoiceRef";
 
 type Hotel = { id: number; code: string; name: string };
 type BatchItem = {
@@ -322,7 +323,8 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     [answer, setAnswer] = useState<any>(),
     [busy, setBusy] = useState(false),
     [hotel, setHotel] = useState(""),
-    [hotels, setHotels] = useState<Hotel[]>([]);
+    [hotels, setHotels] = useState<Hotel[]>([]),
+    [invoiceRef, setInvoiceRef] = useState<InvoiceRefTarget>();
   const askAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     eyeApi<Hotel[]>("/hotels").then(setHotels);
@@ -342,9 +344,9 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
           body: JSON.stringify({
             question: q,
             hotel_code: hotel || undefined,
-            // Ask consulta fatture e recensioni; in area recensioni forza solo quelle.
-            area: reviewOnly ? "reviews" : "all",
-            include_reviews: true,
+            // Ask Fatture = solo fatture; area recensioni = solo recensioni.
+            area: reviewOnly ? "reviews" : "invoices",
+            include_reviews: reviewOnly,
             review_only: reviewOnly,
           }),
           signal: controller.signal,
@@ -372,19 +374,20 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
     : [
         "Qual è la fattura con il totale più alto?",
         "Chi mi vende meglio i bomboloni?",
-        "Quali camere hanno più lamentele?",
-        "Confronta recensioni e prezzi di un prodotto",
+        "Quanto abbiamo speso per limoncello?",
+        "Qual è il prezzo medio della carta igienica?",
       ];
   const invoiceRows = answer?.context?.invoice_rows || [];
   const reviewRows = answer?.context?.reviews || [];
   return (
     <>
+      <InvoiceViewer target={invoiceRef} onClose={() => setInvoiceRef(undefined)} />
       <PageHeader
-        title={reviewOnly ? "Analisi IA recensioni" : "Ask Eye Supremo"}
+        title={reviewOnly ? "Analisi IA recensioni" : "Ask Fatture"}
         subtitle={
           reviewOnly
             ? "Analisi di recensioni, camere, servizi e ranking"
-            : "Consulta fatture, prodotti e anche le recensioni dall’archivio locale"
+            : "Fatture e prodotti via Ollama: llama3.2:3b veloce, poi qwen3:8b se serve"
         }
       >
         <select value={hotel} onChange={(e) => setHotel(e.target.value)}>
@@ -413,7 +416,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
               placeholder={
                 reviewOnly
                   ? "Es. Quali sono le camere peggiori del Giò?"
-                  : "Es. Fattura più alta, bomboloni, oppure camere con più lamentele…"
+                  : "Es. Fattura più alta, bomboloni, limoncello, prezzo medio…"
               }
             />
             <button className="primary-btn" onClick={ask}>
@@ -446,7 +449,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
             </div>
             <p>{answer.answer}</p>
             {answer.agents?.length > 0 && (
-              <small>
+              <small style={{ display: "block", marginTop: 6 }}>
                 Agenti: {answer.agents.map((a: any) => a.name).join(" → ")}
                 {answer.ai_model ? ` · modello ${answer.ai_model}` : ""}
               </small>
@@ -481,6 +484,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                       <th>Prezzo unit.</th>
                       <th>Prezzo normalizzato</th>
                       <th>Totale</th>
+                      <th>Fattura</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -509,6 +513,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
                             ? euro(Number(r.row_total))
                             : "—"}
                         </td>
+                        <td><OpenInvoiceButton id={r.invoice_id} highlight={r.description} onOpen={setInvoiceRef} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -551,7 +556,7 @@ export function AIPage({ reviewOnly = false }: { reviewOnly?: boolean }) {
 
 export function SettingsPage() {
   const user = currentUser();
-  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const canManage = Boolean(user);
   const [data, setData] = useState<any>(),
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
@@ -871,7 +876,7 @@ function updateErrorMessage(error: any): string {
 
 export function SystemPage() {
   const user = currentUser();
-  const canManage = user?.role_name === "developer" || user?.role_name === "supremo";
+  const canManage = Boolean(user);
   const [logs, setLogs] = useState<any[]>();
   const [update, setUpdate] = useState<any>();
   const [updateBusy, setUpdateBusy] = useState(false);

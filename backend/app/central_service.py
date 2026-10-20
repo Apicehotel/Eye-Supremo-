@@ -2,41 +2,114 @@ import httpx
 from rapidfuzz import fuzz
 
 from .config import settings
+from .central_identity import current_identity
+from datetime import UTC, datetime
+
+
+def _credentials() -> tuple[str, str]:
+    if settings.central_identity_enabled:
+        identity = current_identity.get()
+        if identity is None or identity.expires_at <= datetime.now(UTC).replace(tzinfo=None):
+            return "", ""
+        return identity.username, identity.token
+    return settings.central_username, settings.central_pin
+
+
+
+def _check(response: httpx.Response) -> None:
+    """Come raise_for_status, ma include il motivo restituito dal server (es. 'Credenziali non valide')."""
+    if response.is_success:
+        return
+    detail = ""
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            detail = " - ".join(str(body[k]) for k in ("message", "details", "hint", "error", "msg") if body.get(k))
+    except Exception:  # noqa: BLE001
+        detail = (response.text or "")[:200]
+    path = response.request.url.path.rsplit("/", 1)[-1]
+    raise httpx.HTTPStatusError(
+        f"Supabase {response.status_code} su {path}: {detail or response.reason_phrase}"
+        + (f" (utente «{_credentials()[0]}», credenziali personali)" if "Credenziali" in detail else ""),
+        request=response.request,
+        response=response,
+    )
 
 
 def configured() -> bool:
-    return bool(settings.supabase_url and settings.supabase_publishable_key and settings.central_username and settings.central_pin)
+    return bool(settings.supabase_url and settings.supabase_publishable_key and _credentials()[0] and _credentials()[1])
 
 
 async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
     if not configured():
         return {"enabled": False, "items": [], "message": "Supabase centrale non configurato"}
+    from .product_taxonomy import extract_product_query, search_terms
+
+    # Domande NL («chi mi vende meglio i bomboloni») → cerca solo il prodotto.
+    product = (extract_product_query(query) or query or "").strip()
+    needles = []
+    for term in (product, *search_terms(product)):
+        cleaned = (term or "").strip()
+        if cleaned and cleaned.lower() not in {n.lower() for n in needles}:
+            needles.append(cleaned)
+    if not needles and query.strip():
+        needles = [query.strip()]
+
     url = settings.supabase_url.rstrip("/") + f"/functions/v1/{settings.central_function}"
-    payload = {"action": "search_invoices", "username": settings.central_username, "pin": settings.central_pin, "query": query, "limit": max(1, min(limit, 500))}
+    headers = {"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"}
+    cap = max(1, min(limit, 500))
     try:
+        items: list[dict] = []
+        seen: set[str] = set()
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
-            data = response.json()
-        items = data.get("items", []) if isinstance(data, dict) else []
-        if not items and query.strip() and len(query.strip()) >= 3:
-            # Retry against a short prefix, then rank the candidates locally.
-            # This handles small typing errors without broadening a product
-            # search into a dangerous substring match (e.g. bomboloni/bombole).
-            prefix = query.strip()[:2]
+            for needle in needles[:8]:
+                payload = {
+                    "action": "search_invoices",
+                    "username": _credentials()[0],
+                    "pin": _credentials()[1],
+                    "query": needle,
+                    "limit": cap,
+                }
+                response = await client.post(url, json=payload, headers=headers)
+                _check(response)
+                data = response.json()
+                batch = data.get("items", []) if isinstance(data, dict) else []
+                for item in batch:
+                    key = str(item.get("id") or item.get("source_hash") or "")
+                    dedupe = key or f"{item.get('invoice_number')}|{item.get('original_description')}|{item.get('supplier_name')}"
+                    if dedupe in seen:
+                        continue
+                    seen.add(dedupe)
+                    items.append(item)
+                if len(items) >= cap:
+                    break
+        items = items[:cap]
+        if not items and product and len(product) >= 3:
+            # Retry sul prefisso prodotto (bo…), non sulla frase NL (Ch…).
+            prefix = product[:2]
             async with httpx.AsyncClient(timeout=20) as retry_client:
-                broad = await retry_client.post(url, json={**payload, "query": prefix, "limit": 500}, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
+                broad = await retry_client.post(
+                    url,
+                    json={
+                        "action": "search_invoices",
+                        "username": _credentials()[0],
+                        "pin": _credentials()[1],
+                        "query": prefix,
+                        "limit": 500,
+                    },
+                    headers=headers,
+                )
             if broad.is_success:
                 candidates = broad.json().get("items", []) if isinstance(broad.json(), dict) else []
                 ranked = []
-                needle = query.strip().lower()
+                needle = product.lower()
                 for item in candidates:
                     fields = [str(item.get(k) or "").lower() for k in ("original_description", "normalized_description", "supplier_name")]
                     score = max((fuzz.WRatio(needle, field) for field in fields if field and len(field) >= len(needle) * .75), default=0)
                     if score >= 70:
                         ranked.append((score, item))
-                items = [item for _, item in sorted(ranked, key=lambda pair: pair[0], reverse=True)[:max(1, min(limit, 500))]]
-        return {"enabled": True, "items": items, "count": len(items)}
+                items = [item for _, item in sorted(ranked, key=lambda pair: pair[0], reverse=True)[:cap]]
+        return {"enabled": True, "items": items, "count": len(items), "query": product or query}
     except Exception as exc:
         return {"enabled": True, "items": [], "message": str(exc)}
 
@@ -44,7 +117,7 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
 async def central_invoice_page(offset: int = 0, limit: int = 500, since: str | None = None) -> dict:
     if not configured(): return {"enabled": False, "items": [], "total": 0}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_invoice_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since or None}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
         if response.is_success:
@@ -73,26 +146,26 @@ async def central_invoice_page(offset: int = 0, limit: int = 500, since: str | N
                         "line_total": row.get("line_total"), "analysis_status": row.get("analysis_status"),
                     })
             return {"items": list(grouped.values()), "offset": offset, "limit": limit, "total": len(grouped), "fallback": True}
-        response.raise_for_status()
+        _check(response)
 
 
 async def central_review_upsert(review: dict) -> dict:
     if not configured(): return {"enabled": False, "synced": False}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_review_upsert"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_review": review}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_review": review}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return {"enabled": True, "synced": True, "remote": response.json()}
 
 
 async def central_review_page(offset: int = 0, limit: int = 500, since: str | None = None) -> dict:
     if not configured(): return {"enabled": False, "items": [], "total": 0}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_review_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_offset": max(0, offset), "p_limit": max(1, min(limit, 500)), "p_since": since or None}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Authorization": f"Bearer {settings.supabase_publishable_key or ''}", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return response.json()
 
 
@@ -100,12 +173,12 @@ async def central_invoice_upsert(*, source_hash: str, source_filename: str, supp
     if not configured():
         return {"enabled": False, "synced": False, "message": "Supabase centrale non configurato"}
     url = settings.supabase_url.rstrip("/") + f"/functions/v1/{settings.central_function}"
-    payload = {"action": "upsert_invoice", "username": settings.central_username, "pin": settings.central_pin,
+    payload = {"action": "upsert_invoice", "username": _credentials()[0], "pin": _credentials()[1],
                "source_hash": source_hash, "source_filename": source_filename, "supplier": supplier, "invoice": invoice, "rows": rows}
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
+            _check(response)
         return {"enabled": True, "synced": True, "remote": response.json() if response.content else {}}
     except Exception as exc:
         return {"enabled": True, "synced": False, "message": str(exc)}
@@ -115,10 +188,10 @@ async def central_invoice_detail(source_hash: str) -> dict:
     if not configured():
         return {"enabled": False, "items": []}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_invoice_detail"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_source_hash": source_hash}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_source_hash": source_hash}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         return response.json()
 
 
@@ -126,10 +199,10 @@ async def central_product_summary() -> dict:
     if not configured():
         return {"enabled": False, "product_rows": 0, "distinct_products": 0}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_product_summary"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1]}
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return {"enabled": True, **(data if isinstance(data, dict) else {})}
 
@@ -138,11 +211,11 @@ async def central_product_page(query: str = "", limit: int = 200) -> dict:
     if not configured():
         return {"enabled": False, "items": [], "total": 0, "message": "Supabase centrale non configurato"}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_product_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_query": query, "p_limit": max(1, min(limit, 2000))}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_query": query, "p_limit": max(1, min(limit, 2000))}
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-            response.raise_for_status()
+            _check(response)
             data = response.json()
         return {"enabled": True, **(data if isinstance(data, dict) else {})}
     except httpx.HTTPStatusError as exc:
@@ -158,10 +231,10 @@ async def central_product_detail(canonical_name: str) -> dict:
     if not configured():
         return {"enabled": False, "product": None, "history": []}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_product_detail"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_canonical_name": canonical_name}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_canonical_name": canonical_name}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return data if isinstance(data, dict) else {"product": None, "history": []}
 
@@ -170,10 +243,10 @@ async def central_supplier_page(query: str = "", limit: int = 200) -> dict:
     if not configured():
         return {"enabled": False, "items": [], "total": 0, "message": "Supabase centrale non configurato"}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_supplier_page"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_query": query, "p_limit": max(1, min(limit, 2000))}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_query": query, "p_limit": max(1, min(limit, 2000))}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return {"enabled": True, **(data if isinstance(data, dict) else {"items": []})}
 
@@ -182,9 +255,10 @@ async def central_supplier_detail(supplier_id: str) -> dict:
     if not configured():
         return {"enabled": False, "supplier": None, "invoices": [], "categories": []}
     url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_central_supplier_detail"
-    payload = {"p_username": settings.central_username, "p_pin": settings.central_pin, "p_supplier_id": supplier_id}
+    payload = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_supplier_id": supplier_id}
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, json=payload, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
-        response.raise_for_status()
+        _check(response)
         data = response.json()
     return data if isinstance(data, dict) else {"supplier": None, "invoices": [], "categories": []}
+

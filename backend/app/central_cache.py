@@ -10,8 +10,14 @@ from sqlalchemy.orm import Session
 from .central_service import central_invoice_page
 from .database import SessionLocal
 from .models import AppSetting, CentralInvoiceCache
-
-_STOP = {"quanto", "quale", "quali", "cosa", "come", "ho", "hai", "abbiamo", "speso", "pagato", "nel", "nella", "da", "di", "il", "la", "le", "i", "un", "una", "fammi", "vedere", "mostra", "per", "vende", "meglio", "classifica"}
+from .product_taxonomy import (
+    QUESTION_FILLERS,
+    diversify_by_supplier,
+    extract_product_query,
+    product_stem,
+    search_terms,
+    supplier_breakdown,
+)
 
 
 def cache_status(db: Session) -> dict:
@@ -23,29 +29,68 @@ def cache_status(db: Session) -> dict:
 def cached_search(db: Session, query: str, limit: int, offset: int = 0) -> dict:
     stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc()).offset(max(0, offset)).limit(limit)
     if query:
-        needle = f"%{query.strip().lower()}%"
-        stmt = stmt.where(or_(CentralInvoiceCache.search_text.ilike(needle), CentralInvoiceCache.invoice_number.ilike(needle), CentralInvoiceCache.supplier_name.ilike(needle)))
+        needle = extract_product_query(query) or query.strip().lower()
+        patterns = [f"%{normalize}%" for normalize in dict.fromkeys(
+            [needle.lower()] + [t.lower() for t in search_terms(needle)]
+        ) if normalize]
+        if patterns:
+            clause = or_(*[
+                or_(
+                    CentralInvoiceCache.search_text.ilike(pattern),
+                    CentralInvoiceCache.invoice_number.ilike(pattern),
+                    CentralInvoiceCache.supplier_name.ilike(pattern),
+                )
+                for pattern in patterns
+            ])
+            stmt = stmt.where(clause)
     items = [json.loads(x.payload_json) for x in db.scalars(stmt).all()]
     total_stmt = select(func.count()).select_from(CentralInvoiceCache)
     if query:
-        total_stmt = total_stmt.where(or_(CentralInvoiceCache.search_text.ilike(needle), CentralInvoiceCache.invoice_number.ilike(needle), CentralInvoiceCache.supplier_name.ilike(needle)))
+        needle = extract_product_query(query) or query.strip().lower()
+        patterns = [f"%{normalize}%" for normalize in dict.fromkeys(
+            [needle.lower()] + [t.lower() for t in search_terms(needle)]
+        ) if normalize]
+        if patterns:
+            total_stmt = total_stmt.where(or_(*[
+                or_(
+                    CentralInvoiceCache.search_text.ilike(pattern),
+                    CentralInvoiceCache.invoice_number.ilike(pattern),
+                    CentralInvoiceCache.supplier_name.ilike(pattern),
+                )
+                for pattern in patterns
+            ]))
     return {"enabled": True, "local": True, "items": items, "count": len(items), "total": db.scalar(total_stmt) or 0, "offset": max(0, offset), "limit": limit}
 
 
 def _query_tokens(query: str) -> list[str]:
-    tokens = [t for t in re.findall(r"[a-zàèéìòù0-9]+", (query or "").lower()) if len(t) >= 4 and t not in _STOP]
-    return tokens
-
-
-def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
-    """Cerca righe fattura nella cache SQLite locale (niente rete Supabase)."""
-    limit = max(1, min(int(limit or 50), 500))
-    tokens = _query_tokens(query)
-    needle = (query or "").strip().lower()
-    stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())
+    product = extract_product_query(query)
+    variants = [normalize_text for normalize_text in (
+        [product] + list(search_terms(product or query))
+    ) if normalize_text]
+    tokens: list[str] = []
+    for variant in variants:
+        for token in re.findall(r"[a-zàèéìòù0-9]+", variant.lower()):
+            if len(token) >= 3 and token not in QUESTION_FILLERS and token not in tokens:
+                tokens.append(token)
     if tokens:
+        return tokens
+    return [t for t in re.findall(r"[a-zàèéìòù0-9]+", (query or "").lower()) if len(t) >= 4 and t not in QUESTION_FILLERS]
+
+
+def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: int = 0) -> dict:
+    """Cerca righe fattura in TUTTA la cache SQLite locale (niente tetto nascosto)."""
+    unlimited = limit is None or int(limit) <= 0
+    page_size = None if unlimited else max(1, int(limit))
+    offset = max(0, int(offset or 0))
+    tokens = _query_tokens(query)
+    needle = (extract_product_query(query) or query or "").strip().lower()
+    stem = product_stem(query)
+    # «mini» da solo è troppo largo: tieni token prodotto ≥4 + stem famiglia.
+    tokens = [t for t in tokens if len(t) >= 4 or t == needle]
+    stmt = select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())
+    if tokens or (stem and len(stem) >= 6):
         clauses = []
-        for term in tokens[-3:]:
+        for term in tokens:
             pattern = f"%{term}%"
             clauses.append(
                 or_(
@@ -54,6 +99,9 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
                     CentralInvoiceCache.invoice_number.ilike(pattern),
                 )
             )
+        if stem and len(stem) >= 6:
+            clauses.append(CentralInvoiceCache.search_text.ilike(f"%{stem}%"))
+        # OR tra varianti prodotto: tutte le fatture candidate nell'archivio.
         stmt = stmt.where(or_(*clauses))
     elif needle:
         pattern = f"%{needle}%"
@@ -64,20 +112,48 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
                 CentralInvoiceCache.invoice_number.ilike(pattern),
             )
         )
-    records = list(db.scalars(stmt.limit(400)).all())
+    # Nessun LIMIT sulla query: scandisce tutte le fatture in cache che matchano.
+    records = list(db.scalars(stmt).all())
     if not records and tokens:
-        # Soft fallback: last token only, then fuzzy on a bounded scan.
-        term = tokens[-1]
+        term = tokens[0]
         records = list(
             db.scalars(
                 select(CentralInvoiceCache)
                 .where(CentralInvoiceCache.search_text.ilike(f"%{term}%"))
                 .order_by(CentralInvoiceCache.invoice_date.desc())
-                .limit(400)
             ).all()
         )
-    if not records and needle:
-        records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc()).limit(250)).all())
+
+    def _row_matches(hay: str, words: list[str]) -> float | None:
+        """Match famiglia prodotto: substring, stem (minibomboloni), fuzzy stretto."""
+        if tokens:
+            if any(t in hay for t in tokens):
+                return 95.0
+            if stem and len(stem) >= 6 and stem in hay.replace(" ", ""):
+                return 94.0
+            # Token contenuto in una parola composta (minibomboloni ← bomboloni).
+            for token in tokens:
+                core = token[:-1] if len(token) >= 7 else token
+                if len(core) >= 6 and any(core in word for word in words):
+                    return 93.0
+            score = max(
+                (
+                    fuzz.ratio(token, word)
+                    for token in tokens
+                    for word in words
+                    if abs(len(token) - len(word)) <= 2
+                ),
+                default=0,
+            )
+            return float(score) if score >= 90 else None
+        if needle:
+            if needle in hay:
+                return 95.0
+            if stem and len(stem) >= 6 and stem in hay.replace(" ", ""):
+                return 94.0
+            score = max((fuzz.ratio(needle, word) for word in words), default=0)
+            return float(score) if score >= 90 else None
+        return 80.0
 
     ranked: list[tuple[float, dict]] = []
     for record in records:
@@ -89,8 +165,9 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
         invoice_date = record.invoice_date.isoformat() if record.invoice_date else None
         if not rows:
             hay = f"{record.search_text} {record.supplier_name} {record.invoice_number}".lower()
-            score = 100.0 if (not needle or any(t in hay for t in (tokens or [needle]))) else fuzz.WRatio(needle, hay)
-            if score < 70:
+            words = re.findall(r"[a-zàèéìòù0-9]+", hay)
+            score = _row_matches(hay, words)
+            if score is None or score < 70:
                 continue
             ranked.append((float(score), {
                 "id": record.source_hash,
@@ -111,33 +188,11 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
         for idx, row in enumerate(rows):
             desc = str(row.get("original_description") or row.get("normalized_description") or "")
             norm = str(row.get("normalized_description") or desc)
-            hay = f"{desc} {norm} {record.supplier_name}".lower()
+            hay = f"{desc} {norm}".lower()
             words = re.findall(r"[a-zàèéìòù0-9]+", hay)
-            if tokens:
-                if any(t in hay for t in tokens):
-                    score = 95.0
-                else:
-                    # Fuzzy stretto parola-per-parola: evita bomboloni↔bombola.
-                    score = max(
-                        (
-                            fuzz.ratio(token, word)
-                            for token in tokens
-                            for word in words
-                            if abs(len(token) - len(word)) <= 2
-                        ),
-                        default=0,
-                    )
-                    if score < 90:
-                        continue
-            elif needle:
-                if needle in hay:
-                    score = 95.0
-                else:
-                    score = max((fuzz.ratio(needle, word) for word in words), default=0)
-                    if score < 90:
-                        continue
-            else:
-                score = 80.0
+            score = _row_matches(hay, words)
+            if score is None:
+                continue
             ranked.append((float(score), {
                 "id": f"{record.source_hash}:{idx}",
                 "source_hash": record.source_hash,
@@ -151,25 +206,74 @@ def cached_row_search(db: Session, query: str, limit: int = 50) -> list[dict]:
                 "unit_price": float(row.get("unit_price") or 0),
                 "line_total": float(row.get("line_total") or 0),
                 "analysis_status": row.get("analysis_status") or "product",
+                "normalized_price": row.get("normalized_price"),
+                "normalized_unit": row.get("normalized_unit"),
+                "original_unit": row.get("original_unit"),
                 "local_cache": True,
             }))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
-    return [item for _, item in ranked[:limit]]
+    items = [item for _, item in ranked]
+    # Diversifica i fornitori prima della paginazione UI.
+    items = diversify_by_supplier(items, supplier_key="supplier_name")
+    total = len(items)
+    suppliers = supplier_breakdown(items, supplier_key="supplier_name")
+    if unlimited:
+        page = items
+        page_size = total
+    else:
+        page = items[offset: offset + page_size]
+    return {
+        "items": page,
+        "count": len(page),
+        "total": total,
+        "offset": offset,
+        "limit": page_size,
+        "suppliers": suppliers,
+        "supplier_count": len(suppliers),
+        "local": True,
+        "scope": "full-cache-unlimited",
+    }
+
+
+PROGRESS_KEY = "central_sync_progress"
+REMOTE_TOTAL_KEY = "central_remote_total"
+COMPLETE_KEY = "central_sync_complete"
+
+
+def _put_setting(db: Session, key: str, value: str) -> None:
+    row = db.get(AppSetting, key) or AppSetting(key=key, value=value)
+    row.value = value
+    db.add(row)
+
+
+async def _remote_invoice_total() -> int | None:
+    """Totale fatture sul server centrale (sonda leggera). None se non verificabile."""
+    try:
+        page = await central_invoice_page(0, 1, None)
+    except Exception:  # noqa: BLE001
+        return None
+    if page.get("fallback") or page.get("enabled") is False:
+        return None
+    total = page.get("total")
+    return int(total) if isinstance(total, (int, float)) and total >= 0 else None
 
 
 async def refresh_central_cache() -> dict:
     db = SessionLocal()
     try:
-        setting = db.get(AppSetting, "central_sync_state") or AppSetting(key="central_sync_state", value="running")
-        setting.value = "running"; db.add(setting); db.commit()
-        offset = 0; total = None; imported = 0
+        _put_setting(db, "central_sync_state", "running")
+        _put_setting(db, COMPLETE_KEY, "unknown")
+        db.commit()
+        offset = 0; total = None; imported = 0; fallback_used = False
         checkpoint = db.get(AppSetting, "central_sync_at")
+        since = checkpoint.value if checkpoint and checkpoint.value else None
         while True:
-            # 50 keeps the nested line payload below Supabase gateway limits.
-            page = await central_invoice_page(offset, 500, checkpoint.value if checkpoint else None)
+            page = await central_invoice_page(offset, 500, since)
             items = page.get("items", [])
             total = page.get("total", total)
+            if page.get("fallback"):
+                fallback_used = True
             if not items: break
             for item in items:
                 source_hash = str(item.get("source_hash") or item.get("id"))
@@ -181,14 +285,40 @@ async def refresh_central_cache() -> dict:
                     for key, value in values.items(): setattr(existing, key, value)
                 else: db.add(CentralInvoiceCache(**values))
                 imported += 1
-            db.commit(); offset += len(items)
-            if len(items) < 500 or (total is not None and offset >= total): break
-        setting.value = f"ok:{imported}"; db.add(setting)
-        checkpoint = db.get(AppSetting, "central_sync_at") or AppSetting(key="central_sync_at", value="")
-        checkpoint.value = datetime.now(UTC).isoformat(); db.add(checkpoint); db.commit()
-        return {"ok": True, "imported": imported, "total": total}
+            offset += len(items)
+            _put_setting(db, PROGRESS_KEY, json.dumps({"downloaded": offset, "total": total, "at": datetime.now(UTC).isoformat()}))
+            db.commit()
+            # Il percorso alternativo restituisce al massimo 500 righe: non e' un download completo.
+            if fallback_used or len(items) < 500 or (total is not None and offset >= total): break
+
+        local_count = db.scalar(select(func.count()).select_from(CentralInvoiceCache)) or 0
+        remote_total = None
+        if not fallback_used:
+            remote_total = int(total) if (since is None and total is not None) else await _remote_invoice_total()
+        if remote_total is not None:
+            _put_setting(db, REMOTE_TOTAL_KEY, str(remote_total))
+        if fallback_used:
+            complete: bool | None = False
+        elif remote_total is not None:
+            complete = local_count >= remote_total
+        else:
+            complete = None
+        _put_setting(db, COMPLETE_KEY, "unknown" if complete is None else ("yes" if complete else "no"))
+        _put_setting(db, "central_sync_state", f"ok:{imported}" if complete is not False else f"partial:{local_count}")
+        # Il checkpoint incrementale si salva solo se la cache e' completa: altrimenti il prossimo giro riscarica tutto.
+        if complete is not False:
+            _put_setting(db, "central_sync_at", datetime.now(UTC).isoformat())
+        db.commit()
+        message = None
+        if fallback_used:
+            message = f"Percorso alternativo: scaricate solo {local_count} fatture (limite 500 righe). Controlla i permessi Supabase."
+        elif complete is False:
+            message = f"Cache incompleta: {local_count} di {remote_total} fatture"
+        return {"ok": True, "imported": imported, "total": total, "complete": complete, "fallback": fallback_used, "local_count": local_count, "remote_total": remote_total, **({"message": message} if message else {})}
     except Exception as exc:
-        setting = db.get(AppSetting, "central_sync_state") or AppSetting(key="central_sync_state", value="")
-        setting.value = f"error:{exc}"; db.add(setting); db.commit()
+        db.rollback()
+        _put_setting(db, "central_sync_state", f"error:{exc}")
+        _put_setting(db, COMPLETE_KEY, "no")
+        db.commit()
         return {"ok": False, "message": str(exc)}
     finally: db.close()

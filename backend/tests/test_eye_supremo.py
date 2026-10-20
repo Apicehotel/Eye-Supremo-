@@ -1,10 +1,11 @@
-from datetime import date
+from datetime import date, datetime
+from app.models import CentralReviewCache
 from decimal import Decimal
 from unittest.mock import AsyncMock
 from sqlalchemy import select
 from app.eye_services import add_review, classify_review_text, invoice_search_summary
 from app.search_index import invoice_search
-from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Supplier, UserProfile
+from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Review, Supplier, UserProfile
 from app.agent_orchestrator import _max_invoice_context
 from app.report_service import historical_product_report
 from app.review_importers import _author, _rating, _room, clean_review_text, split_review_blocks
@@ -46,6 +47,7 @@ def test_supplier_search_finds_supplier_from_invoice_line_text(client, db):
 
 
 def test_product_taxonomy_respects_word_boundaries():
+    from app.product_taxonomy import extract_product_query
     assert "lamp" not in search_terms("lampadine")
     assert is_family_match("lampadina LED E27", "lampadine")
     assert not is_family_match("lamponi surgelati", "lampadine")
@@ -54,6 +56,9 @@ def test_product_taxonomy_respects_word_boundaries():
     assert is_family_match("acqua naturale 0,5 lt", "acqua")
     assert not is_family_match("acquedotto tariffa base", "acqua")
     assert "bombolino" in search_terms("bomboloni")
+    assert extract_product_query("Chi mi vende meglio i bomboloni?") == "bomboloni"
+    assert "bombolone" in search_terms("Chi mi vende meglio i bomboloni?")
+    assert extract_product_query("Quanto abbiamo speso per limoncello?") == "limoncello"
 
 
 def test_pack_content_normalizes_piece_price_to_comparable_unit():
@@ -250,6 +255,7 @@ def test_live_search_endpoint_uses_row_total(client, db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["engine"] == "fts5+rapidfuzz"
+    assert payload["scope"] == "full-archive-unlimited"
     assert payload["summary"]["row_total"] == 40
     assert payload["results"][0]["description"] == "LAMP LED E27 12W"
 
@@ -310,6 +316,10 @@ def test_historical_report_tracks_price_direction_and_best_supplier(db):
     marr = next(x for x in report["suppliers"] if x["supplier"] == "MARR")
     assert marr["points"][-1]["trend"] == "down"
     assert marr["points"][-1]["delta"] == -0.05
+    # Domanda in linguaggio naturale: non deve cercare letteralmente tutta la frase.
+    nl_report = historical_product_report(db, "Chi mi vende meglio i bomboloni?")
+    assert nl_report["summary"] is not None
+    assert nl_report["summary"]["best_supplier"] == "MARR"
 
 
 def test_historical_report_understands_invoice_abbreviation(db):
@@ -354,6 +364,34 @@ def test_review_import_extracts_google_author_and_rejects_freeform_room():
     assert _room("Camera ok, letto e lenzuola rigide.") is None
     assert _room("CAM: 2219") == "2219"
     assert _room("camera\n10") is None
+
+
+def test_room_parser_ignores_vista_dalla_camera_category_score():
+    # Booking category line: the trailing 10 is a score, not room 10 (inesistente a Hotel Giò).
+    assert _room("Categorie extra\nVista dalla camera 10\nWifi 9") is None
+    assert _room("vista dalla camera 10") is None
+    assert _room("camera 10") is None
+    assert _room("CAM: 10") is None
+    assert _room("CAM: 4411\nVista dalla camera 10") == "4411"
+    blocks = split_review_blocks(
+        """Booking.com recensioni
+9,0
+Mario, it in 14/07 out 15/07 cam. 4411
+Numero di prenotazione 123
+Categorie extra Vista dalla camera 10 Wifi 9
+Ottima camera
+8,0
+Luca, it in 15/07 out 16/07 cam. 2208
+Numero di prenotazione 456
+Categorie extra Vista dalla camera 10
+Camera comoda""",
+        "2026-07-15",
+        "Booking",
+        None,
+        "booking.txt",
+    )
+    assert [block["room_code"] for block in blocks] == ["4411", "2208"]
+    assert all(block["room_code"] != "10" for block in blocks)
 
 
 def test_tripadvisor_category_scores_count_as_review_vote():
@@ -544,6 +582,133 @@ def test_review_ranking_best_and_worst(db):
     assert ranking["worst_rooms"][0]["room"] == "102"
 
 
+def test_room_rating_timeline_keeps_the_good_period_before_a_drop(db):
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "choco"))
+    add_review(db, hotel_id=hotel.id, text="Camera pulita e letto comodo", review_date=date(2026, 2, 10), rating=Decimal("9.5"), room_code="1101")
+    add_review(db, hotel_id=hotel.id, text="Camera sporca e letto scomodo", review_date=date(2026, 4, 13), rating=Decimal("4"), room_code="1101")
+    from app.eye_services import room_rating_timeline
+    timeline = room_rating_timeline(db, hotel_id=hotel.id)
+    room = next(item for item in timeline if item["room"] == "1101")
+    assert room["periods"][0]["from"] == "2026-02-10"
+    assert room["periods"][0]["to"] == "2026-04-12"
+    assert room["periods"][0]["status"] == "ok"
+    assert room["periods"][1]["from"] == "2026-04-13"
+    assert room["periods"][1]["status"] == "attenzione"
+    assert "Pulizia" in room["periods"][1]["causes"]
+
+
+BOOKING_DIGEST = """recensioni 27-10-24
+10
+
+Ospite A, it   in 26/10/24  out 27/10/24  cam 4407
+
+Numero di prenotazione 1000000001 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000001&lang=it&hotel_id=1>
+
+27 ott 2024Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+10
+
+Pulizia
+
+10
+
+________________________________
+
+una perfetta sinfonia
+
+Personale ultragentile e colazione ricchissima.
+
+10
+
+Ospite B, it   in 26/10/24  out 27/10/24  cam 1108
+
+Numero di prenotazione 1000000002 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000002&lang=it&hotel_id=1>
+
+27 ott 2024Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+10
+
+Pulizia
+
+10
+
+________________________________
+
+8,0
+
+Ospite C, it   in 04/12/2024  out 06/12/24  cam 3306
+
+Numero di prenotazione 1000000003 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000003&lang=it&hotel_id=1>
+
+23 gen 2025Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+7,5
+
+Pulizia
+
+10
+
+________________________________
+
+Letto scomodo e stanza rumorosa
+
+Nulla
+"""
+
+
+def _import_digest(client, content: str = BOOKING_DIGEST):
+    return client.post("/api/eye/reviews/import/gio", files=[("files", ("digest.txt", content.encode("utf-8"), "text/plain"))])
+
+
+def test_import_accepts_comma_ratings_and_keeps_every_review_of_the_file(client, db):
+    body = _import_digest(client).json()
+    assert body["imported"] == 3
+    assert not any("non importata" in e["error"] for e in body["errors"])
+    stored = {r.room.code: float(r.rating) for r in db.scalars(select(Review)).all() if r.rating is not None}
+    assert stored == {"4407": 10.0, "1108": 10.0, "3306": 8.0}
+
+
+def test_import_skips_reviews_already_imported(client, db):
+    assert _import_digest(client).json()["imported"] == 3
+    second = _import_digest(client).json()
+    assert second["imported"] == 0 and second["skipped_duplicates"] == 3
+    assert len(db.scalars(select(Review)).all()) == 3
+
+
+def test_import_discards_out_of_scale_ratings_without_losing_the_review():
+    from app.routers.eye import _parse_rating
+    assert _parse_rating("8,0", "Booking") == Decimal("8.0")
+    assert _parse_rating("7,5", "Booking") == Decimal("7.5")
+    assert _parse_rating("26", "Booking") is None
+    assert _parse_rating("6", "Google") is None
+    assert _parse_rating("4,5", "TripAdvisor") == Decimal("4.5")
+    assert _parse_rating("abc", "Booking") is None and _parse_rating(None, "Booking") is None
+
+
+def test_review_list_shows_the_stored_rating_of_imported_reviews(client):
+    _import_digest(client)
+    ratings = {r["room"]: r["rating"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()}
+    assert ratings["4407"] == 10.0 and ratings["3306"] == 8.0
+
+
 def test_review_txt_import_endpoint(client):
     response = client.post("/api/eye/reviews/import/choco", files=[("files", ("review.txt", b"Recensione - Camera 101 pulita e staff gentile", "text/plain"))])
     assert response.status_code == 200
@@ -587,10 +752,11 @@ def test_reviews_sync_retries_all_local_reviews_before_pull(client, db, monkeypa
 
 def test_created_profiles_share_full_access(client):
     developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
-    created = client.post("/api/eye/auth/users", json={"username":"levelcheck","display_name":"Level Check","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
+    created = client.post("/api/eye/auth/users", json={"username":"operativo","display_name":"Operativo","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
     assert created.status_code == 200
-    level_token = client.post("/api/eye/auth/login", json={"username":"levelcheck", "pin":"654321"}).json()["session"]
-    response = client.get("/api/eye/users", headers={"X-Eye-Session":level_token, "X-Eye-Role": "developer"})
+    assert created.json()["role_name"] == "supremo"
+    user_token = client.post("/api/eye/auth/login", json={"username":"operativo", "pin":"654321"}).json()["session"]
+    response = client.get("/api/eye/users", headers={"X-Eye-Session":user_token})
     assert response.status_code == 200
 
 
@@ -600,18 +766,148 @@ def test_default_pin_unlocks_eye_api_and_session_unlocks_it(client):
     token = login.json()["session"]
     blocked = client.get("/api/eye/hotels", headers={"X-Eye-Session":"invalid", "X-Eye-Role":"developer"})
     assert blocked.status_code == 401
-    allowed = client.get("/api/eye/hotels", headers={"X-Eye-Session":token,"X-Eye-Role":"level1"})
+    allowed = client.get("/api/eye/hotels", headers={"X-Eye-Session":token,"X-Eye-Role":"supremo"})
     assert allowed.status_code == 200
     assert len(allowed.json()) == 3
 
 
 def test_created_user_has_same_access_level_after_login(client):
     developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
-    users = client.get("/api/eye/auth/users", headers={"X-Eye-Session":developer_token}).json()
-    created = client.post("/api/eye/auth/users", json={"username":"utente1","display_name":"Utente 1","role_name":"level1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
+    created = client.post("/api/eye/auth/users", json={"username":"utente1","display_name":"Utente 1","pin":"654321"}, headers={"X-Eye-Session":developer_token})
     assert created.status_code == 200
+    assert created.json()["role_name"] == "supremo"
     login = client.post("/api/eye/auth/login", json={"username":"utente1","pin":"654321"})
     assert login.status_code == 200
-    level_token = login.json()["session"]
-    protected = client.get("/api/eye/users", headers={"X-Eye-Session":level_token,"X-Eye-Role":"developer"})
+    user_token = login.json()["session"]
+    protected = client.get("/api/eye/users", headers={"X-Eye-Session":user_token})
     assert protected.status_code == 200
+
+
+def test_create_user_defaults_to_standard_pin(client):
+    developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
+    created = client.post("/api/eye/auth/users", json={"username":"reception","display_name":"Reception"}, headers={"X-Eye-Session":developer_token})
+    assert created.status_code == 200
+    login = client.post("/api/eye/auth/login", json={"username":"reception","pin":"000000"})
+    assert login.status_code == 200
+    hotels = client.get("/api/eye/hotels", headers={"X-Eye-Session":login.json()["session"]})
+    assert hotels.status_code == 200
+    assert len(hotels.json()) == 3
+
+
+
+def test_mixed_digest_keeps_google_and_tripadvisor_out_of_booking():
+    from app.review_importers import split_review_blocks
+
+    mixed = BOOKING_DIGEST + """
+
+<https://www.google.com/maps/contrib/109917461135353325196?hl=it> Mario Rossi <https://www.google.com/maps/contrib/109917461135353325196?hl=it> 16 ore fa su Google 5/5 Vacanza Hotel ottimo, personale gentile.
+
+Camere economy non all'altezza <https://www.tripadvisor.it/Profile/Abc> Abc ha scritto una recensione 11 lug 2/5 Camera piccola.
+"""
+    blocks = split_review_blocks(mixed, "2024-10-27", "Booking", None, "x")
+    assert [b["source"] for b in blocks] == ["Booking", "Booking", "Booking", "Google", "TripAdvisor"]
+    assert [str(b["rating"]) for b in blocks][-2:] == ["5", "2"]
+    # il footer che cita altre piattaforme non cambia la fonte di una recensione Booking
+    assert blocks[2]["source"] == "Booking"
+
+
+def test_import_ignores_the_same_file_selected_twice(client, db):
+    content = BOOKING_DIGEST.encode("utf-8")
+    files = [("files", ("a.txt", content, "text/plain")), ("files", ("b.txt", content, "text/plain"))]
+    body = client.post("/api/eye/reviews/import/gio", files=files).json()
+    assert body["imported"] == 3 and body["skipped_duplicate_files"] == 1
+    assert len(db.scalars(select(Review)).all()) == 3
+
+
+def test_import_skips_review_already_stored_inside_a_legacy_whole_email(client, db):
+    # Archivio vecchio: tutta l'email salvata in un solo record.
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text=BOOKING_DIGEST, review_date=date(2024, 10, 27), rating=None, source="Booking")
+    body = _import_digest(client).json()
+    assert body["imported"] == 0 and body["skipped_duplicates"] == 3
+
+
+def _polarities(db, text):
+    return {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+
+
+def test_review_classifier_negated_negative_words_become_positive(db):
+    # "non lontano" / "non è per nulla lontano": la negazione ribalta la parola negativa
+    assert ("Posizione", "positive") in _polarities(db, "La posizione non è lontano dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione per niente lontana dal centro.")
+    assert ("Posizione", "negative") not in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    # senza negazione resta negativo
+    assert ("Posizione", "negative") in _polarities(db, "Posizione lontana dal centro.")
+
+
+def test_review_classifier_understands_empty_buffet_and_its_negation(db):
+    assert ("Colazione", "negative") in _polarities(db, "Il buffet della colazione era vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "negative") not in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Il buffet della colazione non era vuoto, anzi ricco.")
+
+
+def test_category_scores_are_read_per_tag_and_dates_are_not_votes():
+    from app.review_importers import extract_category_scores
+    booking = "Categorie base\n\nStaff\n\n10\n\nPulizia\n\n9,0\n\nComfort 8,0 Rapporto qualità/prezzo 7,5 Letti 10 7,0 Antonio, it in 25/10 out 26/10"
+    assert extract_category_scores(booking, "Booking") == {"Qualità/prezzo": 7.5, "Staff": 10.0, "Pulizia": 9.0, "Comfort": 8.0, "Letti": 10.0}
+    assert extract_category_scores("Camere5,0 Servizio5,0 Posizione4,0 Punti forti", "TripAdvisor") == {"Posizione": 4.0, "Servizi": 5.0, "Camere": 5.0}
+    # fuori scala, orari/distanze e date non sono voti
+    assert extract_category_scores("Staff 15 Posizione 5 minuti dal centro, Colazione 15/10", "Booking") == {}
+    assert extract_category_scores("Staff 9", "Google") == {}
+
+
+def test_overall_rating_ignores_stay_dates():
+    assert _rating("8,0 Thomas, de in 15/10 out 16/10 camera 221") == "8.0"
+    assert _rating("10 Luca, it in 26/10/24 out 27/10/24 cam 4407") == "10"
+
+
+def test_review_list_exposes_category_scores_for_every_review(client):
+    _import_digest(client)
+    by_room = {r["room"]: r for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()}
+    assert by_room["4407"]["scores"].get("Staff") == 10.0 and by_room["4407"]["scores"].get("Pulizia") == 10.0
+    assert all(isinstance(r["scores"], dict) for r in by_room.values())
+
+
+def test_digest_blocks_without_room_do_not_inherit_the_wrong_room_of_the_whole_email(client, db):
+    from app.models import Room
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    digest = BOOKING_DIGEST.replace("cam 1108", "cam.")  # un ospite senza numero camera
+    # archivio vecchio: l'intera email salvata con una camera letta male
+    add_review(db, hotel_id=hotel.id, text=digest, review_date=date(2024, 10, 28), rating=None, room_code="10", source="Booking")
+    rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
+    assert "10" not in rooms
+    assert rooms.count(None) >= 1
+
+
+def test_rooms_that_are_words_are_not_exposed_as_rooms(client, db):
+    from app.routers.eye import _valid_room
+    assert [_valid_room(x) for x in ("325", "4407", "1108A", " 126 ")] == ["325", "4407", "1108A", "126"]
+    assert [_valid_room(x) for x in ("pulita", "super", "ampia", "Superior", "e", "Numero", "", None)] == [None] * 8
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text="Camera pulita e spaziosa, personale gentile. Voto 5/5 su Google", review_date=date(2026, 8, 23), rating=Decimal("5"), room_code="pulita", source="Google")
+    rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
+    assert "pulita" not in rooms
+
+
+def test_push_local_reviews_sends_only_unsynced_ones(client, db, monkeypatch):
+    import asyncio
+    from app import review_cache
+    _import_digest(client)
+    sent = []
+
+    async def fake_upsert(review):
+        sent.append(review["sync_uuid"])
+        return {"enabled": True, "synced": True}
+
+    monkeypatch.setattr(review_cache, "central_review_upsert", fake_upsert)
+    first = asyncio.run(review_cache.push_local_reviews(db))
+    assert first["pushed"] == 3 and len(sent) == 3 and not first["errors"]
+    # le copie centrali (stesso testo/data/fonte) non vengono reinviate
+    for r in db.scalars(select(Review)).all():
+        db.add(CentralReviewCache(sync_uuid="c-" + r.sync_uuid, hotel_code="gio", review_date=r.date, source=r.source, author=r.author, rating=r.rating, room_code=None, text=r.text, payload_json="{}", synced_at=datetime.now()))
+    db.commit()
+    sent.clear()
+    second = asyncio.run(review_cache.push_local_reviews(db))
+    assert second["pushed"] == 0 and sent == [] and second["skipped_already_central"] == 3

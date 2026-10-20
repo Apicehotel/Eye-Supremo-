@@ -1,7 +1,7 @@
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,7 @@ from .routers.reports_eye import router as reports_router
 from .routers.agents_eye import router as agents_router
 from .routers.sync_eye import router as sync_router
 from .routers.updates_eye import router as updates_router
+from . import central_identity
 
 
 @asynccontextmanager
@@ -27,6 +28,14 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         seed_eye_supremo(db)
+        from .models import AppSetting
+        from .product_recognition import set_user_groups
+        import json as _json
+        row = db.get(AppSetting, "product_groups")
+        if row:
+            set_user_groups(_json.loads(row.value))
+    except Exception:  # noqa: BLE001
+        pass
     finally:
         db.close()
     ensure_fts5(engine)
@@ -35,7 +44,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Eye Supremo API", version="2.0.2", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="Eye Supremo API", version="2.0.26", docs_url="/api/docs", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:8765"],
@@ -50,19 +59,28 @@ DEVELOPER_ONLY_PREFIXES = ("/api/settings", "/api/backups", "/api/logs")
 @app.middleware("http")
 async def local_auth_guard(request: Request, call_next):
     path = request.url.path
-    public_auth = path.startswith("/api/eye/auth/")
+    public_auth = path in {"/api/eye/auth/status", "/api/eye/auth/login-options", "/api/eye/auth/login",
+                           "/api/eye/auth/bootstrap", "/api/eye/auth/me", "/api/eye/auth/logout"}
     eye_protected = path.startswith("/api/eye/") and not public_auth
     legacy_admin = path.startswith(DEVELOPER_ONLY_PREFIXES)
-    if eye_protected or legacy_admin:
+    central_protected = central_identity.enabled() and path.startswith("/api/") and not public_auth and path not in {"/api/health", "/api/docs", "/api/openapi.json"}
+    identity_context = None
+    if eye_protected or legacy_admin or central_protected:
         db = SessionLocal()
         try:
-            if auth_configured(db):
+            if central_identity.enabled() or auth_configured(db):
                 token = request.headers.get("X-Eye-Session")
                 user = session_user(db, token)
                 if not user or not user.active:
                     return JSONResponse({"detail": "Sessione Eye Supremo richiesta"}, status_code=401)
                 if legacy_admin and user.role_name not in {"developer", "supremo"}:
                     return JSONResponse({"detail": "Profilo non autorizzato"}, status_code=403)
+                if central_identity.enabled():
+                    try:
+                        identity = await central_identity.identity_for_request(db, token, user)
+                    except HTTPException as exc:
+                        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+                    identity_context = central_identity.current_identity.set(identity)
                 headers = list(request.scope.get("headers", []))
                 headers = [(k, v) for k, v in headers if k.lower() not in {b"x-eye-role", b"x-eye-user"}]
                 headers.append((b"x-eye-role", user.role_name.encode("utf-8")))
@@ -70,7 +88,11 @@ async def local_auth_guard(request: Request, call_next):
                 request.scope["headers"] = headers
         finally:
             db.close()
-    return await call_next(request)
+    try:
+        return await call_next(request)
+    finally:
+        if identity_context is not None:
+            central_identity.current_identity.reset(identity_context)
 
 
 app.include_router(auth_router)
@@ -93,3 +115,4 @@ def frontend_dist() -> Path:
 _dist = frontend_dist()
 if _dist.exists():
     app.mount("/", StaticFiles(directory=str(_dist), html=True), name="frontend")
+

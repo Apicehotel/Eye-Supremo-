@@ -60,13 +60,13 @@ Due dimensioni principali:
 
 Il punteggio camera applica un fattore di confidenza basato sul numero di recensioni, così una camera con una sola recensione non domina la classifica.
 
-## Ruoli
+## Accesso
 
-Profili logici: `developer`, `supremo`, `level1`, `level2`, `level3`.
+Profili logici attivi: `developer` e `supremo`. Condividono gli stessi permessi operativi (hotel, fatture, recensioni, configurazione, utenti). I vecchi livelli `level1` / `level2` / `level3` non sono più usati: al seed ogni profilo locale viene normalizzato a `developer` (solo username `sviluppatore`) o `supremo`, senza riscrivere le credenziali esistenti. La modalità locale inizializza il PIN solo dove manca; la modalità centrale lo verifica su Supabase al primo accesso.
 
-Le fatture sono visibili di base; `role_exclusions` sottrae categorie, prodotti, fornitori o keyword non pertinenti. La ricerca IA applica le stesse esclusioni prima di costruire il contesto.
+La tabella `role_exclusions` resta nel database per compatibilità storica ma non limita più l'accesso operativo.
 
-La selezione ruolo locale è utile per il client standalone. Qualsiasi accesso remoto usa JWT Supabase e membership server-side.
+Le operazioni centrali Eye usano sessioni personali revocabili; il bridge multi-hotel legacy usa JWT Supabase e membership server-side. Vedi [CENTRAL_IDENTITY.md](CENTRAL_IDENTITY.md) per cache di accesso offline e attivazione.
 
 ## Supabase bridge
 
@@ -76,10 +76,11 @@ La Edge Function `eye-supremo-sync` ha `verify_jwt=true`; usa la membership per 
 
 ## Packaging Windows
 
-La UI viene compilata in `frontend/dist` e incorporata con PyInstaller nel backend. `desktop.py` avvia Uvicorn su `127.0.0.1:8765` e apre il browser. Inno Setup produce l'installer finale.
+La UI viene compilata in `frontend/dist` e incorporata con PyInstaller nel backend. `desktop.py` avvia Uvicorn su `127.0.0.1:8765` **solo come motore interno** e apre una **finestra applicazione nativa** tramite pywebview + Microsoft Edge WebView2. Non apre Chrome/Edge come sito web e non mostra una console CMD (`--windowed`). Inno Setup produce `EyeSupremo-Setup.exe` e avvisa se manca il runtime WebView2.
 
-La macchina finale non richiede Python o Node. I dati sono persistenti in LocalAppData, separati dall'eseguibile.
+La macchina finale non richiede Python o Node. I dati sono persistenti in LocalAppData, separati dall'eseguibile. `start.bat` resta solo per lo sviluppo (Vite + browser).
 
 ## Evoluzione senza parti zombie
 
 La API legacy resta temporaneamente per compatibilità, ma le nuove funzionalità vivono nei router modulari. Quando tutte le schermate usano le API `/api/eye/*`, il router legacy può essere ridotto alle sole API ancora necessarie e infine rimosso in una PR dedicata, dopo test di regressione.
+

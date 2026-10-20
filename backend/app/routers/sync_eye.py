@@ -6,7 +6,7 @@ router = APIRouter(prefix="/api/eye/sync", tags=["Eye Supremo sync"])
 
 def _role(value: str) -> str:
     role = value.strip().lower()
-    if role not in {"developer", "supremo", "level1", "level2", "level3"}:
+    if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Ruolo non valido")
     return role
 

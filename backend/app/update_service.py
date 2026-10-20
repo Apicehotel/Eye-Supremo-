@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from .config import settings
 
 GITHUB_LATEST_URL = "https://api.github.com/repos/Apicehotel/Eye-Supremo-/releases/latest"
-CURRENT_VERSION = "2.0.2"
+CURRENT_VERSION = "2.0.26"
 CHECK_TIMEOUT_S = 12
 DOWNLOAD_TIMEOUT_S = 600
 
@@ -119,3 +119,4 @@ def download_latest_installer(release: dict | None = None) -> Path:
     if not target.exists() or target.stat().st_size <= 0:
         raise RuntimeError("Download installer incompleto")
     return target
+

@@ -6,9 +6,10 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from .central_service import central_review_page
+from .central_service import central_review_page, central_review_upsert
 from .database import SessionLocal
-from .models import AppSetting, CentralReviewCache, Hotel, Review, Room
+from .eye_services import classify_review_text
+from .models import AppSetting, CentralReviewCache, Hotel, Review, ReviewTag, Room
 
 _STOP = {
     "quanto", "quale", "quali", "cosa", "come", "nel", "nella", "da", "di", "il", "la", "le", "i",
@@ -94,7 +95,7 @@ def cached_review_search(
             "room": record.room_code,
             "date": record.review_date.isoformat() if record.review_date else None,
             "rating": float(record.rating) if record.rating is not None else None,
-            "text": text[:280],
+            "text": text,
             "source": record.source,
             "author": record.author,
             "local_cache": True,
@@ -102,6 +103,63 @@ def cached_review_search(
         if len(results) >= limit:
             break
     return results
+
+
+def _upsert_review_mirror(db: Session, values: dict) -> Review | None:
+    """Keep the normal review model aligned with the central cache.
+
+    The normal model powers room rankings and aspect summaries. A cache-only
+    copy is therefore not enough: rooms, changed fields and classifier tags
+    must be mirrored as well.
+    """
+    hotel = db.scalar(select(Hotel).where(Hotel.code == values["hotel_code"]))
+    if not hotel:
+        return None
+
+    room = None
+    if values.get("room_code"):
+        room = db.scalar(
+            select(Room).where(Room.hotel_id == hotel.id, Room.code == values["room_code"])
+        )
+        if room is None:
+            room = Room(hotel_id=hotel.id, code=values["room_code"])
+            db.add(room)
+            db.flush()
+
+    review = db.scalar(select(Review).where(Review.sync_uuid == values["sync_uuid"]))
+    created = review is None
+    if review is None:
+        review = Review(
+            sync_uuid=values["sync_uuid"],
+            hotel_id=hotel.id,
+            date=values["review_date"],
+            text=values["text"],
+        )
+        db.add(review)
+        db.flush()
+
+    text_changed = review.text != values["text"]
+    review.hotel_id = hotel.id
+    review.room_id = room.id if room else None
+    review.source = values["source"]
+    review.author = values["author"]
+    review.rating = values["rating"]
+    review.date = values["review_date"]
+    review.text = values["text"]
+
+    if created or text_changed or not review.tags:
+        review.tags.clear()
+        db.flush()
+        for tag in classify_review_text(db, review.text, hotel.id):
+            review.tags.append(
+                ReviewTag(
+                    category_id=tag["category_id"],
+                    polarity=tag["polarity"],
+                    confidence=tag["confidence"],
+                    excerpt=tag.get("excerpt"),
+                )
+            )
+    return review
 
 
 async def refresh_review_cache() -> dict:
@@ -112,7 +170,7 @@ async def refresh_review_cache() -> dict:
     checkpoint = db.get(AppSetting, "central_review_sync_at")
     try:
         while True:
-            page = await central_review_page(offset, 500, checkpoint.value if checkpoint else None)
+            page = await central_review_page(offset, 500, (checkpoint.value if checkpoint and checkpoint.value else None))
             items = page.get("items", [])
             total = page.get("total", 0)
             if not items:
@@ -136,28 +194,7 @@ async def refresh_review_cache() -> dict:
                         setattr(existing, key, value)
                 else:
                     db.add(CentralReviewCache(**values))
-                # Mirror the record into the normal local model so rankings and
-                # the existing analysis pipeline see remote reviews too.
-                if not db.scalar(select(Review).where(Review.sync_uuid == values["sync_uuid"])):
-                    hotel = db.scalar(select(Hotel).where(Hotel.code == values["hotel_code"]))
-                    if hotel:
-                        room = (
-                            db.scalar(select(Room).where(Room.hotel_id == hotel.id, Room.code == values["room_code"]))
-                            if values["room_code"]
-                            else None
-                        )
-                        db.add(
-                            Review(
-                                sync_uuid=values["sync_uuid"],
-                                hotel_id=hotel.id,
-                                room_id=room.id if room else None,
-                                source=values["source"],
-                                author=values["author"],
-                                rating=values["rating"],
-                                date=values["review_date"],
-                                text=values["text"],
-                            )
-                        )
+                _upsert_review_mirror(db, values)
                 imported += 1
             db.commit()
             offset += len(items)
@@ -168,25 +205,19 @@ async def refresh_review_cache() -> dict:
         for cached_review in db.scalars(select(CentralReviewCache)).all():
             if db.scalar(select(Review).where(Review.sync_uuid == cached_review.sync_uuid)):
                 continue
-            hotel = db.scalar(select(Hotel).where(Hotel.code == cached_review.hotel_code))
-            if hotel:
-                room = (
-                    db.scalar(select(Room).where(Room.hotel_id == hotel.id, Room.code == cached_review.room_code))
-                    if cached_review.room_code
-                    else None
-                )
-                db.add(
-                    Review(
-                        sync_uuid=cached_review.sync_uuid,
-                        hotel_id=hotel.id,
-                        room_id=room.id if room else None,
-                        source=cached_review.source,
-                        author=cached_review.author,
-                        rating=cached_review.rating,
-                        date=cached_review.review_date,
-                        text=cached_review.text,
-                    )
-                )
+            _upsert_review_mirror(
+                db,
+                {
+                    "sync_uuid": cached_review.sync_uuid,
+                    "hotel_code": cached_review.hotel_code,
+                    "review_date": cached_review.review_date,
+                    "source": cached_review.source,
+                    "author": cached_review.author,
+                    "rating": cached_review.rating,
+                    "room_code": cached_review.room_code,
+                    "text": cached_review.text,
+                },
+            )
         state = db.get(AppSetting, "central_review_sync_state") or AppSetting(key="central_review_sync_state", value="")
         state.value = f"ok:{imported}"
         db.add(state)
@@ -199,3 +230,47 @@ async def refresh_review_cache() -> dict:
         return {"ok": False, "message": str(exc)}
     finally:
         db.close()
+
+
+
+async def push_local_reviews(db: Session) -> dict:
+    """Invia a Supabase le recensioni presenti solo in locale (mai sincronizzate).
+
+    L'upsert centrale e' idempotente su sync_uuid; in piu' saltiamo le recensioni
+    che hanno gia' una copia centrale con stessa data, fonte e testo, per non
+    creare doppioni.
+    """
+    cached_uuids = set(db.scalars(select(CentralReviewCache.sync_uuid)).all())
+    central_keys = {(c.hotel_code, c.review_date, (c.source or "").lower(), re.sub(r"\s+", " ", c.text or "").strip().lower()[:300])
+                    for c in db.scalars(select(CentralReviewCache)).all()}
+    pending = pushed = skipped = 0
+    errors: list[str] = []
+    for review in db.scalars(select(Review).order_by(Review.id)).all():
+        if review.sync_uuid in cached_uuids:
+            continue
+        hotel = db.get(Hotel, review.hotel_id)
+        if hotel is None:
+            continue
+        key = (hotel.code, review.date, (review.source or "").lower(), re.sub(r"\s+", " ", review.text or "").strip().lower()[:300])
+        if key in central_keys:
+            skipped += 1
+            continue
+        pending += 1
+        room = db.get(Room, review.room_id) if review.room_id else None
+        try:
+            result = await central_review_upsert({
+                "sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(),
+                "source": review.source, "author": review.author,
+                "rating": float(review.rating) if review.rating is not None else None,
+                "room_code": getattr(room, "code", None) if room else None, "text": review.text,
+            })
+            if not result.get("synced"):
+                errors.append("Supabase centrale non configurato o sessione scaduta")
+                break
+            pushed += 1
+            central_keys.add(key)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc)[:160])
+            if len(errors) >= 3:
+                break
+    return {"pending": pending, "pushed": pushed, "skipped_already_central": skipped, "errors": errors}

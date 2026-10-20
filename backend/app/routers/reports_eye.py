@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session, selectinload
 from ..database import get_db
 from ..models import Hotel, Invoice, InvoiceMeta
 from ..central_service import central_invoice_search, central_product_detail, central_product_page
+import json
+
+from ..models import AppSetting
+from ..normalization import normalize_text
+from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
 from ..report_service import historical_product_report
 
@@ -44,7 +49,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             points = grouped.setdefault(key, [])
             previous = points[-1]["price"] if points else None
             delta = None if previous is None else round(float(price) - previous, 4)
-            points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "description": row.get("original_description") or q})
+            points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": row.get("original_description") or q})
         blocks = []
         for (supplier, unit), points in grouped.items():
             prices = [p["price"] for p in points]; best = min(points, key=lambda p: p["price"])
@@ -69,11 +74,11 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # the product catalogue: equivalent descriptions with the same content
     # must appear as one product, while the source names remain available for
     # the detail/history lookup.
-    page = {"items": merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None)}
+    page = {"items": annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))}
     product = next((x for x in page["items"] if x.get("nome_canonico")), None)
     if not product:
         return result
-    matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price")} for x in page.get("items", []) if x.get("nome_canonico")]
+    matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price"), "recognition": x.get("recognition")} for x in page.get("items", []) if x.get("nome_canonico")]
     # A one-word family search (for example "acqua") is intentionally not
     # collapsed into the first catalogue row: let the user choose the exact
     # product variant so older purchases cannot hide newer ones.
@@ -93,16 +98,23 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     if not history:
         return result
     grouped = {}
+    pieces = _pieces_per_pack(db, [product["nome_canonico"], *detail_names])
     for row in sorted(history, key=lambda x: (str(x.get("invoice_date") or ""), str(x.get("supplier_name") or ""))):
         unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
         price = row.get("normalized_price") or row.get("unit_price")
+        if pieces and row.get("unit_price"):
+            # Pezzi per confezione indicati a mano: prezzo e quantità si esprimono in pezzi.
+            price = float(row["unit_price"]) / pieces
+            unit = "pz"
+            if row.get("quantity") is not None:
+                row = {**row, "quantity": round(float(row["quantity"]) * pieces, 2)}
         if price is None or float(price) <= 0:
             continue
         key = (str(row.get("supplier_name") or "Fornitore"), unit)
         points = grouped.setdefault(key, [])
         previous = points[-1]["price"] if points else None
         delta = None if previous is None else round(float(price) - previous, 4)
-        points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "description": product["nome_canonico"]})
+        points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": product["nome_canonico"]})
     blocks = []
     for (supplier, unit), points in grouped.items():
         prices = [x["price"] for x in points]
@@ -114,6 +126,72 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     best = min(all_points, key=lambda x: x["price"])
     best_supplier = min(blocks, key=lambda x: x["average_price"])
     return {"query": q, "summary": {"product": product["nome_canonico"], "manufacturers": [product["marca"]] if product.get("marca") else [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda x: x["date"])["price"], "initial_date": min(x["date"] for x in all_points), "average_price": round(sum(x["price"] for x in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda x: x["date"])["price"], "latest_date": max(x["date"] for x in all_points), "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({x["date"] for x in all_points}), "units": sorted({x["unit"] for x in all_points}), "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata."}
+
+
+def _pieces_per_pack(db: Session, names: list[str]) -> float | None:
+    row = db.get(AppSetting, "product_configs")
+    try:
+        configs = json.loads(row.value) if row and row.value else {}
+    except Exception:  # noqa: BLE001
+        return None
+    for name in names:
+        value = (configs.get(name) or {}).get("pieces_per_pack") if isinstance(configs, dict) else None
+        if value and float(value) > 0:
+            return float(value)
+    return None
+
+
+def _load_groups(db: Session) -> list[list[str]]:
+    row = db.get(AppSetting, "product_groups")
+    try:
+        return json.loads(row.value) if row else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _save_groups(db: Session, groups: list[list[str]]) -> list[list[str]]:
+    groups = [g for g in groups if len(g) >= 2]
+    row = db.get(AppSetting, "product_groups")
+    if row:
+        row.value = json.dumps(groups, ensure_ascii=False)
+    else:
+        db.add(AppSetting(key="product_groups", value=json.dumps(groups, ensure_ascii=False)))
+    db.commit()
+    set_user_groups(groups)
+    return groups
+
+
+@router.get("/product-groups")
+def product_groups(db: Session = Depends(get_db)):
+    groups = _load_groups(db)
+    set_user_groups(groups)
+    return groups
+
+
+@router.post("/product-groups")
+def merge_product_names(payload: dict, db: Session = Depends(get_db)):
+    """Conferma che questi nomi sono lo stesso prodotto (si uniscono ai gruppi già esistenti)."""
+    names = [normalize_text(str(n)) for n in payload.get("names", []) if str(n).strip()]
+    names = list(dict.fromkeys(names))
+    if len(names) < 2:
+        raise HTTPException(400, "Servono almeno due nomi")
+    groups = _load_groups(db)
+    joined = set(names)
+    rest = []
+    for g in groups:
+        if joined & set(g):
+            joined |= set(g)
+        else:
+            rest.append(g)
+    return _save_groups(db, [*rest, sorted(joined)])
+
+
+@router.delete("/product-groups")
+def split_product_name(name: str = Query(min_length=1), db: Session = Depends(get_db)):
+    """Toglie un nome dal suo gruppo (separa di nuovo)."""
+    key = normalize_text(name)
+    groups = [[n for n in g if n != key] for g in _load_groups(db)]
+    return _save_groups(db, groups)
 
 
 @router.get("/invoice-destinations")

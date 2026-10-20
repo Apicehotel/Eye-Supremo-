@@ -14,9 +14,60 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.2`
-**Branch di lavoro:** `integrate/main-align`
-**Ultimo aggiornamento:** 8 ottobre 2026
+**Versione applicativa:** `2.0.26`
+
+**Novità 2.0.26:** pulsante «Invia a Supabase» in Recensioni: rimanda al centrale le recensioni salvate solo sul PC (mai sincronizzate), senza doppioni (endpoint `POST /api/eye/reviews/sync/push`). Prima la sync partiva solo al momento del caricamento file.
+
+**Novità 2.0.25:** Media camere interattiva: clic su una riga apre le recensioni di quella camera (voto, data, autore, voti per tag, testo); clic su una media Booking/Google/TripAdvisor mostra solo quella fonte.
+
+**Novità 2.0.24:** pagina Ranking più focalizzata: prima le quattro classifiche (top 5), poi lo storico delle sole camere sotto soglia e le segnalazioni anonime, entrambi richiudibili. Verificati i duplicati: nessun doppione creato dai caricamenti recenti.
+
+**Novità 2.0.23:** l'app installata è una cartella (`EyeSupremo.exe` + file di supporto) invece di un unico `.exe` che si estraeva in Temp: risolve l'errore «Failed to load Python DLL … python312.dll» all'avvio dopo l'installazione. L'installer sostituisce il vecchio `.exe` senza perdere i dati (sono in `%LOCALAPPDATA%\EyeSupremo`).
+
+**Novità 2.0.22:** il pulsante **Carica file** delle Recensioni non è più muto con "Tutti gli hotel" selezionato: spiega di scegliere prima un singolo hotel nelle schede in alto, poi apre la selezione file.
+
+**Novità 2.0.21:** un numero camera è fatto di cifre (es. 325, 4407, 1108A): parole lette per errore dalle vecchie importazioni ("pulita", "super", "ampia", "Superior"…) non compaiono più come camere in Media camere, nello storico e nei ranking; quelle recensioni risultano senza camera. Controllo in `_valid_room` (`backend/app/routers/eye.py`) e in `frontend/src/lib/roomAverages.ts`.
+
+**Novità 2.0.20:** in Media camere i filtri **Zona** (Cantine Wine) e **Pavimento** (moquette) sono nella stessa riga degli altri filtri (ricerca, voto per tag, ordinamento, voti minimi) invece che in alto a destra.
+
+**Novità 2.0.19:** nelle email con più ospiti, un ospite senza numero camera non eredita più la camera salvata sull'intera email (che poteva essere un numero letto male, es. "10" al posto di "325"): resta senza camera invece di sporcare le medie di una camera inesistente.
+
+**Novità 2.0.18:**
+
+- **Voti per tag:** i voti per categoria scritti nei digest (Staff, Pulizia, Comfort, Posizione, Servizi, Qualità/prezzo, Letti, Colazione, Wi-Fi, Vista dalla camera, Camere, Ristorante) sono letti per ogni recensione e mostrati come etichette nelle recensioni e nello storico. In **Media camere** un menu "Voto per tag" cambia le medie da generale al tag scelto, sempre separate per fonte e sulla scala della fonte. Lettura in `extract_category_scores` (`backend/app/review_importers.py`); i voti per tag sono calcolati alla lettura dal testo, quindi valgono anche per le recensioni già archiviate.
+- **Date non più lette come voti:** `in 15/10 out 16/10` o `26/10/24` non diventano più "15/10" o "26/10" come voto generale: si legge il voto sulla riga dell'ospite.
+
+**Novità 2.0.17:**
+
+- **Recensioni solo voto:** senza testo scritto dall'ospite contano nelle medie ma non compaiono come righe; un riquadro le riassume per fonte e voto.
+- **Recensioni → Media camere:** pagina a sé con la media dei voti per camera, separata per fonte (Booking su 10, Google e TripAdvisor su 5); i voti fuori scala sono ignorati e segnalati.
+- **Filtro camere "Cantine Wine":** menu a tendina nelle Recensioni (e in Media camere) per filtrare l'Hotel Giò per zona: 1 Cantine Wine (126–131), 2 Cantine Wine (225–233), 3 Cantine Wine (326–332), 4 Cantine Wine (426–434), oppure tutte le Cantine Wine insieme. Le camere fuori elenco restano visibili solo con "Tutte le camere". Un secondo menu **Pavimento** (indipendente dalla zona) filtra le camere con moquette dell'Hotel Giò: 125, 211, 218, 221, 224, 312, 323, 412 (oppure "Senza moquette"); i due filtri si combinano.
+- **Fonte corretta nelle email miste:** la fonte (Booking/Google/TripAdvisor) si decide dai segnali della singola recensione (numero prenotazione, link profilo Google/TripAdvisor, "su Google"), non più dal piè di pagina che cita tutte le piattaforme; le recensioni Google/TripAdvisor in coda a una email Booking vengono separate e il loro voto "N/5" è letto, così Media camere non le conta più come Booking. Codice in `backend/app/review_importers.py`.
+- **Parole negative negate:** la negazione ribalta il giudizio anche se rinforzata ("non è per nulla lontano", "buffet non per nulla vuoto", "per niente", "affatto", "nemmeno", "privo di"): più marcatori insieme contano come una sola negazione. Aggiunte come parole negative "vuoto/vuota/vuoti/vuote" e "lontani/lontane". Elenchi e finestra di negazione in `backend/app/eye_services.py` (`NEGATIONS`, `NEGATION_WINDOW`).
+- **Importazione recensioni affidabile:** voti con la virgola accettati, un blocco difettoso non ferma il file, recensioni già caricate saltate (con conteggio), voto salvato sempre visibile.
+- **Caricamento multiplo senza doppioni:** si possono selezionare molti file insieme (inviati a gruppi di 25, con avanzamento). Lo stesso file scelto due volte viene ignorato; una recensione già presente (testo identico, oppure già contenuta in una vecchia email salvata intera) non viene ricaricata. Alla fine il messaggio indica quante recensioni sono state importate, quante erano già presenti, quanti file ripetuti sono stati ignorati e i primi problemi da verificare. Oltre 200 file per volta il resto non viene elaborato e viene segnalato.
+
+**Novità 2.0.16:** nella sezione Recensioni → Ranking ogni camera mostra l’andamento del voto nel tempo: i periodi positivi restano nello storico, mentre una nuova segnalazione negativa apre un nuovo intervallo con le cause rilevate. Le recensioni con difetti possono inoltre essere sincronizzate nel foglio camere senza sovrascritture o doppioni.
+
+**Novità 2.0.15:** profili centrali condivisi con login personale e accesso offline autorizzato; PIN conservati al riavvio; dashboard unificata senza doppioni e valida anche con sole note di credito; backup SQLite coerente e verificato; ricerche con annullamento delle richieste superate; dipendenze frontend fissate alle versioni del lockfile. La pubblicazione richiede prima l'attivazione descritta in `docs/CENTRAL_IDENTITY.md`.
+
+**Novità 2.0.14:** nella scheda prodotto del catalogo c'è «Pezzi per confezione» (es. 6 per un cartone): il report storico mostra prezzo e quantità al pezzo. Il numero vale per il prodotto ed è salvato in `product_configs` (campo `pieces_per_pack`). **Installer:** il file si chiama `EyeSupremo-Setup-<versione>.exe` (la versione è nel nome, non si sovrascrive nei download); per ogni release aggiornare anche `OutputBaseFilename` in `installer/EyeSupremo.iss`.
+
+**Novità 2.0.13:** il report storico mostra di nuovo il pulsante «fattura N» (apre la fattura con tutte le righe acquistate); ricerca provata su nomi reali delle fatture: «mozzarella» non lascia più passare tutto e il confronto a somiglianza non confonde più crostata/costa, succhi/sacchi, sfoglia/foglia. **Unisci prodotti:** nel catalogo spunta due o più voci e premi «Unisci»: la scelta viene salvata (tabella `settings`, chiave `product_groups`) e vale per catalogo e report storico; «separa» annulla. API: `GET/POST/DELETE /api/eye/product-groups`.
+
+**Novità 2.0.12:** le voci dello stesso prodotto (es. crostata alla marmellata / crostata marmellata / crostate marmellate) si fondono in una sola anche mentre si scrive o con ricerche lunghe.
+
+**Novità 2.0.11:** ricerca a più parole («crostata marmellata»): servono tutte le parole, con plurali e sinonimi, e i prodotti restano insieme in un'unica voce.
+
+**Novità 2.0.10:** ricerca prodotti più precisa (un prodotto = una voce con tutti i produttori), virgolette per la parola esatta (`"olio"`), niente più falsi match (uova/nuova, vino/bovino, olio/gasolio), tovaglioli di carta uniti.
+
+**Novità 2.0.9:** le vecchie variabili d'ambiente PIN/utente centrali vengono ignorate (fine di «Credenziali non valide»), sincronizzazione recensioni corretta, errore credenziali più chiaro.
+
+**Novità 2.0.8:** fattura di riferimento apribile su ogni ricerca prodotto, report storico con tutti i fornitori, ricerca per parte di parola («bombo» trova «bombolino»), riconoscimento prodotti con Open Food Facts (alimentari e non), Ask Fatture completo con integrazione dalla centrale.
+
+**Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server.
+**Branch principale:** `main` (modifiche solo via branch + PR)
+**Ultimo aggiornamento:** 13 ottobre 2026
 
 ### Completato
 
@@ -26,30 +77,32 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - report storico con confronto prezzi, produttore/marca, unità normalizzate e stampa/PDF;
 - recensioni separate per hotel, import MSG/EML/TXT, ranking, temi e alert;
 - dashboard, report, destinazione fattura, backup, audit log e sincronizzazione centrale opzionale;
-- login locale per profilo utente con PIN, ruoli e permessi; il login sviluppatore non è più obbligatorio;
-- gestione utenti e PIN riservata al ruolo Sviluppatore;
+- login personale centrale con PIN e autorizzazione offline sul PC;
+- tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
 - GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
-- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve).
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve);
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 - ricerca dello storico prodotti con suggerimenti, selezione delle varianti e layout responsive a due colonne;
 - gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
 - parsing XML FatturaPA dei riepiloghi fiscali tramite `DatiRiepilogo`, con imponibile, IVA e totale coerenti;
-- autenticazione centrale Supabase verificata per gli utenti `supremo` e `sviluppatore`; i PIN locali e centrali restano sistemi distinti.
+- import PDF/TXT più affidabile e somma delle spese calcolata sulle righe pertinenti;
+- profili centrali personali con cache del verificatore solo dopo un login online riuscito; modalità precedente disponibile esplicitamente per compatibilità.
 
 ### Verificato
 
-- backend: `70 passed`;
+- backend: `152 passed`;
 - build frontend Vite: riuscita;
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
-- build Windows locale pronta tramite `scripts\\build_windows.ps1`.
+- build Windows locale pronta tramite `scripts\\build_windows.ps1`;
+- `EyeSupremo.exe` come app a finestra nativa (WebView2), senza aprire il browser.
 
 ### Da completare
 
-- creare e verificare il nuovo `dist/EyeSupremo.exe`;
-- pubblicare una GitHub Release `v2.0.0` coerente con la versione dell'installer;
-- verificare il percorso completo su un PC pulito: installazione, primo login, import XML e aggiornamento;
+- sicurezza accessi: imporre il cambio PIN al primo accesso (il PIN predefinito non è più mostrato dalla UI);
+- pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
+- verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
 
 GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla le release da GitHub e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
@@ -60,17 +113,23 @@ GitHub conserva codice e versioni, non fatture o recensioni reali. L'app control
 - `choco` — Chocohotel
 - `brigantino` — Hotel Il Brigantino
 
-## Accesso e ruoli
+## Accesso e permessi
 
-Eye Supremo usa autenticazione locale con PIN e sessione. L'installazione crea già i profili **Sviluppatore** e **Supremo**, entrambi con un PIN iniziale temporaneo (non riportato qui): lo Sviluppatore deve sostituirlo al primo accesso dall'area Utenti e ruoli. Gli altri profili vengono creati localmente dallo Sviluppatore con il permesso desiderato.
+I profili sono condivisi su Supabase e usano username e PIN personali. Il primo
+accesso su ogni PC richiede Internet; dopo la verifica l'accesso offline è
+consentito per 7 giorni senza rinnovo automatico. Creazione utenti, cambio PIN e
+disattivazione avvengono nel centrale e richiedono Internet. Il riavvio del PC
+conserva il PIN scelto; nessun verificatore degli altri utenti viene scaricato.
 
-- **Sviluppatore**: accesso completo, configurazione, utenti e manutenzione.
-- **Supremo**: visibilità globale operativa sui tre hotel.
-- **Livello 1 / 2 / 3**: accesso operativo limitabile all'hotel assegnato e alle esclusioni configurate.
+Gli utenti `developer` e `supremo` mantengono gli stessi permessi operativi. Per le
+recensioni ogni profilo vede tutti gli hotel; le fatture restano nell'archivio unico
+Apice. Gli account precedentemente creati solo sul PC vanno registrati nel centrale.
 
-Per le recensioni, Sviluppatore e Supremo vedono **Tutti gli hotel** oltre alle tre sezioni Giò/Choco/Brigantino. Gli utenti assegnati a una sola struttura vedono solo quella.
-
-Per le fatture la visibilità resta aziendale Apice con esclusioni per categoria/prodotto/fornitore/parola chiave; le fatture **non vengono separate in tre archivi hotel**.
+**Attivazione:** prima di aggiornare i PC applicare la migrazione e distribuire le
+funzioni descritte in [docs/CENTRAL_IDENTITY.md](docs/CENTRAL_IDENTITY.md). La modalità
+locale precedente resta configurabile esplicitamente; la nuova autenticazione non
+usa credenziali centrali condivise. README, docs e commit non devono contenere
+credenziali reali o token.
 
 ## Fatture: archivio unico Apice
 
@@ -138,6 +197,14 @@ Formati supportati:
 
 Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi, prova a riconoscere Booking/Google/TripAdvisor, camera, data, voto e testo, e crea più record dallo stesso messaggio. Messaggi che non sembrano recensioni vengono segnalati invece di essere importati alla cieca.
 
+**Importazione affidabile:** i voti con la virgola (`8,0`, `7,5`) sono accettati; un voto fuori scala (oltre 10 per Booking, oltre 5 per Google e TripAdvisor) viene scartato e la recensione è salvata senza voto, con avviso; un blocco difettoso non ferma le altre recensioni dello stesso file; una recensione identica (hotel, data, camera, fonte e testo) già presente non viene importata di nuovo e l'interfaccia indica quante sono state saltate. Il voto salvato resta visibile anche quando il testo non lo contiene.
+
+**Recensioni solo voto:** una recensione senza testo scritto dall'ospite (solo il punteggio) conta nelle medie, nei voti per fonte e nei ranking, ma non viene mostrata come riga nell'archivio, nello storico e nelle segnalazioni anonime. Al suo posto compare un riquadro «Recensioni solo voto» con una voce per fonte e voto (es. «5 ★ su 10 · Booking · 3 recensioni»).
+
+**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera, **separata per fonte** e senza mescolare le scale: Booking su 10, Google e TripAdvisor su 5 (recensioni solo voto incluse). Per ogni fonte mostra media, numero di voti e minimo–massimo; in alto la media generale per fonte. Si filtra per hotel, si cerca per camera/hotel e si ordina per numero camera, media di una fonte o numero di voti. I voti fuori scala (es. 26 su Booking, causato da un giorno di calendario letto come voto) sono ignorati e segnalati con un avviso. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`). **Filtro zona:** i gruppi "1/2/3/4 Cantine Wine" dell'Hotel Giò sono definiti in `frontend/src/lib/roomGroups.ts` (test in `frontend/tests/roomGroups.test.ts`); per cambiare i numeri di camera (zone e moquette) basta modificare quel file.
+
+**Rilascio automatico dell'installer:** quando su `main` viene unita una modifica a `installer/EyeSupremo.iss` con una `AppVersion` non ancora pubblicata, il workflow *Publish Eye Supremo Windows Release* costruisce e pubblica da solo `EyeSupremo-Setup-<versione>.exe` nella GitHub Release `v<versione>`. Se quella versione esiste già non rifà la build. Resta avviabile a mano (Actions → Run workflow) o con un tag `v*`. Per rilasciare basta portare a `main` la nuova versione (package.json, backend, `installer/EyeSupremo.iss`, `docs/RELEASE_x_y_z.md`).
+
 ## Eye AI e agenti interni
 
 Eye AI usa **Qwen 3 8B** tramite Ollama con un orchestratore locale. La UI principale chiama `/api/eye/agents/ask`; l'orchestratore decide quali specialisti servono e restituisce anche il piano eseguito.
@@ -169,11 +236,21 @@ Eye Supremo non forza un unico modello pesante. Usa un **layer mirror** sobrio:
 
 Policy di default: `fast_first`. In Impostazioni → IA locale si può scegliere anche `fast_only` o `quality`.
 
-**Ask performante:** contesto ridotto (max ~12 righe), report storico solo se serve, risposte fattuali (es. fattura più alta / spese semplici) senza Ollama, generazione corta su modello veloce con `keep_alive` e cache dei modelli installati.
+**Ricerca fatture:** estesa a **tutte** le righe prodotto dell’archivio locale e della cache — nessun tetto nascosto e **nessun prodotto speciale**. Ogni descrizione riga (limoncello, carta igienica, detergenti, bomboloni, …) è cercabile con varianti/composti; i fornitori sono diversificati in pagina. `limit`/`offset` paginano solo la UI; `total`, totali economici e conteggio fornitori coprono l’intero match set.
+
+**Ask Fatture:** usa solo l’archivio fatture (`area=invoices`). Estrae il prodotto dalla domanda e cerca **tutte** le righe prodotto su locale + cache (+ Supabase se serve); confronta i fornitori su tutto il match set, non solo il vendor più frequente. Allo LLM arrivano ~24 righe diversificate; summary e storico usano tutti i match. Domande tipo fattura più alta / spese semplici restano deterministiche; altrimenti `llama3.2:3b` con escalation a `qwen3:8b`.
+
+**Fattura di riferimento su ogni ricerca prodotto:** ogni riga prodotto (Fatture → risultati locali e cache/centrale, Prodotti → storico acquisti, Ask Fatture → «Dati fatture verificati») ha il pulsante **Apri** che mostra la fattura completa in un pannello laterale, con la riga cercata evidenziata e la fonte (archivio locale, cache del PC, archivio centrale). Backend: `GET /api/eye/invoice-ref/{ref}` dove `ref` è l’id fattura locale o lo `source_hash` centrale; ordine di ricerca: locale → cache PC → Supabase. Se la fattura non è disponibile (né locale né in cache né online) il pannello lo dice chiaramente.
+
+**Report storico completo (tutti i fornitori):** il report storico unisce le fatture importate in locale **e** quelle scaricate nella cache del PC (archivio centrale), senza doppioni (stessa fattura riconosciuta per hash o per fornitore+numero+data). Cercando ad esempio «bomboloni» compaiono tutti i fornitori che li hanno venduti, con prezzi confrontati sulla stessa unità. Ogni acquisto nella matrice ha il link «fattura N» che apre la fattura di riferimento. Se la cache è incompleta il report lo segnala. L’API `GET /api/eye/reports/history-product` include `sources` (righe locali/cache, numero fornitori, `cache_complete`).
+
+**Ricerca per parte di parola:** dal filtro nomi prodotto (elenco Prodotti, suggerimenti e report storico da archivio centrale) una parte di parola di almeno 4 caratteri trova le parole più lunghe: «bombo» trova «bombolino» e «minibombolini», «limon» trova «limoncello». Sotto i 4 caratteri la ricerca resta rigida. Corretto anche un crash del filtro su «carta igienica».
 
 **Cache PC prima di Supabase:** Ask e le liste leggono la cache SQLite locale per **fatture** (`central_invoice_cache`) e **recensioni** (`central_review_cache`). Supabase interviene solo se la cache è vuota; l’aggiornamento resta in background.
 
-**Bootstrap all’installazione:** al primo avvio (o con cache vuota) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
+**Bootstrap dopo il login online:** dopo la verifica personale (con cache vuota o incompleta) Eye Supremo scarica in background fatture e recensioni da Supabase nella cache del PC. Poi offline consulta solo quella cache. Manuale: Impostazioni → Sincronizzazione → *Scarica tutto per offline*.
+
+**Stato cache a colpo d’occhio:** nella barra laterale c’è un indicatore (verde = completa, ambra = in corso/non verificata/parziale, rosso = errore o vuota) e nella Dashboard una scheda con barra di avanzamento («X di Y fatture · mancano N»). Il download confronta le fatture locali con il totale centrale: se mancano record (o il fallback ha scaricato solo le prime 500) la cache è marcata *incompleta*, non viene salvato il checkpoint e al prossimo avvio il download riprende da solo. Pulsante *Completa download* per forzarlo. Gli errori di Supabase mostrano il motivo restituito dal server (es. `Supabase 400 su eye_central_invoice_page: Credenziali non valide`) invece del solo «400 Bad Request». API: `GET /cache/bootstrap/status` → `health`, `headline`, `progress`, `invoices{local,remote_total,percent,missing}`, `ready_offline`.
 
 Modelli inclusi nel completamento automatico:
 
@@ -219,11 +296,11 @@ EYESUPREMO_SUPABASE_PUBLISHABLE_KEY=
 EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 ```
 
-La replica centrale è disponibile con le credenziali Eye dell'utente centrale (non riportate qui; vanno impostate in locale tramite variabili d'ambiente). L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
+La replica centrale usa il token personale ottenuto dal login online; nessun PIN centrale condiviso viene usato nella nuova modalità. L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
 
 ## Avvio sviluppo
 
-Requisiti: Python 3.11+ e Node 20+.
+Requisiti: Python 3.11+ e Node 22.12+.
 
 ```powershell
 setup.bat
@@ -233,17 +310,22 @@ start.bat
 API: `http://127.0.0.1:8000/api/docs`
 UI dev: `http://127.0.0.1:5173`
 
-## Installer Windows
+## Installer Windows (app nativa)
 
-Il PC finale **non deve avere Python o Node**.
+Il PC finale **non deve avere Python o Node**. L'eseguibile è un'**app Windows a finestra** (WebView2), non una pagina aperta nel browser.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller e incorpora la UI nel backend. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
+Lo script compila React, crea la cartella `dist/EyeSupremo/` (con `EyeSupremo.exe`) con PyInstaller (`--onedir --windowed` + pywebview) e incorpora la UI. Si usa la modalità cartella e non il file unico (`--onefile`) perché quest'ultimo si estrae in `%TEMP%` a ogni avvio e, se l'antivirus o Windows blocca l'estrazione, compare l'errore «Failed to load Python DLL … python312.dll». `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
 
-I dati vengono salvati in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
+- Doppio clic su Eye Supremo → si apre **solo la finestra dell'app** (icona taskbar, senza barra indirizzi).
+- Nessuna console CMD e nessun Chrome/Edge con URL `http://127.0.0.1:8765`.
+- Serve il runtime **Microsoft Edge WebView2** (già presente su Windows 10/11 aggiornati).
+- I dati restano in `%LOCALAPPDATA%\EyeSupremo`, separati dall'eseguibile.
+
+`start.bat` resta solo per lo sviluppo (Vite + browser).
 
 ## Test e CI
 
@@ -260,7 +342,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 ## Sicurezza
 
 - dati reali locali per default;
-- autenticazione locale con PIN e sessione;
+- autenticazione locale con PIN e sessione (PIN iniziale da cambiare al primo accesso);
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
 - agenti con strumenti dichiarati e limitati;
@@ -269,11 +351,61 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 - upload con limiti e nomi generati;
 - hash duplicati;
 - audit log;
-- sync remota centrale autenticata con PIN e paginazione;
+- sync remota centrale con sessione personale revocabile e paginazione;
 - nessun token reale committato.
 
 ## Limitazioni note
 
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
+- le recensioni importate con le versioni fino alla 2.0.16 possono essere salvate come intera email in un unico record, con camera e voto sbagliati (es. un giorno della data letto come voto): le medie per camera ne risentono finché quei record non vengono reimportati o corretti;
 - il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;
 - `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.
+
+
+## Riconoscimento prodotti (Open Food Facts)
+
+Ogni prodotto in elenco e nella selezione del report storico mostra categoria, marca e provenienza riconosciute dalla descrizione di fattura. Il riconoscimento è **locale e offline**: usa un dizionario di categorie in italiano ricavato dalla tassonomia di [Open Food Facts](https://it.openfoodfacts.org/) (licenza ODbL, © contributori Open Food Facts), integrato con marche e voci non alimentari (energia, lavanderia, imposte…) tipiche delle fatture.
+
+- Dizionario: `backend/app/data/off_categories_it.json`, rigenerabile con `python scripts/build_off_categories.py`.
+- Nessuna chiamata all'API di Open Food Facts a runtime (limiti di richieste e uso offline).
+- Marche e famiglie si estendono in `backend/app/product_recognition.py` (`BRANDS`, `NON_FOOD`, `EXTRA_FOODS`).
+- Prodotti **non alimentari**: oltre alle famiglie manuali (imposte, energia, lavanderia…), le righe senza esito alimentare usano le tassonomie Open Products Facts e Open Beauty Facts (`backend/app/data/off_nonfood_it.json`, rigenerabile con `python scripts/build_nonfood_categories.py`) e mostrano famiglia e sottocategoria (es. «Pulizia e igiene › Shampoo»). Le voci contabili restano manuali.
+
+### Ask Fatture: integrazione dalla centrale
+Se la cache PC non è verificata completa, Ask integra sempre i risultati locali con una ricerca su Supabase (timeout 25 s), così un prodotto presente solo nell'archivio centrale mostra tutti i fornitori e non una riga sola.
+
+### Credenziali centrali e variabili d'ambiente (modalità precedente)
+
+Queste variabili sono usate soltanto con `EYESUPREMO_CENTRAL_IDENTITY_ENABLED=false`. Nella modalità centrale personale si usa il login, senza override condivisi.
+Le vecchie variabili Windows `EYESUPREMO_CENTRAL_USERNAME` e `EYESUPREMO_CENTRAL_PIN` vengono ignorate (causavano «Credenziali non valide» dopo il ripristino del PIN predefinito). Per cambiare le credenziali centrali si usano `EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` e `EYESUPREMO_CENTRAL_PIN_OVERRIDE`.
+La sincronizzazione recensioni non invia più un checkpoint vuoto come data (errore «invalid input syntax for type timestamp»), e l'errore «Credenziali non valide» indica l'utente, senza esporre PIN o token.
+
+### Ask Fatture: pertinenza dei risultati
+Ask tiene solo le righe la cui **descrizione** è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile, usando il riconoscimento prodotti: autofatture/voci contabili e accessori (es. «molla portacarta igienica») non finiscono più nel confronto prezzi. Se l'archivio centrale non risponde, Ask lo segnala con il motivo invece di mostrare un risultato parziale senza avvisi.
+
+### Sinonimi di prodotto
+La ricerca tratta «marmellata», «confettura» e la sigla «MARM.» come lo stesso prodotto (le righe di dolci pronti come «crostata alla marmellata» e gli accessori come dispenser o dosatori restano fuori dal confronto prezzi). Nuovi sinonimi si aggiungono in `PRODUCT_FAMILY_ALIASES` (`backend/app/product_taxonomy.py`).
+
+### Un prodotto, più produttori
+Cercando un prodotto (es. «crostata», «marmellata») l'elenco e la scelta del report storico mostrano **una sola voce** con tutti i nomi e produttori trovati, così il confronto prezzi per fornitore è unico. Le ricerche dove la misura conta (acqua, carta igienica, A4, lampadine) continuano a proporre le varianti da scegliere. Logica in `collapse_to_product` (`backend/app/product_recognition.py`).
+
+### Simulazione su dati reali (ricerca prodotti)
+
+Verificati banane, birra, caffè, latte, mozzarella, pomodori, prosciutto, uova, yogurt: ogni prodotto resta una sola voce con tutti i produttori. Correzioni: la ricerca per parte di parola scatta in mezzo alla parola solo da 6 caratteri (così «uova» non trova «nuova»), parole di confezione (sgrassato, vassoio, busta) non escludono più un alimento, e «MOZZ.» è riconosciuto come mozzarella.
+
+### Ricerca esatta con le virgolette
+
+Scrivendo la parola tra virgolette (`"olio"`, anche in Ask: «chi mi vende "olio"?») la ricerca trova solo la **parola intera**: niente parti di parola, sinonimi o correzioni (`"olio"` non trova «gasolio»). Senza virgolette resta la ricerca flessibile. In più: «vino» non trova più «bovino/ovino», «olio» non trova «gasolio» (le parole corte contano solo a inizio parola) e i tovaglioli di carta sono «Monouso e tavola» e si uniscono in un solo prodotto, distinti dal servizio di lavanderia.
+
+### Ricerca a più parole («crostata marmellata»)
+
+Con due o più parole la ricerca richiede **tutte** le parole (plurali e sinonimi inclusi: crostata≈crostate, marmellata≈marm≈confettura) e non si riduce più al solo sinonimo «marmellata». Così «crostata marmellata» riunisce in un solo prodotto crostata/crostate alla marmellata/crostate marmellate e non mostra più confetture, cornetti o dosatori. Una parola sola funziona come prima.
+
+### Ricerca incompleta o lunga («crost», «crostate marmellate crostata»)
+
+Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la famiglia viene dedotta dalle voci trovate. Se almeno due voci (e metà del totale) sono nella stessa famiglia (es. «Crostate») si fondono in una sola, senza toccare le voci non imparentate. Funziona offline, senza Ollama: l'IA locale resta per la risposta di Ask, il raggruppamento dei nomi è deterministico (più veloce e ripetibile).
+
+### Nomi equivalenti fusi anche nell'elenco catalogo
+
+Anche senza ricerca (elenco catalogo, suggerimenti) le voci che sono lo stesso prodotto scritto in modo diverso diventano **una sola riga** con tutti i produttori: «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate», «crostate marmellate». Si confrontano le parole utili senza articoli/preposizioni e senza desinenza (plurale/femminile), con «marm» = marmellata. Formati e misure restano nell'impronta (acqua 75x12 ≠ acqua 100x12) e si fondono solo voci della stessa famiglia riconosciuta. I nomi originali restano in `canonical_names` per storico e confronto fornitori.
+

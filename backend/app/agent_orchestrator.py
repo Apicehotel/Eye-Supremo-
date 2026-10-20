@@ -10,18 +10,26 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .central_cache import cached_row_search
+from .central_service import central_invoice_search, configured as central_configured
 from .database import SessionLocal
 from .eye_services import invoice_search_summary, review_rankings
 from .model_layers import AiRuntime, generate_with_layers, resolve_ai_runtime
 from .models import CentralInvoiceCache, Hotel, Invoice, Review, Room, Supplier
-from .report_service import historical_product_report
+from .report_service import _cache_complete, historical_product_report
 from .review_cache import cached_review_search
+from .product_taxonomy import (
+    diversify_by_supplier,
+    extract_product_query,
+    row_matches_product_query,
+    supplier_breakdown,
+)
 from .search_index import invoice_search
 
-# Limiti snelli per Ask: meno token, meno SQL, risposta più rapida sui PC ufficio.
-ASK_ROW_LIMIT = 12
+# Limiti snelli per Ask: meno token verso l'LLM. La ricerca SQL/FTS invece
+# interroga tutto l'indice (anche 20k+ righe), non solo le ultime fatture.
+ASK_ROW_LIMIT = 24  # solo contesto passato all'LLM; la ricerca sotto è senza tetto
 ASK_REVIEW_LIMIT = 8
-ASK_HISTORY_LIMIT = 180
+ASK_HISTORY_LIMIT = None  # storico prezzi su tutte le osservazioni
 ASK_NUM_PREDICT = 260
 ASK_NUM_CTX = 3072
 
@@ -91,6 +99,26 @@ def _is_simple_spend_question(question: str) -> bool:
     return spend and not complex_
 
 
+def _asks_best_supplier(question: str) -> bool:
+    q = question.lower()
+    return any(
+        phrase in q
+        for phrase in (
+            "vende meglio",
+            "vendono meglio",
+            "fornitore migliore",
+            "miglior fornitore",
+            "chi mi vende",
+            "chi vende",
+            "prezzo migliore",
+            "costo minore",
+            "più conveniente",
+            "piu conveniente",
+            "meno caro",
+        )
+    )
+
+
 def _max_invoice_context(db: Session) -> dict[str, Any] | None:
     """Return the highest positive invoice across local and central archives."""
     candidates: list[dict[str, Any]] = []
@@ -157,10 +185,8 @@ def classify_intent(question: str, *, area: str = "all") -> list[str]:
         if hard_product:
             agents.extend(["products", "prices"])
     elif mode == "invoices":
-        if product_hit or not review_hit:
-            agents.extend(["products", "prices"])
-        if review_hit:
-            agents.append("reviews")
+        # Ask Fatture: solo archivio fatture/prodotti/prezzi, niente rumore recensioni.
+        agents.extend(["products", "prices", "invoices"])
         if any(x in q for x in CLASSIFY_HINTS):
             agents.append("classifier")
     else:
@@ -203,7 +229,8 @@ def _slim_historical(report: dict[str, Any] | None) -> dict[str, Any] | None:
     if not report or not report.get("summary"):
         return None
     suppliers = []
-    for block in (report.get("suppliers") or [])[:4]:
+    # Fino a 12 fornitori: Ask non deve collassare su un solo vendor dominante.
+    for block in (report.get("suppliers") or [])[:12]:
         suppliers.append({
             "supplier": block.get("supplier"),
             "unit": block.get("unit"),
@@ -216,6 +243,7 @@ def _slim_historical(report: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "summary": report.get("summary"),
         "suppliers": suppliers,
+        "supplier_count": len(report.get("suppliers") or []),
         "units": report.get("units") or [],
         "comparison_note": report.get("comparison_note"),
     }
@@ -228,6 +256,9 @@ def _compact_for_llm(context: dict[str, Any]) -> dict[str, Any]:
         compact["invoice_summary"] = context["invoice_summary"]
     if context.get("invoice_rows"):
         compact["invoice_rows"] = _slim_invoice_rows(context["invoice_rows"])
+    if context.get("suppliers"):
+        compact["suppliers"] = (context.get("suppliers") or [])[:12]
+        compact["supplier_count"] = context.get("supplier_count") or len(context.get("suppliers") or [])
     hist = _slim_historical(context.get("historical_product"))
     if hist:
         compact["historical_product"] = hist
@@ -301,6 +332,114 @@ def _review_context(question: str, hotel_id: int | None = None) -> dict[str, Any
         db.close()
 
 
+def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("invoice") or ""),
+        str(row.get("description") or "")[:80],
+        str(row.get("date") or ""),
+    )
+
+
+def _map_cache_item(item: dict[str, Any], *, source: str) -> dict[str, Any]:
+    return {
+        "row_id": item.get("id"),
+        "invoice_id": item.get("source_hash") or item.get("id"),
+        "invoice": item.get("invoice_number"),
+        "date": item.get("invoice_date"),
+        "supplier": item.get("supplier_name"),
+        "description": item.get("original_description") or item.get("normalized_description"),
+        "quantity": float(item.get("quantity") or 0),
+        "unit_price": float(item.get("unit_price") or 0),
+        "row_total": float(item.get("line_total") or 0),
+        "normalized_price": float(item["normalized_price"]) if item.get("normalized_price") is not None else None,
+        "unit": item.get("normalized_unit") or item.get("original_unit") or item.get("unit"),
+        "analysis_status": item.get("analysis_status") or "product",
+        "source": source,
+    }
+
+
+def _filter_product_rows(rows: list[dict[str, Any]], product_needle: str) -> list[dict[str, Any]]:
+    """Tiene solo righe la cui DESCRIZIONE è il prodotto cercato (non il nome del fornitore) e di famiglia compatibile."""
+    if not product_needle:
+        return rows
+    from .product_recognition import compatible, recognize
+    from .product_taxonomy import description_matches_product
+
+    wanted = recognize(product_needle)
+    out = []
+    for row in rows:
+        desc = str(row.get("description") or "")
+        if not row_matches_product_query(desc, product_needle) or not description_matches_product(desc, product_needle):
+            continue
+        if not compatible(wanted, recognize(desc)):
+            continue
+        out.append(row)
+    return out
+
+
+def _report_from_rows(rows: list[dict[str, Any]], product_needle: str) -> dict[str, Any] | None:
+    """Storico fornitori costruito dalle righe trovate (cache/centrale), non solo da InvoiceRow locali."""
+    priced: list[dict[str, Any]] = []
+    for row in rows:
+        price = row.get("normalized_price")
+        if price is None:
+            price = row.get("unit_price")
+        try:
+            price_f = float(price or 0)
+        except (TypeError, ValueError):
+            continue
+        if price_f <= 0:
+            continue
+        priced.append({**row, "_price": price_f})
+    if not priced:
+        return None
+
+    by_supplier: dict[str, list[dict[str, Any]]] = {}
+    for row in priced:
+        key = str(row.get("supplier") or "—")
+        by_supplier.setdefault(key, []).append(row)
+
+    supplier_blocks = []
+    for name, points in by_supplier.items():
+        prices = [p["_price"] for p in points]
+        dated = sorted(points, key=lambda p: str(p.get("date") or ""))
+        best = min(points, key=lambda p: p["_price"])
+        supplier_blocks.append({
+            "supplier": name,
+            "unit": next((p.get("unit") for p in points if p.get("unit")), "pz") or "pz",
+            "average_price": round(sum(prices) / len(prices), 4),
+            "best_price": best["_price"],
+            "best_date": best.get("date"),
+            "latest_price": dated[-1]["_price"],
+            "latest_date": dated[-1].get("date"),
+            "observations": len(points),
+        })
+    supplier_blocks.sort(key=lambda b: (b["average_price"], b["supplier"].lower()))
+    best_supplier = supplier_blocks[0]
+    all_prices = [p["_price"] for p in priced]
+    dated_all = sorted(priced, key=lambda p: str(p.get("date") or ""))
+    best_point = min(priced, key=lambda p: p["_price"])
+    summary = {
+        "product": product_needle or "prodotto",
+        "unit": best_supplier["unit"],
+        "average_price": round(sum(all_prices) / len(all_prices), 4),
+        "best_price": best_point["_price"],
+        "best_date": best_point.get("date"),
+        "latest_price": dated_all[-1]["_price"],
+        "latest_date": dated_all[-1].get("date"),
+        "best_supplier": best_supplier["supplier"],
+        "best_supplier_average": best_supplier["average_price"],
+        "best_supplier_observations": best_supplier["observations"],
+    }
+    return {
+        "query": product_needle,
+        "summary": summary,
+        "suppliers": supplier_blocks,
+        "units": sorted({b["unit"] for b in supplier_blocks}),
+        "comparison_note": "Confronto costruito da cache/centrale e fatture locali trovate.",
+    }
+
+
 async def _product_context(question: str, role_name: str) -> dict[str, Any]:
     db = SessionLocal()
     try:
@@ -309,44 +448,96 @@ async def _product_context(question: str, role_name: str) -> dict[str, Any]:
         if max_invoice and _asks_for_max_invoice(question):
             return {"max_invoice": max_invoice, "invoice_rows": [], "invoice_summary": invoice_search_summary([])}
 
-        rows = invoice_search(db, question, role_name=role_name, limit=ASK_ROW_LIMIT)
-        # Keep the bakery product family separate from similarly spelled
-        # technical items such as bombole/bombole per pulizia.
-        lowered_question = question.lower()
-        if "bombolon" in lowered_question or "bobolon" in lowered_question:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
-        # Preferisci la cache SQLite locale (già sincronizzata) rispetto a Supabase:
-        # sul PC ufficio è molto più veloce e funziona anche offline.
-        if not rows:
-            cached_items = cached_row_search(db, question, limit=ASK_ROW_LIMIT)
-            rows = [{
-                "row_id": item.get("id"),
-                "invoice_id": item.get("source_hash") or item.get("id"),
-                "invoice": item.get("invoice_number"),
-                "date": item.get("invoice_date"),
-                "supplier": item.get("supplier_name"),
-                "description": item.get("original_description") or item.get("normalized_description"),
-                "quantity": float(item.get("quantity") or 0),
-                "unit_price": float(item.get("unit_price") or 0),
-                "row_total": float(item.get("line_total") or 0),
-                "normalized_price": None,
-                "unit": None,
-                "analysis_status": item.get("analysis_status") or "product",
-                "source": "sqlite-cache",
-            } for item in cached_items]
-        if "bombolon" in lowered_question or "bobolon" in lowered_question:
-            rows = [row for row in rows if any(token in str(row.get("description") or "").lower() for token in ("bombolin", "bombolon"))]
+        product_needle = extract_product_query(question)
+        search_query = product_needle or question
+
+        # 1) Archivio locale (FTS/ILIKE) su tutto l'indice.
+        all_rows = invoice_search(db, search_query, role_name=role_name, limit=None)
+        seen_keys = {_row_key(r) for r in all_rows}
+
+        # 2) Sempre unisci la cache PC (non solo se i locali sono pochi).
+        cached_page = cached_row_search(db, search_query, limit=None)
+        cached_items = cached_page.get("items") if isinstance(cached_page, dict) else cached_page
+        for item in cached_items or []:
+            mapped = _map_cache_item(item, source="sqlite-cache")
+            key = _row_key(mapped)
+            if key in seen_keys:
+                continue
+            all_rows.append(mapped)
+            seen_keys.add(key)
+
+        # 3) Se ancora vuoto dopo il filtro prodotto: stessa fonte delle Liste → Supabase.
+        sources = {"local", "sqlite-cache"}
+        central_error = None
+        filtered = _filter_product_rows(all_rows, product_needle)
+        # Anche con qualche riga locale: se la cache PC non è verificata completa, integra dalla centrale
+        # (altrimenti un prodotto presente solo su Supabase risulta con 1 fornitore o nessuno).
+        if central_configured() and (not filtered or _cache_complete(db) is not True):
+            try:
+                central = await asyncio.wait_for(central_invoice_search(search_query, limit=500), timeout=25)
+            except Exception as exc:  # noqa: BLE001
+                central = {"items": [], "message": str(exc) or exc.__class__.__name__}
+            if central.get("message") and not central.get("items"):
+                central_error = str(central["message"])
+            for item in central.get("items") or []:
+                mapped = _map_cache_item(item, source="supabase")
+                key = _row_key(mapped)
+                if key in seen_keys:
+                    continue
+                all_rows.append(mapped)
+                seen_keys.add(key)
+                sources.add("supabase")
+            filtered = _filter_product_rows(all_rows, product_needle)
+        all_rows = filtered
+        # Contesto LLM: sample diversificato per fornitore (non solo il più frequente).
+        rows = diversify_by_supplier(all_rows, supplier_key="supplier", limit=ASK_ROW_LIMIT)
+        suppliers = supplier_breakdown(all_rows, supplier_key="supplier")
 
         report = None
-        if _needs_price_history(question):
+        # Per OGNI prodotto trovato: confronta i fornitori su tutto il match set
+        # (locale + cache + centrale), non solo per «chi vende meglio» / bomboloni.
+        wants_compare = bool(product_needle) and (
+            bool(all_rows)
+            or _needs_price_history(question)
+            or _asks_best_supplier(question)
+        )
+        if wants_compare:
             try:
-                report = historical_product_report(db, question, limit=ASK_HISTORY_LIMIT)
+                report = historical_product_report(db, search_query, limit=ASK_HISTORY_LIMIT)
             except Exception:
                 report = None
+            row_report = _report_from_rows(all_rows, product_needle) if all_rows else None
+            if not (report and report.get("summary")):
+                report = row_report
+            elif row_report and row_report.get("suppliers"):
+                # Unisci fornitori presenti solo in cache/centrale.
+                known = {str(b.get("supplier")) for b in (report.get("suppliers") or [])}
+                merged = list(report.get("suppliers") or [])
+                for block in row_report["suppliers"]:
+                    if block.get("supplier") not in known:
+                        merged.append(block)
+                merged.sort(key=lambda b: (float(b.get("average_price") or 0), str(b.get("supplier") or "").lower()))
+                report = {**report, "suppliers": merged}
+                if report.get("summary") and merged:
+                    best = merged[0]
+                    report["summary"] = {
+                        **report["summary"],
+                        "best_supplier": best.get("supplier"),
+                        "best_supplier_average": best.get("average_price"),
+                        "best_supplier_observations": best.get("observations"),
+                        "best_price": best.get("best_price"),
+                        "best_date": best.get("best_date"),
+                    }
         return {
             "invoice_rows": rows,
-            "invoice_summary": invoice_search_summary(rows),
+            "invoice_summary": invoice_search_summary(all_rows),
+            "match_total": len(all_rows),
+            "suppliers": suppliers,
+            "supplier_count": len(suppliers),
             "historical_product": report,
+            "product_query": product_needle or None,
+            "data_sources": sorted(sources),
+            "central_error": central_error,
             **({"max_invoice": max_invoice} if max_invoice else {}),
         }
     finally:
@@ -366,6 +557,8 @@ def _verify(context: dict[str, Any]) -> dict[str, Any]:
         terms = {str(r.get("description", "")).lower() for r in rows}
         if any("bombola" in t for t in terms) and any("bombolone" in t for t in terms):
             warnings.append("Rilevata possibile collisione bombola/bombolone: risultati da tenere separati.")
+    if context.get("central_error"):
+        warnings.append(f"Archivio centrale non interrogabile ({context['central_error']}): risultati solo dalla cache del PC.")
     return {"ok": not warnings, "warnings": warnings}
 
 
@@ -407,11 +600,75 @@ def _deterministic_answer(
     reviews = context.get("reviews") or []
     hist = context.get("historical_product") or {}
     hist_summary = hist.get("summary") if isinstance(hist, dict) else None
+    product_label = context.get("product_query") or (hist_summary or {}).get("product") or "il prodotto richiesto"
 
     if not rows and not reviews and not hist_summary and not max_invoice:
         return {
-            "answer": "Non ho trovato dati pertinenti nell'archivio locale.",
+            "answer": (
+                f"Non ho trovato righe pertinenti per «{product_label}» nell'archivio locale "
+                "(ricerca su tutto l'indice fatture). Verifica import/cache o prova un altro nome prodotto."
+            ),
             "facts": [],
+            "confidence": "high" if verification.get("ok", True) else "medium",
+        }
+
+    # Confronto fornitori per QUALSIASI prodotto (non solo bomboloni / «chi vende meglio»).
+    if hist_summary and (
+        _asks_best_supplier(question)
+        or _needs_price_history(question)
+        or (product_label and rows and (hist.get("suppliers") or context.get("suppliers")))
+    ):
+        unit = hist_summary.get("unit") or "pz"
+        supplier_blocks = [
+            b for b in (hist.get("suppliers") or [])
+            if (b.get("unit") or unit) == unit
+        ]
+        if not supplier_blocks:
+            # Fallback: costruisci elenco dai conteggi riga.
+            supplier_blocks = [
+                {
+                    "supplier": s.get("supplier"),
+                    "average_price": None,
+                    "observations": s.get("rows"),
+                    "unit": unit,
+                }
+                for s in (context.get("suppliers") or [])
+                if s.get("supplier")
+            ]
+        others = []
+        for b in supplier_blocks:
+            if not b.get("supplier") or b.get("supplier") == hist_summary.get("best_supplier"):
+                continue
+            if b.get("average_price") is not None:
+                others.append(
+                    f"{b.get('supplier')} (media € {float(b.get('average_price') or 0):.4f}/{unit}, "
+                    f"{b.get('observations') or 0} oss.)"
+                )
+            else:
+                others.append(f"{b.get('supplier')} ({b.get('observations') or 0} righe)")
+        others = others[:8]
+        others_text = (" Altri fornitori nello stesso archivio: " + "; ".join(others) + ".") if others else ""
+        match_total = context.get("match_total") or summary.get("rows") or len(rows)
+        return {
+            "answer": (
+                f"Per {hist_summary.get('product') or product_label} ho confrontato "
+                f"{match_total} {'riga prodotto' if match_total == 1 else 'righe prodotto'} tra "
+                f"{(len(supplier_blocks) or context.get('supplier_count') or 1)} {'fornitore' if (len(supplier_blocks) or context.get('supplier_count') or 1) == 1 else 'fornitori'}. "
+                f"Il più conveniente è {hist_summary['best_supplier']} "
+                f"(media € {float(hist_summary['best_supplier_average']):.4f}/{unit} "
+                f"su {hist_summary['best_supplier_observations']} osservazioni; "
+                f"miglior prezzo puntuale € {float(hist_summary['best_price']):.4f}/{unit} "
+                f"il {hist_summary.get('best_date') or 'n/d'})."
+                f"{others_text}"
+            ),
+            "facts": [
+                f"Fornitore migliore {hist_summary['best_supplier']}",
+                f"Media € {float(hist_summary['best_supplier_average']):.4f}/{unit}",
+                f"Miglior prezzo € {float(hist_summary['best_price']):.4f}/{unit}",
+                f"{hist_summary['best_supplier_observations']} osservazioni",
+                f"{match_total} righe prodotto",
+                *([f"{len(supplier_blocks)} fornitori confrontati"] if len(supplier_blocks) > 1 else []),
+            ],
             "confidence": "high" if verification.get("ok", True) else "medium",
         }
 
@@ -438,15 +695,34 @@ def _deterministic_answer(
     return None
 
 
-async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRuntime) -> dict[str, Any]:
+async def _qwen_structured(
+    question: str,
+    context: dict[str, Any],
+    runtime: AiRuntime,
+    *,
+    area: str = "all",
+) -> dict[str, Any]:
     compact = _compact_for_llm(context)
+    if area == "invoices":
+        scope = (
+            "Ambito: solo fatture, prodotti, fornitori e prezzi. "
+            "Ignora recensioni. Cita numeri, fornitori e date dal contesto. "
+        )
+    elif area == "reviews":
+        scope = "Ambito: solo recensioni, camere, servizi e ranking. "
+    else:
+        scope = "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
     prompt = (
-        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto. "
-        "Non inventare dati. Italiano, max 3 frasi. "
-        "Puoi usare sia fatture/prodotti sia recensioni/ranking se presenti. "
-        "Prezzi solo su unità confrontabili.\n"
+        "Sei l'agente risposta di Eye Supremo. Usa solo il contesto fornito. "
+        "Non inventare dati assenti dal contesto. Italiano, massimo 5 frasi. "
+        f"{scope}"
+        "Confronta tutte le righe prodotto trovate tra i fornitori; non limitarti a un solo vendor. "
+        "Se ci sono più fornitori o varianti (mini, formati, marche), elencarli. "
+        "Prezzi solo su unità confrontabili. "
+        "Se i dati non bastano, dillo esplicitamente e abbassa confidence a low.\n"
         f"DOMANDA: {question}\nCONTESTO: {json.dumps(compact, ensure_ascii=False, default=str)}"
     )
+    # Ask Fatture: mirror veloce (llama) poi scala a Qwen 8B se la risposta è vuota o low.
     return await generate_with_layers(
         prompt=prompt,
         runtime=runtime,
@@ -454,8 +730,8 @@ async def _qwen_structured(question: str, context: dict[str, Any], runtime: AiRu
         temperature=0.0,
         num_predict=ASK_NUM_PREDICT,
         num_ctx=ASK_NUM_CTX,
-        request_timeout=35.0,
-        escalate_on_low_confidence=False,
+        request_timeout=45.0,
+        escalate_on_low_confidence=True,
     )
 
 
@@ -466,6 +742,11 @@ def _public_context(context: dict[str, Any]) -> dict[str, Any]:
         "invoice_rows": _slim_invoice_rows(context.get("invoice_rows") or []),
         "verification": context.get("verification"),
     }
+    if context.get("suppliers"):
+        public["suppliers"] = (context.get("suppliers") or [])[:12]
+        public["supplier_count"] = context.get("supplier_count") or len(context.get("suppliers") or [])
+    if context.get("match_total") is not None:
+        public["match_total"] = context["match_total"]
     if context.get("max_invoice"):
         public["max_invoice"] = context["max_invoice"]
     if context.get("reviews"):
@@ -528,7 +809,7 @@ async def run_orchestrated_query(
         }
 
     try:
-        structured = await _qwen_structured(question, context, runtime)
+        structured = await _qwen_structured(question, context, runtime, area=area)
         answer = str(structured.get("answer", "")).strip()
         if not answer:
             raise ValueError("Risposta vuota")
@@ -545,12 +826,33 @@ async def run_orchestrated_query(
             "ai_model": structured.get("_model"),
             "ai_policy": runtime.policy,
         }
-    except Exception:
+    except Exception as exc:
         summary = context.get("invoice_summary") or {"rows": 0, "invoices": 0, "row_total": 0}
+        detail = str(exc).lower()
+        ollama_hint = any(
+            token in detail
+            for token in ("modello", "ollama", "connect", "timeout", "11434", "nessun modello")
+        )
         if summary.get("rows"):
-            answer = f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, per € {summary['row_total']:.2f}."
+            answer = (
+                f"Ho trovato {summary['rows']} righe pertinenti in {summary['invoices']} fatture, "
+                f"per € {summary['row_total']:.2f}."
+            )
+            if ollama_hint:
+                answer += (
+                    " L'IA locale (Ollama/Qwen) non ha risposto: verifica che Ollama sia avviato "
+                    "e che i modelli siano installati con scarica-modelli-ia.bat "
+                    "(llama3.2:3b + qwen3:8b)."
+                )
         elif context.get("reviews"):
             answer = f"Ho trovato {len(context['reviews'])} recensioni pertinenti nell'archivio locale."
+        elif ollama_hint:
+            answer = (
+                "Ollama non è disponibile o mancano i modelli IA. "
+                "Avvia Ollama e lancia scarica-modelli-ia.bat "
+                "(llama3.2:3b veloce, qwen3:8b qualità). "
+                "Senza modelli restano solo le risposte deterministiche su SQLite."
+            )
         else:
             answer = "Non ho trovato dati pertinenti nell'archivio locale."
         return {
@@ -559,10 +861,11 @@ async def run_orchestrated_query(
             "agents": [{"name": name, "purpose": AGENTS[name].purpose} for name in plan],
             "answer": answer,
             "facts": [],
-            "confidence": "high" if verification["ok"] else "medium",
+            "confidence": "medium" if ollama_hint else ("high" if verification["ok"] else "medium"),
             "verification": verification,
             "context": _public_context(context),
             "ai_layer": "deterministic",
             "ai_model": None,
             "ai_policy": runtime.policy,
+            "ai_error": str(exc)[:240] if ollama_hint else None,
         }

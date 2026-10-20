@@ -8,7 +8,7 @@ Dividere il lavoro di Qwen in specialisti piccoli, verificabili e con strumenti 
 
 `router → specialisti necessari → verifier → answer`
 
-Ask unificato (`area=all`) può attivare insieme prodotti/prezzi e recensioni. Con `area=reviews` il router forza lo specialista recensioni.
+**Ask Fatture** usa `area=invoices` (solo prodotti/prezzi/fatture). **Ask Recensioni** usa `area=reviews`. `area=all` resta per domande miste.
 
 Gli specialisti dati possono lavorare in parallelo ma ogni worker apre una sessione SQLAlchemy/SQLite indipendente.
 
@@ -26,10 +26,11 @@ Gli specialisti dati possono lavorare in parallelo ma ogni worker apre una sessi
 
 `SQLite (deterministico) → llama3.2:3b (veloce) → qwen3:8b (qualità)`
 
-- Policy default `fast_first`: il mirror veloce risponde sui PC ufficio; la qualità scala solo se serve.
+- Policy default `fast_first`: su Ask, `llama3.2:3b` prova per primo; se la risposta è vuota o `confidence=low` scala a `qwen3:8b`.
 - `fast_only` evita del tutto il modello 8B.
 - `quality` forza il modello qualità quando disponibile.
 - I calcoli restano sempre deterministici; i layer LLM sintetizzano solo il contesto già recuperato.
+- Se Ollama non è avviato o mancano i modelli, Ask mostra un messaggio esplicito e ricade sul riepilogo SQLite.
 
 ## Regole
 

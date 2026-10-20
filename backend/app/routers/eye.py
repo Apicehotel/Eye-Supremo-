@@ -1,7 +1,9 @@
 import json
+import re
+import hashlib
 import secrets
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
@@ -13,35 +15,43 @@ from ..central_cache import cache_status, cached_row_search, cached_search, refr
 from ..central_service import central_review_upsert
 from ..local_cache_bootstrap import bootstrap_status, run_local_cache_bootstrap, schedule_bootstrap
 from ..review_cache import cached_review_search, refresh_review_cache, review_cache_status
+from ..review_sheet_sync import sync_review_defects
 from ..database import SessionLocal, get_db
 from ..eye_services import (
-    add_review, ensure_invoice_metadata, invoice_search, invoice_search_summary,
-    review_rankings, seed_eye_supremo, classify_review_text,
+    add_review, ensure_invoice_metadata,
+    review_rankings, room_rating_timeline, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
-    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Supplier,
+    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Room, Supplier,
     CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
-from ..review_importers import clean_review_text, parse_review_document, split_review_blocks
+from ..review_importers import clean_review_text, extract_category_scores, parse_review_document, split_review_blocks
 from ..sync_service import push_to_supabase, sync_configuration
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
 
 
+def _valid_room(code: str | None) -> str | None:
+    """Un numero camera è fatto di cifre (es. 325, 4407, 1108A): parole come «pulita» o «super» non lo sono."""
+    value = (code or "").strip()
+    return value if re.fullmatch(r"\d{1,4}[A-Za-z]?", value) else None
+
+
 def _review_payload(review: Review, *, review_id=None, text: str | None = None, date_value: str | None = None,
                     room_code: str | None = None, author: str | None = None, source: str | None = None,
-                    rating: float | None = None, tags: list[dict] | None = None) -> dict:
+                    rating: float | None = None, tags: list[dict] | None = None, inherit_room: bool = True) -> dict:
     return {
         "id": review.id if review_id is None else review_id,
         "hotel": review.hotel.name,
         "hotel_code": review.hotel.code,
-        "room": room_code if room_code is not None else (review.room.code if review.room else None),
+        "room": _valid_room(room_code if room_code is not None else (review.room.code if review.room and inherit_room else None)),
         "author": author if author is not None else review.author,
         "source": source if source is not None else review.source,
         "rating": rating if rating is not None else (float(review.rating) if review.rating is not None else None),
         "date": date_value or review.date.isoformat(),
         "text": clean_review_text(text if text is not None else review.text),
+        "scores": extract_category_scores(text if text is not None else review.text, source if source is not None else review.source),
         "tags": tags if tags is not None else [{"category": t.category.name, "polarity": t.polarity, "confidence": float(t.confidence)} for t in review.tags],
     }
 
@@ -63,7 +73,8 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
             rating=block_rating,
             date_value=block.get("date") or review.date.isoformat(),
         )
-        payload["rating"] = block_rating
+        # Il voto nel testo ha la precedenza; se manca (recensione già separata) vale quello salvato.
+        payload["rating"] = block_rating if block_rating is not None else (float(review.rating) if review.rating is not None else None)
         return [payload]
     expanded = []
     for index, block in enumerate(blocks, start=1):
@@ -81,6 +92,7 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
             source=block.get("source"),
             rating=block_rating,
             tags=[],
+            inherit_room=False,  # la camera salvata sull'intera email non vale per le singole recensioni
         )
         # ``None`` means the individual block has no recognized score; do not
         # inherit the digest-level score from the parent email.
@@ -91,7 +103,7 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
 
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
     role = x_eye_role.strip().lower()
-    if role not in {"developer", "supremo", "level1", "level2", "level3"}:
+    if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Ruolo non valido")
     return role
 
@@ -101,12 +113,8 @@ def current_username(x_eye_user: str = Header(default="", alias="X-Eye-User")) -
 
 
 def allowed_hotel_ids(db: Session, role: str, username: str) -> set[int] | None:
-    if role in {"developer", "supremo"}:
-        return None
-    profile = db.scalar(select(UserProfile).where(UserProfile.username == username)) if username else None
-    if profile and profile.home_hotel_id:
-        return {profile.home_hotel_id}
-    return set()
+    # Permessi unificati: ogni profilo attivo vede tutti gli hotel.
+    return None
 
 
 def hotel_from_code(db: Session, code: str) -> Hotel:
@@ -154,24 +162,7 @@ def exclusions(role_name: str | None = None, role: str = Depends(current_role), 
 def add_exclusion(payload: dict, role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Profilo non autorizzato")
-    role_name = str(payload.get("role_name", "")).strip()
-    exclusion_type = str(payload.get("exclusion_type", "")).strip()
-    value = normalize_text(str(payload.get("value", "")))
-    if role_name not in {"level1", "level2", "level3"} or exclusion_type not in {"category", "product", "supplier", "keyword"} or not value:
-        raise HTTPException(422, "Esclusione non valida")
-    existing = db.scalar(select(RoleExclusion).where(RoleExclusion.role_name == role_name, RoleExclusion.exclusion_type == exclusion_type, RoleExclusion.value == value))
-    if existing:
-        existing.enabled = True
-        item = existing
-    else:
-        item = RoleExclusion(role_name=role_name, exclusion_type=exclusion_type, value=value, note=payload.get("note")); db.add(item)
-    db.commit(); db.refresh(item); return item
-
-
-@router.get("/search/live")
-def live_search(q: str = Query(min_length=1, max_length=160), limit: int = Query(30, le=100), role: str = Depends(current_role), db: Session = Depends(get_db)):
-    records = invoice_search(db, q, role_name=role, limit=limit)
-    return {"query": q, "summary": invoice_search_summary(records), "results": records}
+    raise HTTPException(410, "I livelli utente sono stati eliminati: le esclusioni per livello non sono più utilizzate")
 
 
 @router.post("/ai/ask")
@@ -182,9 +173,6 @@ async def ask_eye(payload: dict, role: str = Depends(current_role), username: st
     hotel_id = None
     if payload.get("hotel_code"):
         hotel = hotel_from_code(db, str(payload["hotel_code"])); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
-    elif role not in {"developer", "supremo"}:
-        allowed = allowed_hotel_ids(db, role, username)
-        hotel_id = next(iter(allowed)) if allowed else None
     return await eye_ai_answer(db, question, role_name=role, hotel_id=hotel_id)
 
 
@@ -200,19 +188,61 @@ def assign_invoice_hotel(invoice_id: int, hotel_code: str, role: str = Depends(c
     return {"ok": True, "invoice_id": invoice_id, "destination": hotel.name, "sync_uuid": meta.sync_uuid}
 
 
+RATING_SCALE = {"booking": 10, "google": 5, "tripadvisor": 5}
+
+
+def _parse_rating(value, source: str | None) -> Decimal | None:
+    """Voto da testo: accetta la virgola decimale e scarta valori illeggibili o fuori scala."""
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        rating = Decimal(str(value).strip().replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return None
+    scale = RATING_SCALE.get((source or "").strip().lower(), 10)
+    return rating if rating.is_finite() and 0 <= rating <= scale else None
+
+
+def _already_imported(db: Session, hotel_id: int, review_date: date, room_code: str | None, source: str | None, text: str) -> bool:
+    """Una recensione identica (hotel, data, camera, fonte e testo) non viene importata due volte."""
+    stmt = select(Review.id).where(
+        Review.hotel_id == hotel_id, Review.date == review_date, Review.text == text,
+        (Review.source == source) if source else Review.source.is_(None),
+    )
+    if room_code:
+        stmt = stmt.join(Room, Review.room_id == Room.id).where(Room.code == room_code)
+    else:
+        stmt = stmt.where(Review.room_id.is_(None))
+    if db.scalar(stmt.limit(1)) is not None:
+        return True
+    # Le email importate con le versioni vecchie sono salvate intere in un solo record:
+    # una recensione già contenuta in un record dello stesso hotel conta come già presente.
+    clean = text.strip()
+    if len(clean) >= 60:
+        contained = select(Review.id).where(Review.hotel_id == hotel_id, Review.text.contains(clean, autoescape=True)).limit(1)
+        return db.scalar(contained) is not None
+    return False
+
+
 @router.post("/reviews/import/{hotel_code}")
 async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username)
-    imported, errors = [], []
-    # Do not silently discard files selected by the user.  The previous slice
-    # made every file after the 200th disappear without an error.
-    for file in files:
+    imported, errors, skipped, skipped_files = [], [], 0, 0
+    seen_files: set[str] = set()
+    if len(files) > 200:
+        errors.append({"file": None, "error": f"Caricati al massimo 200 file per volta: {len(files) - 200} non elaborati, ricaricali separatamente"})
+    for file in files[:200]:
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in {".msg", ".eml", ".txt"}:
             errors.append({"file": file.filename, "error": "Formato recensione supportato: MSG, EML o TXT"}); continue
         content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
         if len(content) > settings.max_upload_mb * 1024 * 1024:
             errors.append({"file": file.filename, "error": "File troppo grande"}); continue
+        digest = hashlib.sha256(content).hexdigest()
+        if digest in seen_files:
+            skipped_files += 1  # stesso file selezionato due volte nello stesso caricamento
+            continue
+        seen_files.add(digest)
         safe = settings.data_dir / "reviews" / f"{secrets.token_hex(12)}{suffix}"
         safe.write_bytes(content)
         try:
@@ -220,20 +250,34 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
             if not parsed_reviews:
                 errors.append({"file": file.filename, "error": "Nessuna recensione riconosciuta nel messaggio"}); continue
             file_count = 0
-            for parsed in parsed_reviews:
-                review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=date.fromisoformat(parsed["date"]),
-                                    rating=Decimal(parsed["rating"]) if parsed.get("rating") else None,
-                                    room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
-                imported.append(review.id); file_count += 1
+            for index, parsed in enumerate(parsed_reviews, start=1):
+                # Un blocco difettoso non deve far perdere le altre recensioni dello stesso file.
                 try:
-                    sync_result = await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
-                    if not sync_result.get("synced"):
-                        errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale non completato: {sync_result.get('message') or 'Supabase centrale non configurato'}"})
-                except Exception as sync_exc:
-                    errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
+                    review_date = date.fromisoformat(parsed["date"])
+                    rating = _parse_rating(parsed.get("rating"), parsed.get("source"))
+                    if parsed.get("rating") and rating is None:
+                        errors.append({"file": file.filename, "error": f"Recensione {index}: voto «{parsed['rating']}» non valido, salvata senza voto"})
+                    if _already_imported(db, hotel.id, review_date, parsed.get("room_code"), parsed.get("source"), parsed["text"]):
+                        skipped += 1
+                        continue
+                    review = add_review(db, hotel_id=hotel.id, text=parsed["text"], review_date=review_date, rating=rating,
+                                        room_code=parsed.get("room_code"), source=parsed.get("source"), author=parsed.get("author"), raw_file=parsed.get("raw_file"))
+                    imported.append(review.id); file_count += 1
+                    sheet_result = await sync_review_defects(db, review)
+                    if sheet_result.get("enabled") and not sheet_result.get("sent"):
+                        errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
+                    try:
+                        sync_result = await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
+                        if not sync_result.get("synced"):
+                            errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale non completato: {sync_result.get('message') or 'Supabase centrale non configurato'}"})
+                    except Exception as sync_exc:
+                        errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
+                except Exception as block_exc:
+                    db.rollback()
+                    errors.append({"file": file.filename, "error": f"Recensione {index} non importata: {block_exc}"})
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
-    return {"hotel": hotel.name, "imported": len(imported), "review_ids": imported, "errors": errors}
+    return {"hotel": hotel.name, "imported": len(imported), "skipped_duplicates": skipped, "skipped_duplicate_files": skipped_files, "review_ids": imported, "errors": errors}
 
 
 @router.get("/reviews")
@@ -339,6 +383,17 @@ async def reviews_sync(role: str = Depends(current_role), db: Session = Depends(
     return {"push": push, "pull": pull}
 
 
+@router.post("/reviews/sync/push")
+async def reviews_sync_push(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    from ..review_cache import push_local_reviews
+    result = await push_local_reviews(db)
+    if result["pushed"]:
+        try: await refresh_review_cache()
+        except Exception: pass
+    return result
+
+
 @router.get("/reviews/sync/status")
 def reviews_sync_status(role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
@@ -350,9 +405,6 @@ def rankings(hotel_code: str | None = None, limit: int = Query(5, ge=1, le=25), 
     hotel_id = None
     if hotel_code:
         hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
-    elif role not in {"developer", "supremo"}:
-        allowed = allowed_hotel_ids(db, role, username)
-        hotel_id = next(iter(allowed)) if allowed else None
     return review_rankings(db, hotel_id=hotel_id, limit=limit)
 
 
@@ -367,6 +419,14 @@ def rankings_by_hotel(limit: int = Query(5, ge=1, le=25), role: str = Depends(cu
     for hotel in db.scalars(stmt).all():
         result[hotel.code] = {"hotel": hotel.name, **review_rankings(db, hotel_id=hotel.id, limit=limit)}
     return result
+
+
+@router.get("/rankings/timeline")
+def rankings_timeline(hotel_code: str | None = None, role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
+    hotel_id = None
+    if hotel_code:
+        hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username); hotel_id = hotel.id
+    return {"rooms": room_rating_timeline(db, hotel_id=hotel_id)}
 
 
 @router.get("/emerging-themes")
@@ -426,7 +486,7 @@ def central_status():
 
 
 @router.get("/central/invoices")
-async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), background_tasks: BackgroundTasks = None, role: str = Depends(current_role)):
+async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=5000), offset: int = Query(0, ge=0), background_tasks: BackgroundTasks = None, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     from ..database import SessionLocal
@@ -438,21 +498,30 @@ async def central_invoices(q: str = "", limit: int = Query(50, ge=1, le=500), of
             if background_tasks is not None and central_configured():
                 background_tasks.add_task(refresh_central_cache)
             if q.strip():
-                row_items = cached_row_search(db, q, limit)
-                if row_items:
+                row_page = cached_row_search(db, q, limit=limit, offset=offset)
+                if row_page.get("total"):
                     return {
                         "enabled": True,
                         "local": True,
-                        "items": row_items,
-                        "count": len(row_items),
+                        "items": row_page["items"],
+                        "count": row_page["count"],
+                        "total": row_page["total"],
+                        "offset": row_page["offset"],
+                        "limit": row_page["limit"],
+                        "suppliers": row_page.get("suppliers") or [],
+                        "supplier_count": row_page.get("supplier_count") or 0,
                         "source": "sqlite-cache",
+                        "scope": "full-cache",
                         "sync": status,
                     }
-            cached = cached_search(db, q, limit, offset)
-            return cached | {"source": "sqlite-cache", "sync": status}
+                # Cache piena ma 0 match per questa query → prova Supabase
+                # (la cache può essere parziale/stale; non bloccare la ricerca).
+            else:
+                cached = cached_search(db, q, limit, offset)
+                return cached | {"source": "sqlite-cache", "sync": status}
     finally:
         db.close()
-    # Cache vuota: unica occasione in cui Ask/liste battono Supabase.
+    # Cache vuota, oppure query senza match in cache: prova Supabase.
     if background_tasks is not None and central_configured():
         background_tasks.add_task(refresh_central_cache)
     central = await central_invoice_search(q, limit)
@@ -480,6 +549,68 @@ async def central_invoice_detail_route(source_hash: str, role: str = Depends(cur
     if not item:
         raise HTTPException(404, "Fattura centrale non trovata")
     return json.loads(item.payload_json or "{}")
+
+
+def _local_invoice_ref(db: Session, invoice: Invoice) -> dict:
+    """Fattura locale nello stesso formato del dettaglio centrale (per l'anteprima unica in app)."""
+    rows = db.scalars(select(InvoiceRow).where(InvoiceRow.invoice_id == invoice.id).order_by(InvoiceRow.id)).all()
+    return {
+        "source": "local",
+        "id": invoice.id,
+        "source_hash": invoice.hash_file,
+        "invoice_number": invoice.numero,
+        "invoice_date": invoice.data.isoformat(),
+        "supplier_name": invoice.supplier.ragione_sociale if invoice.supplier else None,
+        "taxable": float(invoice.imponibile or 0),
+        "vat": float(invoice.iva or 0),
+        "total": float(invoice.totale or 0),
+        "currency": invoice.valuta,
+        "source_filename": invoice.file_originale,
+        "rows": [{
+            "original_description": r.descrizione_originale,
+            "normalized_description": r.descrizione_normalizzata,
+            "quantity": float(r.quantita or 0),
+            "original_unit": r.unita_originale,
+            "normalized_unit": r.unita_normalizzata,
+            "unit_price": float(r.prezzo_unitario or 0),
+            "line_total": float(r.totale_riga or 0),
+            "normalized_price": float(r.prezzo_normalizzato) if r.prezzo_normalizzato is not None else None,
+        } for r in rows],
+    }
+
+
+@router.get("/invoice-ref/{ref}")
+async def invoice_reference(ref: str, role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Fattura di riferimento di una riga prodotto.
+
+    `ref` e' l'id numerico di una fattura locale oppure lo source_hash centrale. Prova in ordine:
+    fattura locale, cache del PC, archivio centrale.
+    """
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    ref = ref.strip()
+    if ref.isdigit() and len(ref) <= 9:
+        invoice = db.scalar(select(Invoice).options(selectinload(Invoice.supplier)).where(Invoice.id == int(ref)))
+        if invoice:
+            return _local_invoice_ref(db, invoice)
+    else:
+        invoice = db.scalar(select(Invoice).options(selectinload(Invoice.supplier)).where(Invoice.hash_file == ref))
+        if invoice:
+            return _local_invoice_ref(db, invoice)
+        cached = db.get(CentralInvoiceCache, ref)
+        if cached:
+            data = json.loads(cached.payload_json or "{}")
+            if data.get("rows"):
+                return {**data, "source": "cache"}
+        try:
+            remote = await central_invoice_detail(ref)
+            if remote and remote.get("invoice_number"):
+                return {**remote, "source": "central"}
+        except Exception:  # noqa: BLE001
+            pass
+        if cached:
+            return {**json.loads(cached.payload_json or "{}"), "source": "cache", "rows_available": False}
+    raise HTTPException(404, "Fattura di riferimento non trovata")
 
 
 @router.get("/central/products/{canonical_name:path}")
@@ -576,35 +707,10 @@ def central_sync_status(role: str = Depends(current_role)):
 
 @router.get("/central/summary")
 def central_summary(role: str = Depends(current_role), db: Session = Depends(get_db)):
-    """Dashboard KPIs backed by the complete central invoice cache."""
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    records = list(db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date.desc())).all())
-    offline = False
-    if not records:
-        records = list(db.scalars(select(Invoice).order_by(Invoice.data.desc())).all())
-        offline = True
-    now = date.today()
-    monthly: dict[str, Decimal] = {}
-    suppliers = set()
-    recent = []
-    credits = Decimal("0")
-    credit_documents = 0
-    for record in records:
-        invoice_date = record.invoice_date if isinstance(record, CentralInvoiceCache) else record.data
-        total = record.total if isinstance(record, CentralInvoiceCache) else record.totale
-        supplier_name = record.supplier_name if isinstance(record, CentralInvoiceCache) else (record.supplier.ragione_sociale if record.supplier else "")
-        key = invoice_date.strftime("%Y-%m")
-        monthly[key] = monthly.get(key, Decimal("0")) + (total or Decimal("0"))
-        if (total or Decimal("0")) < 0:
-            credits += total or Decimal("0")
-            credit_documents += 1
-        suppliers.add(supplier_name)
-        if len(recent) < 6:
-            recent.append({"id": record.source_hash if isinstance(record, CentralInvoiceCache) else record.id, "numero": record.invoice_number if isinstance(record, CentralInvoiceCache) else record.numero, "data": invoice_date.isoformat(), "imponibile": None if isinstance(record, CentralInvoiceCache) else float(record.imponibile), "iva": None if isinstance(record, CentralInvoiceCache) else float(record.iva), "totale": float(total or 0), "valuta": "EUR", "stato_importazione": "Cache locale" if offline else "Supabase", "file_originale": record.payload_json if isinstance(record, CentralInvoiceCache) else record.file_originale, "supplier": {"id": supplier_name, "ragione_sociale": supplier_name}, "row_count": 0})
-    totals = sum(((r.total if isinstance(r, CentralInvoiceCache) else r.totale) or Decimal("0")) for r in records)
-    dates = [r.invoice_date if isinstance(r, CentralInvoiceCache) else r.data for r in records]
-    return {"offline": offline, "kpis": {"invoices": len(records), "total_spent": float(totals), "month_spent": float(monthly.get(now.strftime("%Y-%m"), 0)), "suppliers": len(suppliers), "products": 0}, "period": {"from": min(dates).isoformat() if dates else None, "to": max(dates).isoformat() if dates else None, "credit_documents": credit_documents, "credit_total": float(credits)}, "monthly": [{"month": key, "total": float(value)} for key, value in sorted(monthly.items())[-24:]], "recent": recent, "anomalies": []}
+    from ..dashboard_service import dashboard_snapshot
+    return {"offline": not central_configured(), **dashboard_snapshot(db), "anomalies": []}
 
 
 @router.get("/cache/bootstrap/status")
