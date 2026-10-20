@@ -168,7 +168,7 @@ Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi
 
 **Recensioni solo voto:** una recensione senza testo scritto dall'ospite (solo il punteggio) conta nelle medie, nei voti per fonte e nei ranking, ma non viene mostrata come riga nell'archivio, nello storico e nelle segnalazioni anonime. Al suo posto compare un riquadro «Recensioni solo voto» con una voce per fonte e voto (es. «5 ★ su 10 · Booking · 3 recensioni»).
 
-**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera (scala 10; Google e TripAdvisor ×2, recensioni solo voto incluse), numero di recensioni, minimo–massimo, ultimo voto e fonti. Si filtra per hotel, si cerca per camera/hotel e si ordina per media, numero di recensioni o numero camera. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`).
+**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera, **separata per fonte** e senza mescolare le scale: Booking su 10, Google e TripAdvisor su 5 (recensioni solo voto incluse). Per ogni fonte mostra media, numero di voti e minimo–massimo; in alto la media generale per fonte. Si filtra per hotel, si cerca per camera/hotel e si ordina per numero camera, media di una fonte o numero di voti. I voti fuori scala (es. 26 su Booking, causato da un giorno di calendario letto come voto) sono ignorati e segnalati con un avviso. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`).
 
 ## Eye AI e agenti interni
 

@@ -1,55 +1,99 @@
-export type RoomScoreInput = {
+export type SourceKey = 'Booking' | 'Google' | 'TripAdvisor';
+export const SOURCES: {key: SourceKey; scale: 5 | 10}[] = [
+  {key: 'Booking', scale: 10},
+  {key: 'Google', scale: 5},
+  {key: 'TripAdvisor', scale: 5},
+];
+
+export function sourceKey(source: string | null | undefined): SourceKey | null {
+  const name = (source || '').trim().toLowerCase();
+  if (name === 'booking' || name === 'booking.com') return 'Booking';
+  if (name === 'google') return 'Google';
+  if (name === 'tripadvisor') return 'TripAdvisor';
+  return null;
+}
+
+export type RoomRatingInput = {
   hotel: string;
   hotel_code: string;
   room: string | null;
   source: string | null;
   date: string;
-  /** Voto già normalizzato su scala 10 (null = senza voto). */
-  score: number | null;
+  /** Voto originale, sulla scala della sua fonte (Booking 0–10, Google/TripAdvisor 0–5). */
+  rating: number | null;
 };
+
+export type SourceAverage = {average: number; count: number; min: number; max: number};
 
 export type RoomAverage = {
   hotel: string;
   hotel_code: string;
   room: string;
-  reviews: number;
-  average: number;
-  min: number;
-  max: number;
   lastDate: string;
-  sources: {source: string; count: number}[];
+  total: number;
+  bySource: Record<SourceKey, SourceAverage | null>;
+};
+
+export type RoomAveragesResult = {
+  rows: RoomAverage[];
+  /** Voti fuori scala ignorati (es. un giorno di calendario letto per errore come voto). */
+  invalid: number;
 };
 
 export type RoomStatus = 'ok' | 'monitorare' | 'attenzione';
 
-export function roomStatus(average: number): RoomStatus {
-  return average < 6 ? 'attenzione' : average < 7.5 ? 'monitorare' : 'ok';
+/** Stato della media: soglie sulla scala 10, riportando il voto alla sua scala. */
+export function roomStatus(average: number, scale: 5 | 10): RoomStatus {
+  const onTen = average / scale * 10;
+  return onTen < 6 ? 'attenzione' : onTen < 7.5 ? 'monitorare' : 'ok';
 }
 
-/** Media dei voti per camera: contano solo recensioni con camera e voto. */
-export function roomAverages(items: RoomScoreInput[]): RoomAverage[] {
-  type Group = {hotel: string; hotel_code: string; room: string; scores: number[]; lastDate: string; sources: Map<string, number>};
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/** Medie per camera, tenute separate per fonte: nessun voto di scale diverse viene mescolato. */
+export function roomAverages(items: RoomRatingInput[]): RoomAveragesResult {
+  type Group = {hotel: string; hotel_code: string; room: string; lastDate: string; scores: Record<SourceKey, number[]>};
   const groups = new Map<string, Group>();
+  let invalid = 0;
   for (const item of items) {
     const room = (item.room || '').trim();
-    if (!room || item.score === null || !Number.isFinite(item.score)) continue;
-    const key = `${item.hotel_code}:${room}`;
-    const group: Group = groups.get(key) || {hotel: item.hotel, hotel_code: item.hotel_code, room, scores: [], lastDate: '', sources: new Map()};
-    group.scores.push(item.score);
+    const key = sourceKey(item.source);
+    if (!room || !key || item.rating === null || !Number.isFinite(item.rating)) continue;
+    const scale = SOURCES.find(s => s.key === key)!.scale;
+    if (item.rating < 0 || item.rating > scale) { invalid += 1; continue; }
+    const id = `${item.hotel_code}:${room}`;
+    const group: Group = groups.get(id) || {hotel: item.hotel, hotel_code: item.hotel_code, room, lastDate: '', scores: {Booking: [], Google: [], TripAdvisor: []}};
+    group.scores[key].push(item.rating);
     if (item.date > group.lastDate) group.lastDate = item.date;
-    const source = item.source || 'Fonte non indicata';
-    group.sources.set(source, (group.sources.get(source) || 0) + 1);
-    groups.set(key, group);
+    groups.set(id, group);
   }
-  return [...groups.values()].map(group => ({
-    hotel: group.hotel,
-    hotel_code: group.hotel_code,
-    room: group.room,
-    reviews: group.scores.length,
-    average: Math.round(group.scores.reduce((sum, value) => sum + value, 0) / group.scores.length * 100) / 100,
-    min: Math.min(...group.scores),
-    max: Math.max(...group.scores),
-    lastDate: group.lastDate,
-    sources: [...group.sources.entries()].map(([source, count]) => ({source, count})).sort((a, b) => b.count - a.count || a.source.localeCompare(b.source)),
-  }));
+  const rows = [...groups.values()].map(group => {
+    const bySource = {} as Record<SourceKey, SourceAverage | null>;
+    let total = 0;
+    for (const {key} of SOURCES) {
+      const scores = group.scores[key];
+      total += scores.length;
+      bySource[key] = scores.length
+        ? {average: round2(scores.reduce((sum, value) => sum + value, 0) / scores.length), count: scores.length, min: Math.min(...scores), max: Math.max(...scores)}
+        : null;
+    }
+    return {hotel: group.hotel, hotel_code: group.hotel_code, room: group.room, lastDate: group.lastDate, total, bySource};
+  });
+  return {rows, invalid};
+}
+
+/** Media generale per fonte su tutte le camere, pesata sul numero di voti. */
+export function sourceOverview(rows: RoomAverage[]): Record<SourceKey, SourceAverage | null> {
+  const result = {} as Record<SourceKey, SourceAverage | null>;
+  for (const {key} of SOURCES) {
+    let count = 0, sum = 0, min = Infinity, max = -Infinity;
+    for (const row of rows) {
+      const entry = row.bySource[key];
+      if (!entry) continue;
+      count += entry.count; sum += entry.average * entry.count;
+      min = Math.min(min, entry.min); max = Math.max(max, entry.max);
+    }
+    result[key] = count ? {average: round2(sum / count), count, min, max} : null;
+  }
+  return result;
 }
