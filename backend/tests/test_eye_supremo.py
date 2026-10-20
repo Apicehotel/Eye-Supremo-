@@ -793,3 +793,14 @@ def test_review_list_exposes_category_scores_for_every_review(client):
     by_room = {r["room"]: r for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()}
     assert by_room["4407"]["scores"].get("Staff") == 10.0 and by_room["4407"]["scores"].get("Pulizia") == 10.0
     assert all(isinstance(r["scores"], dict) for r in by_room.values())
+
+
+def test_digest_blocks_without_room_do_not_inherit_the_wrong_room_of_the_whole_email(client, db):
+    from app.models import Room
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    digest = BOOKING_DIGEST.replace("cam 1108", "cam.")  # un ospite senza numero camera
+    # archivio vecchio: l'intera email salvata con una camera letta male
+    add_review(db, hotel_id=hotel.id, text=digest, review_date=date(2024, 10, 28), rating=None, room_code="10", source="Booking")
+    rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
+    assert "10" not in rooms
+    assert rooms.count(None) >= 1

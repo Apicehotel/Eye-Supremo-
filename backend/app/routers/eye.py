@@ -33,12 +33,12 @@ router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
 
 def _review_payload(review: Review, *, review_id=None, text: str | None = None, date_value: str | None = None,
                     room_code: str | None = None, author: str | None = None, source: str | None = None,
-                    rating: float | None = None, tags: list[dict] | None = None) -> dict:
+                    rating: float | None = None, tags: list[dict] | None = None, inherit_room: bool = True) -> dict:
     return {
         "id": review.id if review_id is None else review_id,
         "hotel": review.hotel.name,
         "hotel_code": review.hotel.code,
-        "room": room_code if room_code is not None else (review.room.code if review.room else None),
+        "room": room_code if room_code is not None else (review.room.code if review.room and inherit_room else None),
         "author": author if author is not None else review.author,
         "source": source if source is not None else review.source,
         "rating": rating if rating is not None else (float(review.rating) if review.rating is not None else None),
@@ -85,6 +85,7 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
             source=block.get("source"),
             rating=block_rating,
             tags=[],
+            inherit_room=False,  # la camera salvata sull'intera email non vale per le singole recensioni
         )
         # ``None`` means the individual block has no recognized score; do not
         # inherit the digest-level score from the parent email.

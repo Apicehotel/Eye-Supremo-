@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.18`
+**Versione applicativa:** `2.0.19`
+
+**Novità 2.0.19:** nelle email con più ospiti, un ospite senza numero camera non eredita più la camera salvata sull'intera email (che poteva essere un numero letto male, es. "10" al posto di "325"): resta senza camera invece di sporcare le medie di una camera inesistente.
 
 **Novità 2.0.18:**
 
