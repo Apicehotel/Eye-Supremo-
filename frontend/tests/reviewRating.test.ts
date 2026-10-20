@@ -13,7 +13,7 @@ test('normalizza Booking, Google e TripAdvisor sulla stessa scala', () => {
 
 test('classifica il voto in base alla scala della fonte', () => {
   assert.equal(reviewRatingTone({source: 'TripAdvisor', rating: 4}), 'positive');
-  assert.equal(reviewRatingTone({source: 'Google', rating: 3}), 'positive');
+  assert.equal(reviewRatingTone({source: 'Google', rating: 3}), 'negative');
   assert.equal(reviewRatingTone({source: 'Booking', rating: 5}), 'negative');
   assert.equal(reviewRatingTone({source: 'Booking', rating: null}), 'unrated');
 });

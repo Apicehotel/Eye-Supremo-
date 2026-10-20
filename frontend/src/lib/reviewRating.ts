@@ -11,7 +11,7 @@ export function normalizedReviewRating(review: RatedReview): number | null {
 }
 
 export function reviewRatingTone(review: RatedReview): 'positive' | 'negative' | 'unrated' {
-  const normalized = normalizedReviewRating(review);
-  if (normalized === null) return 'unrated';
-  return normalized >= 6 ? 'positive' : 'negative';
+  if (review.rating === null || !Number.isFinite(review.rating)) return 'unrated';
+  const positiveThreshold = reviewRatingScale(review.source) === 5 ? 4 : 6;
+  return review.rating >= positiveThreshold ? 'positive' : 'negative';
 }
