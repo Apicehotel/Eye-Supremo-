@@ -2,7 +2,7 @@ import json
 import re
 import hashlib
 import secrets
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
@@ -23,13 +23,14 @@ from ..eye_services import (
     review_rankings, room_rating_timeline, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
-    Alert, AppSetting, EmergingTheme, Hotel, Invoice, InvoiceRow, Product, Review, ReviewCategory, ReviewTag, Room, Supplier,
-    CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
+    Alert, AppSetting, AuditLog, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, Product, Review, ReviewCategory,
+    ReviewTag, Room, Supplier, CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
 from ..review_importers import (clean_review_text, extract_category_scores, normalized_review_rating,
                                 normalized_source, parse_review_document, review_identity, split_review_blocks)
 from ..sync_service import push_to_supabase, sync_configuration
+from ..services import audit
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo"])
 
@@ -129,7 +130,7 @@ def _review_stats(db: Session, hotel_code: str | None = None) -> dict:
         stmt = stmt.join(Hotel, Review.hotel_id == Hotel.id).where(Hotel.code == hotel_code)
     raw_reviews = db.scalars(stmt).all()
     seen: set[str] = set()
-    expanded = normalized = duplicates = excluded = valid_votes = 0
+    expanded = normalized = duplicates = excluded = valid_votes = without_room = without_rating = 0
     for review in raw_reviews:
         for payload in _expanded_review_payloads(review):
             expanded += 1
@@ -144,9 +145,14 @@ def _review_stats(db: Session, hotel_code: str | None = None) -> dict:
             normalized += 1
             if payload.get("rating") is not None:
                 valid_votes += 1
+            else:
+                without_rating += 1
+            if not payload.get("room"):
+                without_room += 1
     return {"raw": len(raw_reviews), "expanded": expanded, "normalized": normalized,
             "valid": normalized, "excluded": excluded, "duplicates": duplicates,
-            "valid_votes": valid_votes}
+            "valid_votes": valid_votes, "without_room": without_room,
+            "without_rating": without_rating}
 
 
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
@@ -345,6 +351,10 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                     errors.append({"file": file.filename, "error": f"Recensione {index} non importata: {block_exc}"})
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
+    for error in errors:
+        audit(db, "import.error", f"Recensioni {hotel.name}: {error.get('error', 'errore import')}", "error")
+    if errors:
+        db.commit()
     return {"hotel": hotel.name, "imported": len(imported), "skipped_duplicates": skipped, "skipped_duplicate_files": skipped_files, "review_ids": imported, "errors": errors}
 
 
@@ -479,6 +489,43 @@ def reviews_sync_status(role: str = Depends(current_role), db: Session = Depends
     summary = review_sync_summary(db)
     db.commit()
     return {"configured": central_configured(), **review_cache_status(db), "review_sync": summary}
+
+
+@router.get("/data-health")
+def data_health(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Riepilogo leggibile della qualità e della disponibilità dei dati locali."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    review_stats = _review_stats(db)
+    review_sync = review_sync_summary(db)
+    invoice_meta = db.scalars(select(InvoiceMeta)).all()
+    invoice_sync_counts = {status: sum(1 for item in invoice_meta if item.sync_status == status)
+                           for status in {"local", "inviato", "sincronizzato", "conflitto"}}
+    local = {
+        "invoices": db.scalar(select(func.count()).select_from(Invoice)) or 0,
+        "invoice_rows": db.scalar(select(func.count()).select_from(InvoiceRow)) or 0,
+        "suppliers": db.scalar(select(func.count()).select_from(Supplier)) or 0,
+        "products": db.scalar(select(func.count()).select_from(Product)) or 0,
+        "reviews_raw": review_stats["raw"],
+        "reviews_valid": review_stats["valid"],
+    }
+    synchronized = (review_sync["counts"].get("sincronizzato", 0) + invoice_sync_counts.get("sincronizzato", 0))
+    queued = (review_sync["queue_size"] + invoice_sync_counts.get("local", 0) + invoice_sync_counts.get("inviato", 0))
+    conflicts = review_sync["counts"].get("conflitto", 0) + invoice_sync_counts.get("conflitto", 0)
+    error_logs = db.scalars(select(AuditLog).where(AuditLog.event_type == "import.error").order_by(AuditLog.created_at.desc()).limit(10)).all()
+    backup_logs = db.scalars(select(AuditLog).where(AuditLog.event_type == "backup.created").order_by(AuditLog.created_at.desc()).limit(5)).all()
+    settings_map = {key: db.get(AppSetting, key) for key in ("central_sync_at", "central_review_sync_at")}
+    db.commit()
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "local_records": {**local, "total": local["invoices"] + local["invoice_rows"] + local["suppliers"] + local["products"] + local["reviews_raw"]},
+        "synchronized": {"total": synchronized, "reviews": review_sync["counts"].get("sincronizzato", 0), "invoices": invoice_sync_counts.get("sincronizzato", 0)},
+        "sync": {"queued": queued, "conflicts": conflicts, "supabase_configured": central_configured(), "reviews": review_sync, "invoices": invoice_sync_counts},
+        "imports": {"errors": len(error_logs), "latest_errors": [{"message": item.message, "created_at": item.created_at.isoformat() if item.created_at else None} for item in error_logs]},
+        "reviews": {"without_room": review_stats["without_room"], "without_rating": review_stats["without_rating"]},
+        "last_sync": {"invoices": settings_map["central_sync_at"].value if settings_map["central_sync_at"] else None, "reviews": settings_map["central_review_sync_at"].value if settings_map["central_review_sync_at"] else None},
+        "backups": {"count": len(backup_logs), "latest": [{"message": item.message, "created_at": item.created_at.isoformat() if item.created_at else None} for item in backup_logs]},
+    }
 
 
 @router.get("/rankings")

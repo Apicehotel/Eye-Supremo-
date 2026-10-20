@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.26`
+**Versione applicativa:** `2.0.27`
+
+**Novità 2.0.27:** pagina «Salute dati» con conteggi locali, sincronizzati, errori import, recensioni incomplete, ultimi sync e backup; installer Windows più chiaro e con IA locale opzionale.
 
 **Novità 2.0.26:** pulsante «Invia a Supabase» in Recensioni: rimanda al centrale le recensioni salvate solo sul PC (mai sincronizzate), senza doppioni (endpoint `POST /api/eye/reviews/sync/push`). Prima la sync partiva solo al momento del caricamento file.
 

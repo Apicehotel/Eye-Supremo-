@@ -25,6 +25,7 @@ import {
   MessageSquareWarning,
   Globe2,
   BedDouble,
+  HeartPulse,
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
@@ -43,7 +44,8 @@ export type Page =
   | "categories"
   | "settings"
   | "system"
-  | "feedback";
+  | "feedback"
+  | "health";
 const nav: [Page, string, any][] = [
   ["dashboard", "Dashboard", LayoutDashboard],
   ["invoices", "Fatture", FileText],
@@ -58,6 +60,7 @@ const nav: [Page, string, any][] = [
   ["anomalies", "Alert", TriangleAlert],
   ["categories", "Categorie", Tags],
   ["settings", "Impostazioni", Settings],
+  ["health", "Salute dati", HeartPulse],
   ["system", "Sistema", MonitorCog],
   ["feedback", "Feedback", MessageSquareWarning],
 ];
