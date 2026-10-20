@@ -17,8 +17,29 @@ permissions:
   contents: write
 
 jobs:
+  # Su main la release parte da sola quando cambia installer/EyeSupremo.iss (filtro `paths` sopra)
+  # e la versione non è già stata pubblicata; resta possibile avviarla a mano o con `[release]`.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ] || [ "$GITHUB_REF_TYPE" = 'tag' ]; then echo run=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          version=$(sed -n 's/^AppVersion=//p' installer/EyeSupremo.iss | head -1 | tr -d '\r ')
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Release v$version già pubblicata: nessuna nuova build."; echo run=false >> "$GITHUB_OUTPUT"
+          else
+            echo run=true >> "$GITHUB_OUTPUT"
+          fi
+
   release-windows:
-    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[release]')
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
