@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sqlite3
 import time
@@ -132,6 +133,15 @@ def stage_update(release: dict | None = None) -> dict[str, object]:
     from .services import create_backup
 
     backup = create_backup()
+    target_dir = settings.data_dir / "updates"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    previous = sorted(target_dir.glob("*.exe"), key=lambda item: item.stat().st_mtime, reverse=True)
+    previous_installer = None
+    if previous:
+        rollback_dir = target_dir / "rollback"
+        rollback_dir.mkdir(parents=True, exist_ok=True)
+        previous_installer = rollback_dir / "previous-installer.exe"
+        shutil.copy2(previous[0], previous_installer)
     installer = download_latest_installer(release)
     state = settings.data_dir / "updates" / "pending-update.json"
     payload = {
@@ -139,6 +149,7 @@ def stage_update(release: dict | None = None) -> dict[str, object]:
         "backup": str(backup),
         "current_version": CURRENT_VERSION,
         "latest_version": (release or {}).get("latest_version"),
+        "previous_installer": str(previous_installer) if previous_installer else None,
         "staged_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     state.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -185,6 +196,11 @@ def rollback_latest_backup() -> dict[str, object]:
             finally:
                 destination.close()
                 source.close()
+    previous_installer = Path(str(state.get("previous_installer", ""))).resolve()
+    binary_rollback = False
+    if os.name == "nt" and previous_installer.is_file():
+        subprocess.Popen([str(previous_installer), "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTART"], close_fds=True)
+        binary_rollback = True
     state_path.unlink(missing_ok=True)
-    return {"ok": True, "restored_from": str(backup), "restart_required": True}
+    return {"ok": True, "restored_from": str(backup), "binary_rollback_started": binary_rollback, "restart_required": True}
 

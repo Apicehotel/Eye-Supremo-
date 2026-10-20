@@ -21,6 +21,7 @@ WizardResizable=yes
 DisableProgramGroupPage=yes
 Uninstallable=yes
 CloseApplications=yes
+AllowDowngrade=yes
 RestartApplications=no
 SetupLogging=yes
 UninstallDisplayName=Eye Supremo
