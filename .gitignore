@@ -10,6 +10,7 @@ data/
 !backend/app/data/
 __pycache__/
 .pytest_cache/
+.pytest-local/
 *.pyc
 *.log
 .env

@@ -849,6 +849,8 @@ def test_review_stats_separate_raw_valid_excluded_and_duplicates(client, db):
         "excluded": 1,
         "duplicates": 1,
         "valid_votes": 1,
+        "without_room": 0,
+        "without_rating": 0,
     }
 
 
@@ -887,6 +889,20 @@ def test_review_sync_marks_remote_divergence_as_conflict_without_overwriting_loc
     db.refresh(review)
     assert state.status == "conflitto"
     assert review.text == "Recensione locale Camera 101"
+
+
+def test_data_health_reports_local_sync_quality_and_review_gaps(client, monkeypatch):
+    monkeypatch.setattr("app.routers.eye.central_configured", lambda: False)
+    _import_digest(client)
+
+    response = client.get("/api/eye/data-health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_records"]["reviews_raw"] == 3
+    assert payload["synchronized"]["total"] == 0
+    assert payload["sync"]["queued"] == 3
+    assert "last_sync" in payload and "backups" in payload and "imports" in payload
 
 
 def _polarities(db, text):
