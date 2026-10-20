@@ -16,6 +16,12 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Versione applicativa:** `2.0.16`
 
+**In arrivo (branch `fix/reviews-hide-textless`, non ancora rilasciato):**
+
+- **Recensioni solo voto:** senza testo scritto dall'ospite contano nelle medie ma non compaiono come righe; un riquadro le riassume per fonte e voto.
+- **Recensioni → Media camere:** pagina a sé con la media dei voti per camera, separata per fonte (Booking su 10, Google e TripAdvisor su 5); i voti fuori scala sono ignorati e segnalati.
+- **Importazione recensioni affidabile:** voti con la virgola accettati, un blocco difettoso non ferma il file, recensioni già caricate saltate (con conteggio), voto salvato sempre visibile.
+
 **Novità 2.0.16:** nella sezione Recensioni → Ranking ogni camera mostra l’andamento del voto nel tempo: i periodi positivi restano nello storico, mentre una nuova segnalazione negativa apre un nuovo intervallo con le cause rilevate. Le recensioni con difetti possono inoltre essere sincronizzate nel foglio camere senza sovrascritture o doppioni.
 
 **Novità 2.0.15:** profili centrali condivisi con login personale e accesso offline autorizzato; PIN conservati al riavvio; dashboard unificata senza doppioni e valida anche con sole note di credito; backup SQLite coerente e verificato; ricerche con annullamento delle richieste superate; dipendenze frontend fissate alle versioni del lockfile. La pubblicazione richiede prima l'attivazione descritta in `docs/CENTRAL_IDENTITY.md`.
@@ -324,6 +330,7 @@ La PR esegue automaticamente backend test + frontend build e la pipeline Windows
 ## Limitazioni note
 
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
+- le recensioni importate con le versioni fino alla 2.0.16 possono essere salvate come intera email in un unico record, con camera e voto sbagliati (es. un giorno della data letto come voto): le medie per camera ne risentono finché quei record non vengono reimportati o corretti;
 - il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;
 - `qwen3-embedding:0.6b` è predisposto, mentre FTS5 + RapidFuzz sono ancora il motore di retrieval attivo; la ricerca vettoriale/canonicalizzazione massiva sarà il passo successivo quando verrà caricato l'archivio delle fatture.
 
