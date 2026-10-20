@@ -561,6 +561,7 @@ export function SettingsPage() {
     [status, setStatus] = useState<any>(),
     [sync, setSync] = useState<any>(),
     [centralSync, setCentralSync] = useState<any>(),
+    [reviewSync, setReviewSync] = useState<any>(),
     [bootstrap, setBootstrap] = useState<any>(),
     [syncBusy, setSyncBusy] = useState(false),
     [syncError, setSyncError] = useState(""),
@@ -610,14 +611,16 @@ export function SettingsPage() {
   }
   async function loadSyncStatus() {
     try {
-      const [bridge, central, boot] = await Promise.all([
+      const [bridge, central, boot, reviews] = await Promise.all([
         eyeApi<any>("/sync/status"),
         eyeApi<any>("/central/sync/status"),
         eyeApi<any>("/cache/bootstrap/status"),
+        eyeApi<any>("/reviews/sync/status"),
       ]);
       setSync(bridge);
       setCentralSync(central);
       setBootstrap(boot);
+      setReviewSync(reviews);
       setSyncError("");
     } catch (error: any) {
       setSyncError(error.message || "Stato sincronizzazione non disponibile");
@@ -806,6 +809,15 @@ export function SettingsPage() {
                   <span>Cache recensioni</span>
                   <b>{bootstrap?.reviews?.count ?? "—"}</b>
                   <small>{bootstrap?.reviews?.state || "mai aggiornata"}</small>
+                </article>
+                <article>
+                  <span>Coda recensioni locale</span>
+                  <b>{reviewSync?.review_sync?.queue_size ?? "—"}</b>
+                  <small>
+                    {reviewSync?.review_sync?.counts
+                      ? `locali ${reviewSync.review_sync.counts.local || 0} · inviati ${reviewSync.review_sync.counts.inviato || 0} · conflitti ${reviewSync.review_sync.counts.conflitto || 0}`
+                      : "stato non disponibile"}
+                  </small>
                 </article>
                 <article>
                   <span>Bootstrap offline</span>
