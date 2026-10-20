@@ -71,7 +71,23 @@ def _author(text: str, fallback: str | None = None):
     return fallback[:160] if fallback and "@" not in fallback else None
 
 
-def _source(text: str, fallback: str = "email") -> str:
+_STRONG_SOURCE_MARKERS = (
+    ("TripAdvisor", re.compile(r"tripadvisor\.[a-z]+/(?:profile|showuserreviews)|\bha scritto una recensione\b", re.I)),
+    ("Google", re.compile(r"google\.com/maps/contrib|\bsu google\b|\bgoogle\s+#\d", re.I)),
+    ("Booking", re.compile(r"nu\s*mero di prenotazione|booking\.com", re.I)),
+)
+
+
+def _source(text: str, fallback: str = "email", block: str | None = None) -> str:
+    # Un'email "digest" mescola recensioni di piattaforme diverse e il piè di pagina
+    # cita sempre Google/TripAdvisor/Booking: la fonte si decide dai segnali propri
+    # della singola recensione (link profilo, "su Google", numero prenotazione).
+    for scope in (block, text):
+        if not scope:
+            continue
+        for name, marker in _STRONG_SOURCE_MARKERS:
+            if marker.search(scope):
+                return name
     low = text.lower()
     if "booking" in low:
         return "Booking"
@@ -170,7 +186,12 @@ def _looks_like_review(text: str) -> bool:
     platform = any(x in low for x in ("booking", "tripadvisor", "google"))
     review_terms = any(x in low for x in ("recensione", "review", "valutazione", "voto", "positivo", "negativo"))
     room_terms = bool(re.search(r"(?:\bCAM\b|camera|room)[ \t]*[:#.\-]?[ \t]*[A-Z0-9-]{1,12}", text, re.I))
-    return (platform and review_terms) or (room_terms and review_terms)
+    # Recensioni Google/TripAdvisor delle email: link profilo + voto "N/5", senza parole chiave.
+    scored_platform_review = bool(
+        re.search(r"google\.com/maps/contrib|tripadvisor\.[a-z]+/(?:profile|showuserreviews)|\bsu google\b", low)
+        and re.search(r"\b\d(?:[.,]\d)?\s*/\s*5\b", low)
+    )
+    return (platform and review_terms) or (room_terms and review_terms) or scored_platform_review
 
 
 def split_review_blocks(text: str, default_date: str, source_hint: str, author_hint: str | None, raw_file: str) -> list[dict]:
@@ -221,6 +242,27 @@ def split_review_blocks(text: str, default_date: str, source_hint: str, author_h
     # ``<name> ha scritto una recensione``. Keep those reviews separate even
     # when only the first one has a room marker.
     review_marker = re.compile(r"(?im)^\s*[^\n]{1,100}\s+ha scritto una recensione\b")
+    # Nelle email miste una recensione Google segue l'ultima recensione Booking senza
+    # una propria intestazione: la separiamo al primo link profilo Google
+    # (ripetuto due volte di seguito per la stessa recensione) che compare dopo un
+    # "Numero di prenotazione", così non viene contata come Booking.
+    google_profile = re.compile(r"<https://www\.google\.com/maps/contrib/[^>\s]+>")
+    split_blocks: list[str] = []
+    for block in blocks:
+        reservation = re.search(r"(?i)nu\s*mero di prenotazione\b", block)
+        cuts: list[int] = []
+        previous_url = None
+        if reservation:
+            for match in google_profile.finditer(block):
+                if match.start() > reservation.end() and match.group() != previous_url:
+                    cuts.append(match.start())
+                previous_url = match.group()
+        if not cuts:
+            split_blocks.append(block)
+            continue
+        edges = [0, *cuts, len(block)]
+        split_blocks.extend(block[edges[i]:edges[i + 1]].strip() for i in range(len(edges) - 1))
+    blocks = [block for block in split_blocks if block]
     separated: list[str] = []
     for block in blocks:
         markers = list(review_marker.finditer(block))
@@ -261,10 +303,15 @@ def split_review_blocks(text: str, default_date: str, source_hint: str, author_h
         if rating is None:
             standalone = re.findall(r"(?m)^\s*(\d+(?:[.,]\d+)?)\s*$", cleaned[max(0, starts[idx] - 500):starts[idx]]) if starts and idx < len(starts) else []
             rating = standalone[-1] if standalone else None
+        block_source = _source(context, source_hint, block)
+        if rating is None and block_source in {"Google", "TripAdvisor"}:
+            # Google/TripAdvisor: voto "N/5" scritto nella recensione (non una data tipo 2/5/2026).
+            own_score = re.search(r"(?<![\d/])([0-5](?:[.,]\d)?)\s*/\s*5\b(?!\s*/)", block)
+            rating = own_score.group(1) if own_score else None
         reviews.append({
             "date": _review_date(context, default_date),
             "author": _author(context, author_hint),
-            "source": _source(context, source_hint),
+            "source": block_source,
             "text": block,
             "rating": rating,
             "room_code": _room(block),

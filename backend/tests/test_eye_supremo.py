@@ -718,3 +718,19 @@ def test_create_user_defaults_to_standard_pin(client):
     assert hotels.status_code == 200
     assert len(hotels.json()) == 3
 
+
+
+def test_mixed_digest_keeps_google_and_tripadvisor_out_of_booking():
+    from app.review_importers import split_review_blocks
+
+    mixed = BOOKING_DIGEST + """
+
+<https://www.google.com/maps/contrib/109917461135353325196?hl=it> Mario Rossi <https://www.google.com/maps/contrib/109917461135353325196?hl=it> 16 ore fa su Google 5/5 Vacanza Hotel ottimo, personale gentile.
+
+Camere economy non all'altezza <https://www.tripadvisor.it/Profile/Abc> Abc ha scritto una recensione 11 lug 2/5 Camera piccola.
+"""
+    blocks = split_review_blocks(mixed, "2024-10-27", "Booking", None, "x")
+    assert [b["source"] for b in blocks] == ["Booking", "Booking", "Booking", "Google", "TripAdvisor"]
+    assert [str(b["rating"]) for b in blocks][-2:] == ["5", "2"]
+    # il footer che cita altre piattaforme non cambia la fonte di una recensione Booking
+    assert blocks[2]["source"] == "Booking"
