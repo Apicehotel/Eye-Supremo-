@@ -267,9 +267,11 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                     if sheet_result.get("enabled") and not sheet_result.get("sent"):
                         errors.append({"file": file.filename, "error": f"Recensione locale salvata, foglio difetti: {sheet_result.get('message', 'sync non riuscita')}"})
                     try:
-                        await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
+                        sync_result = await central_review_upsert({"sync_uuid": review.sync_uuid, "hotel_code": hotel.code, "review_date": review.date.isoformat(), "source": review.source, "author": review.author, "rating": float(review.rating) if review.rating is not None else None, "room_code": parsed.get("room_code"), "text": review.text})
+                        if not sync_result.get("synced"):
+                            errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale non completato: {sync_result.get('message') or 'Supabase centrale non configurato'}"})
                     except Exception as sync_exc:
-                        errors.append({"file": file.filename, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
+                        errors.append({"file": file.filename, "review_id": review.id, "error": f"Recensione locale salvata, sync centrale: {sync_exc}"})
                 except Exception as block_exc:
                     db.rollback()
                     errors.append({"file": file.filename, "error": f"Recensione {index} non importata: {block_exc}"})
@@ -353,9 +355,32 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
 
 
 @router.post("/reviews/sync")
-async def reviews_sync(role: str = Depends(current_role)):
+async def reviews_sync(role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
-    return await refresh_review_cache()
+    push = {"configured": central_configured(), "attempted": 0, "synced": 0, "errors": []}
+    if central_configured():
+        reviews = db.scalars(select(Review).options(selectinload(Review.hotel), selectinload(Review.room))).all()
+        for review in reviews:
+            push["attempted"] += 1
+            try:
+                result = await central_review_upsert({
+                    "sync_uuid": review.sync_uuid,
+                    "hotel_code": review.hotel.code,
+                    "review_date": review.date.isoformat(),
+                    "source": review.source,
+                    "author": review.author,
+                    "rating": float(review.rating) if review.rating is not None else None,
+                    "room_code": review.room.code if review.room else None,
+                    "text": review.text,
+                })
+                if result.get("synced"):
+                    push["synced"] += 1
+                else:
+                    push["errors"].append({"review_id": review.id, "error": result.get("message") or "Supabase centrale non configurato"})
+            except Exception as exc:
+                push["errors"].append({"review_id": review.id, "error": str(exc)})
+    pull = await refresh_review_cache()
+    return {"push": push, "pull": pull}
 
 
 @router.post("/reviews/sync/push")
@@ -719,4 +744,3 @@ async def sync_push(payload: dict, role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     return await push_to_supabase(payload)
-
