@@ -14,9 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.16`
+**Versione applicativa:** `2.0.17`
 
-**In arrivo (branch `fix/reviews-hide-textless`, non ancora rilasciato):**
+**Novità 2.0.17:**
 
 - **Recensioni solo voto:** senza testo scritto dall'ospite contano nelle medie ma non compaiono come righe; un riquadro le riassume per fonte e voto.
 - **Recensioni → Media camere:** pagina a sé con la media dei voti per camera, separata per fonte (Booking su 10, Google e TripAdvisor su 5); i voti fuori scala sono ignorati e segnalati.

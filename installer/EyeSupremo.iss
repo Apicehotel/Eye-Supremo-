@@ -1,14 +1,14 @@
-; Release 2.0.16: ranking dinamico camere e sincronizzazione difetti recensioni.
+; Release 2.0.17: media camere per fonte, filtri Zona/Pavimento, importazione recensioni affidabile.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.16
+AppVersion=2.0.17
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.16
+OutputBaseFilename=EyeSupremo-Setup-2.0.17
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
