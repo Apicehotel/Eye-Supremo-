@@ -75,7 +75,8 @@ export function roomAverages(items: RoomRatingInput[], category: string | null =
   const groups = new Map<string, Group>();
   let invalid = 0;
   for (const item of items) {
-    const room = (item.room || '').trim();
+    const raw = (item.room || '').trim();
+    const room = /^\d{1,4}[A-Za-z]?$/.test(raw) ? raw : ''; // «pulita», «super»… non sono camere
     const key = sourceKey(item.source);
     // Con un tag scelto vale il voto di quel tag, altrimenti il voto generale.
     const value = category ? (item.scores?.[category] ?? null) : item.rating;

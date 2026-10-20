@@ -94,3 +94,10 @@ test('voti per tag: la media usa il voto del tag scelto, separata per fonte', as
   assert.equal(colazione.rows[0].bySource.TripAdvisor, null);
   assert.equal(roomAverages(items).rows[0].bySource.Booking?.average, 8);
 });
+
+test('le parole non sono camere: «pulita», «super» vengono ignorate', async () => {
+  const {roomAverages} = await import('../src/lib/roomAverages.ts');
+  const base = {hotel: 'Hotel Giò', hotel_code: 'gio', date: '2026-01-01', source: 'Google', rating: 5};
+  const result = roomAverages([{...base, room: 'pulita'}, {...base, room: 'super'}, {...base, room: '330'}]);
+  assert.deepEqual(result.rows.map(r => r.room), ['330']);
+});
