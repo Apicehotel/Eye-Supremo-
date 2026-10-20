@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.22`
+**Versione applicativa:** `2.0.23`
+
+**Novità 2.0.23:** l'app installata è una cartella (`EyeSupremo.exe` + file di supporto) invece di un unico `.exe` che si estraeva in Temp: risolve l'errore «Failed to load Python DLL … python312.dll» all'avvio dopo l'installazione. L'installer sostituisce il vecchio `.exe` senza perdere i dati (sono in `%LOCALAPPDATA%\EyeSupremo`).
 
 **Novità 2.0.22:** il pulsante **Carica file** delle Recensioni non è più muto con "Tutti gli hotel" selezionato: spiega di scegliere prima un singolo hotel nelle schede in alto, poi apre la selezione file.
 
@@ -310,7 +312,7 @@ Il PC finale **non deve avere Python o Node**. L'eseguibile è un'**app Windows 
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-Lo script compila React, crea `dist/EyeSupremo.exe` con PyInstaller (`--windowed` + pywebview) e incorpora la UI. `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
+Lo script compila React, crea la cartella `dist/EyeSupremo/` (con `EyeSupremo.exe`) con PyInstaller (`--onedir --windowed` + pywebview) e incorpora la UI. Si usa la modalità cartella e non il file unico (`--onefile`) perché quest'ultimo si estrae in `%TEMP%` a ogni avvio e, se l'antivirus o Windows blocca l'estrazione, compare l'errore «Failed to load Python DLL … python312.dll». `installer/EyeSupremo.iss` con Inno Setup 6 produce `release/EyeSupremo-Setup.exe`.
 
 - Doppio clic su Eye Supremo → si apre **solo la finestra dell'app** (icona taskbar, senza barra indirizzi).
 - Nessuna console CMD e nessun Chrome/Edge con URL `http://127.0.0.1:8765`.

@@ -15,7 +15,7 @@ python -m pip install pyinstaller==6.16.0
 $sep = ';'
 $icon = Join-Path $Root 'installer\assets\eye-supremo.ico'
 # --windowed = nessun CMD nero; UI in WebView2 nativo via pywebview (non apre Chrome/Edge)
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name EyeSupremo `
+python -m PyInstaller --noconfirm --clean --onedir --windowed --name EyeSupremo `
   --paths backend `
   --icon $icon `
   --add-data "frontend/dist${sep}frontend_dist" `
@@ -36,5 +36,5 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name EyeSupremo
   --hidden-import uvicorn.lifespan.on `
   backend/desktop.py
 
-Write-Host 'Executable: dist/EyeSupremo.exe (app nativa WebView2, non pagina web)'
+Write-Host 'Cartella app: dist/EyeSupremo/ con EyeSupremo.exe (app nativa WebView2, non pagina web)'
 Write-Host 'Per creare Setup.exe installare Inno Setup 6 e compilare installer/EyeSupremo.iss'
