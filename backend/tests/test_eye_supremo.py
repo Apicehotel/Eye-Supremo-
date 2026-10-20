@@ -8,7 +8,7 @@ from app.search_index import invoice_search
 from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Review, Supplier, UserProfile
 from app.agent_orchestrator import _max_invoice_context
 from app.report_service import historical_product_report
-from app.review_importers import _author, _rating, _room, clean_review_text, split_review_blocks
+from app.review_importers import _author, _rating, _room, _source, clean_review_text, split_review_blocks
 from app.product_taxonomy import is_family_match, is_product_search_match, normalize_product_display_name, search_terms
 from app.normalization import extract_content, normalized_price_with_content
 from app.product_taxonomy import is_catalog_product, merge_product_catalog, product_content_group, product_family_similarity
@@ -809,6 +809,11 @@ Camere economy non all'altezza <https://www.tripadvisor.it/Profile/Abc> Abc ha s
     assert [str(b["rating"]) for b in blocks][-2:] == ["5", "2"]
     # il footer che cita altre piattaforme non cambia la fonte di una recensione Booking
     assert blocks[2]["source"] == "Booking"
+
+
+def test_booking_source_wins_over_footer_platform_links():
+    block = """Booking.com\n9,0\nCAM: 101\nNumero di prenotazione 123456\nCamera pulita e silenziosa.\nhttps://www.google.com/maps/contrib/123\nhttps://www.tripadvisor.it/Profile/abc"""
+    assert _source(block, "Booking", block) == "Booking"
 
 
 def test_import_ignores_the_same_file_selected_twice(client, db):

@@ -123,6 +123,23 @@ def _source(text: str, fallback: str = "email", block: str | None = None) -> str
     # Un'email "digest" mescola recensioni di piattaforme diverse e il piè di pagina
     # cita sempre Google/TripAdvisor/Booking: la fonte si decide dai segnali propri
     # della singola recensione (link profilo, "su Google", numero prenotazione).
+    # A Booking digest often appends a footer containing links to Google and
+    # TripAdvisor.  Those links describe the notification, not the review in
+    # the current block.  A reservation marker is therefore a stronger source
+    # signal than platform names appearing after it.  This also keeps the
+    # source/rating pair intact when a legacy digest is expanded on read.
+    if (fallback or "").strip().lower() == "booking":
+        booking_scope = block or text
+        reservation = re.search(r"(?i)nu\s*mero di prenotazione\b", booking_scope)
+        if reservation:
+            before_reservation = booking_scope[:reservation.start()]
+            for name, marker in _STRONG_SOURCE_MARKERS:
+                if name == "Booking":
+                    continue
+                if marker.search(before_reservation):
+                    return name
+            return "Booking"
+
     for scope in (block, text):
         if not scope:
             continue

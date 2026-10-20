@@ -101,6 +101,24 @@ def _expanded_review_payloads(review: Review) -> list[dict]:
     return expanded
 
 
+def _expanded_review_key(payload: dict) -> tuple:
+    """Stable identity for exact duplicate blocks produced by legacy digests."""
+    text = normalize_text(str(payload.get("text") or ""))
+    rating = payload.get("rating")
+    try:
+        rating = round(float(rating), 4) if rating is not None else None
+    except (TypeError, ValueError):
+        rating = None
+    return (
+        payload.get("hotel_code"),
+        payload.get("date"),
+        payload.get("room"),
+        (payload.get("source") or "").strip().lower(),
+        rating,
+        text,
+    )
+
+
 def current_role(x_eye_role: str = Header(default="developer", alias="X-Eye-Role")) -> str:
     role = x_eye_role.strip().lower()
     if role not in {"developer", "supremo"}:
@@ -297,6 +315,7 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
     # contain many reviews and would otherwise hide them from the archive.
     items = db.scalars(ordered).unique().all()
     result = []
+    seen_expanded: set[tuple] = set()
     for review in items:
         for payload in _expanded_review_payloads(review):
             # Legacy archives may not have persisted ReviewTag rows yet. Keep
@@ -311,6 +330,10 @@ def reviews(hotel_code: str | None = None, q: str = "", limit: int | None = Quer
                 haystack = f"{payload['text']} {payload.get('room') or ''} {payload['hotel']}".lower()
                 if q.lower() not in haystack:
                     continue
+            identity = _expanded_review_key(payload)
+            if identity in seen_expanded:
+                continue
+            seen_expanded.add(identity)
             result.append(payload)
     cached = db.scalars(select(CentralReviewCache)).all()
     fetch_limit = limit if limit is not None else 500
