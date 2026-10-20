@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     supabase_url: str | None = "https://ooqlfldcrnkudhgjnied.supabase.co"
     supabase_publishable_key: str | None = "sb_publishable_Oiu7IOhuUd6YPEDmmSa7zA_ngNuiSlX"
     supabase_access_token: str | None = None
+    # Logical namespace inside the temporary shared Supabase project.
+    # Existing RPC compatibility remains in public until the staged cutover.
+    supabase_schema: str = "eye_supremo"
     central_username: str = "supremo"
     central_pin: str = "000000"
     central_function: str = "eye-central-gateway"
