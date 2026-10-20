@@ -540,6 +540,21 @@ def test_review_ranking_best_and_worst(db):
     assert ranking["worst_rooms"][0]["room"] == "102"
 
 
+def test_room_rating_timeline_keeps_the_good_period_before_a_drop(db):
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "choco"))
+    add_review(db, hotel_id=hotel.id, text="Camera pulita e letto comodo", review_date=date(2026, 2, 10), rating=Decimal("9.5"), room_code="1101")
+    add_review(db, hotel_id=hotel.id, text="Camera sporca e letto scomodo", review_date=date(2026, 4, 13), rating=Decimal("4"), room_code="1101")
+    from app.eye_services import room_rating_timeline
+    timeline = room_rating_timeline(db, hotel_id=hotel.id)
+    room = next(item for item in timeline if item["room"] == "1101")
+    assert room["periods"][0]["from"] == "2026-02-10"
+    assert room["periods"][0]["to"] == "2026-04-12"
+    assert room["periods"][0]["status"] == "ok"
+    assert room["periods"][1]["from"] == "2026-04-13"
+    assert room["periods"][1]["status"] == "attenzione"
+    assert "Pulizia" in room["periods"][1]["causes"]
+
+
 def test_review_txt_import_endpoint(client):
     response = client.post("/api/eye/reviews/import/choco", files=[("files", ("review.txt", b"Recensione - Camera 101 pulita e staff gentile", "text/plain"))])
     assert response.status_code == 200
@@ -590,3 +605,4 @@ def test_create_user_defaults_to_standard_pin(client):
     hotels = client.get("/api/eye/hotels", headers={"X-Eye-Session":login.json()["session"]})
     assert hotels.status_code == 200
     assert len(hotels.json()) == 3
+
