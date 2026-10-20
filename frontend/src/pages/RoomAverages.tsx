@@ -1,15 +1,18 @@
-import {useMemo, useState} from 'react';
+import {Fragment, useMemo, useState} from 'react';
 import {BedDouble, Search, TriangleAlert} from 'lucide-react';
 import {Status} from '../components/UI';
 import {GIO_ROOM_GROUPS, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
-import {SOURCES, roomStatus, sourceOverview, type RoomAverage, type SourceKey} from '../lib/roomAverages';
+import {SOURCES, roomStatus, sourceKey, sourceOverview, type RoomAverage, type SourceKey} from '../lib/roomAverages';
+
+export type RoomReviewItem = {id: number | string; source: string | null; date: string; rating: number | null; author: string | null; text: string; scores: Record<string, number>; tags: {category: string; polarity: string}[]};
 
 type Sort = 'room_asc' | `${'Booking' | 'Google' | 'TripAdvisor'}_${'desc' | 'asc'}` | 'count_desc';
 const fmt = (value: number) => value.toFixed(2).replace('.', ',');
 const scaleOf = (key: SourceKey) => SOURCES.find(s => s.key === key)!.scale;
 
-export default function RoomAverages({rows, invalid, scopeLabel, categories, category, onCategory, group, onGroup, floor, onFloor}: {rows: RoomAverage[]; invalid: number; scopeLabel: string; categories: string[]; category: string; onCategory: (value: string) => void; group: RoomGroupKey; onGroup: (value: RoomGroupKey) => void; floor: FloorFilter; onFloor: (value: FloorFilter) => void}) {
-  const [query, setQuery] = useState(''), [sort, setSort] = useState<Sort>('room_asc'), [minReviews, setMinReviews] = useState(1);
+export default function RoomAverages({reviewsByRoom, rows, invalid, scopeLabel, categories, category, onCategory, group, onGroup, floor, onFloor}: {reviewsByRoom: Record<string, RoomReviewItem[]>; rows: RoomAverage[]; invalid: number; scopeLabel: string; categories: string[]; category: string; onCategory: (value: string) => void; group: RoomGroupKey; onGroup: (value: RoomGroupKey) => void; floor: FloorFilter; onFloor: (value: FloorFilter) => void}) {
+  const [query, setQuery] = useState(''), [sort, setSort] = useState<Sort>('room_asc'), [minReviews, setMinReviews] = useState(1), [open, setOpen] = useState<string | null>(null), [openSource, setOpenSource] = useState<SourceKey | 'all'>('all');
+  const toggle = (key: string, src: SourceKey | 'all') => { if (open === key && openSource === src) setOpen(null); else { setOpen(key); setOpenSource(src); } };
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter(r => r.total >= minReviews && (!q || `${r.room} ${r.hotel}`.toLowerCase().includes(q)));
@@ -63,16 +66,31 @@ export default function RoomAverages({rows, invalid, scopeLabel, categories, cat
       </div>
       {visible.length ? <div className="table-wrap"><table className="room-averages-table">
         <thead><tr><th>Camera</th><th>Hotel</th>{SOURCES.map(({key, scale}) => <th key={key}>{key} / {scale}</th>)}<th>Ultimo voto</th></tr></thead>
-        <tbody>{visible.map(r => <tr key={`${r.hotel_code}-${r.room}`}>
-          <td><b>{r.room}</b></td><td>{r.hotel}</td>
-          {SOURCES.map(({key}) => {
-            const entry = r.bySource[key];
-            if (!entry) return <td key={key} className="room-average-empty">—</td>;
-            const status = roomStatus(entry.average, scaleOf(key));
-            return <td key={key}><div className="room-average-cell"><strong className={`timeline-status-${status}`}>{fmt(entry.average)}</strong><small>{entry.count} {entry.count === 1 ? 'voto' : 'voti'}{entry.count > 1 ? ` · ${fmt(entry.min)}–${fmt(entry.max)}` : ''}</small></div></td>;
-          })}
-          <td>{r.lastDate}</td>
-        </tr>)}</tbody>
+        <tbody>{visible.map(r => {
+          const key = `${r.hotel_code}|${r.room}`;
+          const isOpen = open === key;
+          const list = (reviewsByRoom[key] || []).filter(x => openSource === 'all' || sourceKey(x.source) === openSource);
+          return <Fragment key={key}>
+            <tr className={`room-row-clickable${isOpen ? ' room-row-open' : ''}`} onClick={() => toggle(key, 'all')} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(key, 'all'); } }} aria-expanded={isOpen}>
+              <td><b>{isOpen ? '▾' : '▸'} {r.room}</b></td><td>{r.hotel}</td>
+              {SOURCES.map(({key: sk}) => {
+                const entry = r.bySource[sk];
+                if (!entry) return <td key={sk} className="room-average-empty">—</td>;
+                const status = roomStatus(entry.average, scaleOf(sk));
+                return <td key={sk} className="room-average-source" onClick={e => { e.stopPropagation(); toggle(key, sk); }} title={`Vedi recensioni ${sk}`}><div className="room-average-cell"><strong className={`timeline-status-${status}`}>{fmt(entry.average)}</strong><small>{entry.count} {entry.count === 1 ? 'voto' : 'voti'}{entry.count > 1 ? ` · ${fmt(entry.min)}–${fmt(entry.max)}` : ''}</small></div></td>;
+              })}
+              <td>{r.lastDate}</td>
+            </tr>
+            {isOpen && <tr key={`${key}-d`} className="room-detail-row"><td colSpan={3 + SOURCES.length}>
+              <div className="room-detail-head"><b>Camera {r.room} · {openSource === 'all' ? 'tutte le fonti' : openSource}</b><span>{list.length} {list.length === 1 ? 'recensione' : 'recensioni'}</span>{openSource !== 'all' && <button className="secondary-btn" onClick={() => setOpenSource('all')}>Mostra tutte</button>}<button className="secondary-btn" onClick={() => setOpen(null)}>Chiudi</button></div>
+              {list.length ? <div className="room-detail-list">{list.map(x => <article key={x.id}>
+                <header><b>{x.source || 'Fonte non indicata'}</b><span>{x.date}{x.rating !== null ? ` · ${String(x.rating).replace('.', ',')}${sourceKey(x.source) === 'Booking' ? '/10' : '/5'}` : ''}{x.author ? ` · ${x.author}` : ''}</span></header>
+                {Object.keys(x.scores).length > 0 && <div className="score-chips">{Object.entries(x.scores).map(([name, v]) => <span key={name}>{name} {String(v).replace('.', ',')}</span>)}</div>}
+                <p>{x.text || 'Solo voto, nessun testo.'}</p>
+              </article>)}</div> : <div className="empty"><span>Nessuna recensione per questa fonte.</span></div>}
+            </td></tr>}
+          </Fragment>;
+        })}</tbody>
       </table></div> : <div className="empty"><span>Nessuna camera con voti per questa selezione.</span></div>}
     </section>
   </section>;

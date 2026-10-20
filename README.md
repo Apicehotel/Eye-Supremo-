@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.24`
+**Versione applicativa:** `2.0.25`
+
+**Novità 2.0.25:** Media camere interattiva: clic su una riga apre le recensioni di quella camera (voto, data, autore, voti per tag, testo); clic su una media Booking/Google/TripAdvisor mostra solo quella fonte.
 
 **Novità 2.0.24:** pagina Ranking più focalizzata: prima le quattro classifiche (top 5), poi lo storico delle sole camere sotto soglia e le segnalazioni anonime, entrambi richiudibili. Verificati i duplicati: nessun doppione creato dai caricamenti recenti.
 
