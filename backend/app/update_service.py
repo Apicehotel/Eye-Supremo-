@@ -1,4 +1,10 @@
 import json
+import os
+import subprocess
+import sqlite3
+import time
+import tempfile
+import zipfile
 import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -119,4 +125,66 @@ def download_latest_installer(release: dict | None = None) -> Path:
     if not target.exists() or target.stat().st_size <= 0:
         raise RuntimeError("Download installer incompleto")
     return target
+
+
+def stage_update(release: dict | None = None) -> dict[str, object]:
+    """Download an update and record a rollback point before it can be applied."""
+    from .services import create_backup
+
+    backup = create_backup()
+    installer = download_latest_installer(release)
+    state = settings.data_dir / "updates" / "pending-update.json"
+    payload = {
+        "installer": str(installer),
+        "backup": str(backup),
+        "current_version": CURRENT_VERSION,
+        "latest_version": (release or {}).get("latest_version"),
+        "staged_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    state.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
+
+
+def launch_staged_update() -> dict[str, object]:
+    state = settings.data_dir / "updates" / "pending-update.json"
+    if not state.exists():
+        raise FileNotFoundError("Nessun aggiornamento preparato")
+    payload = json.loads(state.read_text(encoding="utf-8"))
+    installer = Path(str(payload.get("installer", ""))).resolve()
+    if not installer.is_file() or installer.suffix.lower() != ".exe":
+        raise RuntimeError("Installer preparato non valido")
+    if os.name != "nt":
+        raise RuntimeError("L'installazione automatica è disponibile solo su Windows")
+    subprocess.Popen([str(installer), "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTART"], close_fds=True)
+    return {"ok": True, "restart_required": True, "version": payload.get("latest_version")}
+
+
+def rollback_latest_backup() -> dict[str, object]:
+    state_path = settings.data_dir / "updates" / "pending-update.json"
+    if not state_path.exists():
+        raise FileNotFoundError("Nessun punto di ripristino disponibile")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    backup = Path(str(state.get("backup", ""))).resolve()
+    if not backup.is_file() or backup.suffix.lower() != ".zip":
+        raise RuntimeError("Backup di ripristino non valido")
+    with zipfile.ZipFile(backup) as archive:
+        names = [name for name in archive.namelist() if Path(name).name == "eye-supremo.db"]
+        if not names:
+            raise RuntimeError("Il backup non contiene il database locale")
+        with tempfile.TemporaryDirectory(prefix="eye-rollback-") as scratch:
+            extracted = Path(scratch) / "eye-supremo.db"
+            extracted.write_bytes(archive.read(names[0]))
+            with sqlite3.connect(extracted) as check:
+                if check.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                    raise RuntimeError("Il database di ripristino non è integro")
+            target = settings.data_dir / "eye-supremo.db"
+            source = sqlite3.connect(extracted)
+            destination = sqlite3.connect(target)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+                source.close()
+    state_path.unlink(missing_ok=True)
+    return {"ok": True, "restored_from": str(backup), "restart_required": True}
 

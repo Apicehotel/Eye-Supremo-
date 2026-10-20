@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .auth_service import auth_configured, session_user
 from .database import Base, SessionLocal, engine
+from .db_migrations import run_safe_migrations
 from .eye_services import seed_eye_supremo
 from .local_cache_bootstrap import maybe_schedule_on_startup
 from .search_index import ensure_fts5
@@ -25,6 +26,7 @@ from . import central_identity
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(engine)
+    run_safe_migrations(engine)
     db = SessionLocal()
     try:
         seed_eye_supremo(db)

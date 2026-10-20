@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
 
-from ..update_service import download_latest_installer, latest_release
+from ..update_service import download_latest_installer, launch_staged_update, latest_release, rollback_latest_backup, stage_update
 
 router = APIRouter(prefix="/api/eye/updates", tags=["Eye Supremo updates"])
 
@@ -50,3 +50,37 @@ def download_update(mode: str = Query("redirect", pattern="^(redirect|proxy)$"))
         raise
     except Exception as exc:
         raise HTTPException(502, f"Impossibile scaricare l'aggiornamento: {exc}") from exc
+
+
+@router.post("/stage")
+def stage_update_route():
+    try:
+        release = latest_release()
+        if not release.get("download_url"):
+            raise HTTPException(404, release.get("message") or "Installer Windows non disponibile")
+        return stage_update(release)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Impossibile preparare l'aggiornamento: {exc}") from exc
+
+
+@router.post("/apply")
+def apply_update():
+    try:
+        result = launch_staged_update()
+        return result
+    except FileNotFoundError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, f"Aggiornamento non avviato: {exc}") from exc
+
+
+@router.post("/rollback")
+def rollback_update():
+    try:
+        return rollback_latest_backup()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, f"Ripristino non riuscito: {exc}") from exc

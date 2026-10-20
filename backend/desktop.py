@@ -133,7 +133,7 @@ def open_native_window() -> None:
             "pip install pywebview."
         ) from exc
 
-    write_log(f"Apro finestra nativa {WINDOW_TITLE} → {URL}")
+    write_log(f"Apro finestra nativa {WINDOW_TITLE} (WebView2 incorporato)")
     window = webview.create_window(
         WINDOW_TITLE,
         URL,
@@ -167,8 +167,8 @@ def main() -> None:
         server = threading.Thread(target=run_api_server, name="eye-api", daemon=True)
         server.start()
         if not wait_for_server():
-            raise TimeoutError(f"Server locale non raggiungibile su {URL}")
-        write_log(f"Server pronto su {URL}")
+            raise TimeoutError("Servizio applicativo locale non pronto")
+        write_log("Servizio applicativo pronto; nessun browser esterno richiesto.")
         open_native_window()
         write_log("Finestra chiusa; uscita.")
         sys.exit(0)
