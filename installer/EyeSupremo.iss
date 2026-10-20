@@ -1,14 +1,14 @@
-; Release 2.0.22: il pulsante Carica file spiega che serve scegliere un hotel.
+; Release 2.0.23: app in cartella (non più file unico) per evitare «Failed to load Python DLL».
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.22
+AppVersion=2.0.23
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.22
+OutputBaseFilename=EyeSupremo-Setup-2.0.23
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
@@ -19,7 +19,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\EyeSupremo.exe
 
 [Files]
-Source: "..\dist\EyeSupremo.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\EyeSupremo\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\scarica-modelli-ia.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

@@ -90,7 +90,7 @@ jobs:
         run: |
           $env:EYE_SUPREMO_HEADLESS = '1'
           $env:EYE_SUPREMO_NO_BROWSER = '1'
-          $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo.exe" -PassThru
+          $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo\EyeSupremo.exe" -PassThru
           $ok = $false
           try {
             for ($i = 0; $i -lt 60; $i++) {
