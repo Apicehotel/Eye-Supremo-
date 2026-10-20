@@ -46,8 +46,11 @@ CATEGORY_KEYWORDS = {
     "Cuscini": ["cuscino", "cuscini"],
 }
 POSITIVE_WORDS = {"ottimo", "ottima", "ottimi", "ottime", "eccellente", "pulito", "pulita", "pulitissimo", "pulitissima", "pulitissimi", "pulitissime", "gentile", "gentilissimo", "gentilissima", "comodo", "comoda", "confortevole", "confortevoli", "agevole", "agevoli", "funzionale", "funzionali", "spazioso", "spaziosa", "silenzioso", "silenziosa", "buono", "buona", "perfetto", "perfetta", "fantastico", "fantastica", "fantastiche", "super", "ricca", "ricco", "abbondante", "abbondanti", "accettabile", "cordiale", "cordialissimo", "cordialissima", "disponibile", "accogliente", "divina", "bello", "bella", "belle", "bravo", "bravissimi", "onesto", "onestissimo", "ampio", "ampia", "ampi", "ampie", "vicino", "vicina", "vicini", "innovativa", "garantiti", "molta", "molte", "scelta", "varietà", "varieta", "ok"}
-NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rumorosa", "rotto", "rotta", "scomodo", "scomoda", "disagio", "disagevole", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi", "stretto", "stretta", "vecchio", "vecchia", "datato", "datata", "datate", "distante", "lontano", "lontana", "pochi", "poche", "poco", "poca", "limitato", "limitata", "limitate", "deludente", "neo"}
-NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza"}
+NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", "rigido", "rigida", "rigide", "rumore", "rumoroso", "rumorosa", "rotto", "rotta", "scomodo", "scomoda", "disagio", "disagevole", "cattivo", "cattiva", "odore", "freddo", "caldo", "lento", "lenta", "evitare", "migliorare", "problema", "problemi", "stretto", "stretta", "vecchio", "vecchia", "datato", "datata", "datate", "distante", "lontano", "lontana", "pochi", "poche", "poco", "poca", "limitato", "limitata", "limitate", "deludente", "neo", "vuoto", "vuota", "vuoti", "vuote", "lontani", "lontane"}
+# "non è per nulla lontano": la negazione può essere rinforzata (per nulla, affatto, per niente);
+# più marcatori nella stessa finestra valgono come una sola negazione, non si annullano a vicenda.
+NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza", "nulla", "niente", "affatto", "nemmeno", "neanche", "mica", "privo", "priva"}
+NEGATION_WINDOW = 4
 
 
 def seed_eye_supremo(db: Session) -> None:
@@ -159,7 +162,7 @@ def classify_review_text(db: Session, text: str, hotel_id: int | None = None) ->
             negative = 0
             ordered_tokens = re.findall(r"[a-zà-ÿ]+", sentence)
             for index, token in enumerate(ordered_tokens):
-                window = ordered_tokens[max(0, index - 3):index]
+                window = ordered_tokens[max(0, index - NEGATION_WINDOW):index]
                 inverted = any(negation in window for negation in NEGATIONS)
                 if token in POSITIVE_WORDS:
                     negative += 1 if inverted else 0

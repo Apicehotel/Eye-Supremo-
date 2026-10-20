@@ -1,4 +1,5 @@
 import json
+import hashlib
 import secrets
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -203,13 +204,24 @@ def _already_imported(db: Session, hotel_id: int, review_date: date, room_code: 
         stmt = stmt.join(Room, Review.room_id == Room.id).where(Room.code == room_code)
     else:
         stmt = stmt.where(Review.room_id.is_(None))
-    return db.scalar(stmt.limit(1)) is not None
+    if db.scalar(stmt.limit(1)) is not None:
+        return True
+    # Le email importate con le versioni vecchie sono salvate intere in un solo record:
+    # una recensione già contenuta in un record dello stesso hotel conta come già presente.
+    clean = text.strip()
+    if len(clean) >= 60:
+        contained = select(Review.id).where(Review.hotel_id == hotel_id, Review.text.contains(clean, autoescape=True)).limit(1)
+        return db.scalar(contained) is not None
+    return False
 
 
 @router.post("/reviews/import/{hotel_code}")
 async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), role: str = Depends(current_role), username: str = Depends(current_username), db: Session = Depends(get_db)):
     hotel = hotel_from_code(db, hotel_code); require_hotel_access(db, hotel, role, username)
-    imported, errors, skipped = [], [], 0
+    imported, errors, skipped, skipped_files = [], [], 0, 0
+    seen_files: set[str] = set()
+    if len(files) > 200:
+        errors.append({"file": None, "error": f"Caricati al massimo 200 file per volta: {len(files) - 200} non elaborati, ricaricali separatamente"})
     for file in files[:200]:
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in {".msg", ".eml", ".txt"}:
@@ -217,6 +229,11 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
         content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
         if len(content) > settings.max_upload_mb * 1024 * 1024:
             errors.append({"file": file.filename, "error": "File troppo grande"}); continue
+        digest = hashlib.sha256(content).hexdigest()
+        if digest in seen_files:
+            skipped_files += 1  # stesso file selezionato due volte nello stesso caricamento
+            continue
+        seen_files.add(digest)
         safe = settings.data_dir / "reviews" / f"{secrets.token_hex(12)}{suffix}"
         safe.write_bytes(content)
         try:
@@ -249,7 +266,7 @@ async def import_reviews(hotel_code: str, files: list[UploadFile] = File(...), r
                     errors.append({"file": file.filename, "error": f"Recensione {index} non importata: {block_exc}"})
         except Exception as exc:
             errors.append({"file": file.filename, "error": str(exc)})
-    return {"hotel": hotel.name, "imported": len(imported), "skipped_duplicates": skipped, "review_ids": imported, "errors": errors}
+    return {"hotel": hotel.name, "imported": len(imported), "skipped_duplicates": skipped, "skipped_duplicate_files": skipped_files, "review_ids": imported, "errors": errors}
 
 
 @router.get("/reviews")

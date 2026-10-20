@@ -718,3 +718,56 @@ def test_create_user_defaults_to_standard_pin(client):
     assert hotels.status_code == 200
     assert len(hotels.json()) == 3
 
+
+
+def test_mixed_digest_keeps_google_and_tripadvisor_out_of_booking():
+    from app.review_importers import split_review_blocks
+
+    mixed = BOOKING_DIGEST + """
+
+<https://www.google.com/maps/contrib/109917461135353325196?hl=it> Mario Rossi <https://www.google.com/maps/contrib/109917461135353325196?hl=it> 16 ore fa su Google 5/5 Vacanza Hotel ottimo, personale gentile.
+
+Camere economy non all'altezza <https://www.tripadvisor.it/Profile/Abc> Abc ha scritto una recensione 11 lug 2/5 Camera piccola.
+"""
+    blocks = split_review_blocks(mixed, "2024-10-27", "Booking", None, "x")
+    assert [b["source"] for b in blocks] == ["Booking", "Booking", "Booking", "Google", "TripAdvisor"]
+    assert [str(b["rating"]) for b in blocks][-2:] == ["5", "2"]
+    # il footer che cita altre piattaforme non cambia la fonte di una recensione Booking
+    assert blocks[2]["source"] == "Booking"
+
+
+def test_import_ignores_the_same_file_selected_twice(client, db):
+    content = BOOKING_DIGEST.encode("utf-8")
+    files = [("files", ("a.txt", content, "text/plain")), ("files", ("b.txt", content, "text/plain"))]
+    body = client.post("/api/eye/reviews/import/gio", files=files).json()
+    assert body["imported"] == 3 and body["skipped_duplicate_files"] == 1
+    assert len(db.scalars(select(Review)).all()) == 3
+
+
+def test_import_skips_review_already_stored_inside_a_legacy_whole_email(client, db):
+    # Archivio vecchio: tutta l'email salvata in un solo record.
+    hotel = db.scalar(select(Hotel).where(Hotel.code == "gio"))
+    add_review(db, hotel_id=hotel.id, text=BOOKING_DIGEST, review_date=date(2024, 10, 27), rating=None, source="Booking")
+    body = _import_digest(client).json()
+    assert body["imported"] == 0 and body["skipped_duplicates"] == 3
+
+
+def _polarities(db, text):
+    return {(tag["category"], tag["polarity"]) for tag in classify_review_text(db, text)}
+
+
+def test_review_classifier_negated_negative_words_become_positive(db):
+    # "non lontano" / "non è per nulla lontano": la negazione ribalta la parola negativa
+    assert ("Posizione", "positive") in _polarities(db, "La posizione non è lontano dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    assert ("Posizione", "positive") in _polarities(db, "Posizione per niente lontana dal centro.")
+    assert ("Posizione", "negative") not in _polarities(db, "Posizione non è per nulla lontana dal centro.")
+    # senza negazione resta negativo
+    assert ("Posizione", "negative") in _polarities(db, "Posizione lontana dal centro.")
+
+
+def test_review_classifier_understands_empty_buffet_and_its_negation(db):
+    assert ("Colazione", "negative") in _polarities(db, "Il buffet della colazione era vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "negative") not in _polarities(db, "Buffet della colazione non per nulla vuoto.")
+    assert ("Colazione", "positive") in _polarities(db, "Il buffet della colazione non era vuoto, anzi ricco.")

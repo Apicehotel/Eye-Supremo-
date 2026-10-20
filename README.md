@@ -14,13 +14,17 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.16`
+**Versione applicativa:** `2.0.17`
 
-**In arrivo (branch `fix/reviews-hide-textless`, non ancora rilasciato):**
+**Novità 2.0.17:**
 
 - **Recensioni solo voto:** senza testo scritto dall'ospite contano nelle medie ma non compaiono come righe; un riquadro le riassume per fonte e voto.
 - **Recensioni → Media camere:** pagina a sé con la media dei voti per camera, separata per fonte (Booking su 10, Google e TripAdvisor su 5); i voti fuori scala sono ignorati e segnalati.
+- **Filtro camere "Cantine Wine":** menu a tendina nelle Recensioni (e in Media camere) per filtrare l'Hotel Giò per zona: 1 Cantine Wine (126–131), 2 Cantine Wine (225–233), 3 Cantine Wine (326–332), 4 Cantine Wine (426–434), oppure tutte le Cantine Wine insieme. Le camere fuori elenco restano visibili solo con "Tutte le camere". Un secondo menu **Pavimento** (indipendente dalla zona) filtra le camere con moquette dell'Hotel Giò: 125, 211, 218, 221, 224, 312, 323, 412 (oppure "Senza moquette"); i due filtri si combinano.
+- **Fonte corretta nelle email miste:** la fonte (Booking/Google/TripAdvisor) si decide dai segnali della singola recensione (numero prenotazione, link profilo Google/TripAdvisor, "su Google"), non più dal piè di pagina che cita tutte le piattaforme; le recensioni Google/TripAdvisor in coda a una email Booking vengono separate e il loro voto "N/5" è letto, così Media camere non le conta più come Booking. Codice in `backend/app/review_importers.py`.
+- **Parole negative negate:** la negazione ribalta il giudizio anche se rinforzata ("non è per nulla lontano", "buffet non per nulla vuoto", "per niente", "affatto", "nemmeno", "privo di"): più marcatori insieme contano come una sola negazione. Aggiunte come parole negative "vuoto/vuota/vuoti/vuote" e "lontani/lontane". Elenchi e finestra di negazione in `backend/app/eye_services.py` (`NEGATIONS`, `NEGATION_WINDOW`).
 - **Importazione recensioni affidabile:** voti con la virgola accettati, un blocco difettoso non ferma il file, recensioni già caricate saltate (con conteggio), voto salvato sempre visibile.
+- **Caricamento multiplo senza doppioni:** si possono selezionare molti file insieme (inviati a gruppi di 25, con avanzamento). Lo stesso file scelto due volte viene ignorato; una recensione già presente (testo identico, oppure già contenuta in una vecchia email salvata intera) non viene ricaricata. Alla fine il messaggio indica quante recensioni sono state importate, quante erano già presenti, quanti file ripetuti sono stati ignorati e i primi problemi da verificare. Oltre 200 file per volta il resto non viene elaborato e viene segnalato.
 
 **Novità 2.0.16:** nella sezione Recensioni → Ranking ogni camera mostra l’andamento del voto nel tempo: i periodi positivi restano nello storico, mentre una nuova segnalazione negativa apre un nuovo intervallo con le cause rilevate. Le recensioni con difetti possono inoltre essere sincronizzate nel foglio camere senza sovrascritture o doppioni.
 
@@ -176,7 +180,7 @@ Un singolo `.msg` può contenere **più recensioni**: il parser separa i blocchi
 
 **Recensioni solo voto:** una recensione senza testo scritto dall'ospite (solo il punteggio) conta nelle medie, nei voti per fonte e nei ranking, ma non viene mostrata come riga nell'archivio, nello storico e nelle segnalazioni anonime. Al suo posto compare un riquadro «Recensioni solo voto» con una voce per fonte e voto (es. «5 ★ su 10 · Booking · 3 recensioni»).
 
-**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera, **separata per fonte** e senza mescolare le scale: Booking su 10, Google e TripAdvisor su 5 (recensioni solo voto incluse). Per ogni fonte mostra media, numero di voti e minimo–massimo; in alto la media generale per fonte. Si filtra per hotel, si cerca per camera/hotel e si ordina per numero camera, media di una fonte o numero di voti. I voti fuori scala (es. 26 su Booking, causato da un giorno di calendario letto come voto) sono ignorati e segnalati con un avviso. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`).
+**Media camere:** nel menu Recensioni la voce **Media camere** è una pagina a sé con la media dei voti di ogni camera, **separata per fonte** e senza mescolare le scale: Booking su 10, Google e TripAdvisor su 5 (recensioni solo voto incluse). Per ogni fonte mostra media, numero di voti e minimo–massimo; in alto la media generale per fonte. Si filtra per hotel, si cerca per camera/hotel e si ordina per numero camera, media di una fonte o numero di voti. I voti fuori scala (es. 26 su Booking, causato da un giorno di calendario letto come voto) sono ignorati e segnalati con un avviso. Il calcolo è in `frontend/src/lib/roomAverages.ts` (test in `frontend/tests/roomAverages.test.ts`). **Filtro zona:** i gruppi "1/2/3/4 Cantine Wine" dell'Hotel Giò sono definiti in `frontend/src/lib/roomGroups.ts` (test in `frontend/tests/roomGroups.test.ts`); per cambiare i numeri di camera (zone e moquette) basta modificare quel file.
 
 ## Eye AI e agenti interni
 
