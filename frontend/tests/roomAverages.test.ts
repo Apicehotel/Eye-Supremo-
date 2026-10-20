@@ -45,12 +45,23 @@ test('la stessa camera in hotel diversi resta separata', () => {
 
 test('media per fonte su tutte le camere pesata sui voti', () => {
   const {rows} = roomAverages([
-    {...base, room: '1', source: 'Booking', date: '2026-01-01', rating: 10},
-    {...base, room: '1', source: 'Booking', date: '2026-01-02', rating: 8},
-    {...base, room: '2', source: 'Booking', date: '2026-01-03', rating: 6},
+    {...base, room: '101', source: 'Booking', date: '2026-01-01', rating: 10},
+    {...base, room: '101', source: 'Booking', date: '2026-01-02', rating: 8},
+    {...base, room: '202', source: 'Booking', date: '2026-01-03', rating: 6},
   ]);
   assert.equal(sourceOverview(rows).Booking?.average, 8);
   assert.equal(sourceOverview(rows).Google, null);
+});
+
+test('ignora camera 10 inventata da Vista dalla camera (voto Booking)', () => {
+  const {rows, invalid} = roomAverages([
+    {...base, room: '10', source: 'Booking', date: '2026-07-15', rating: 9},
+    {...base, room: '10', source: 'Booking', date: '2026-07-16', rating: 9},
+    {...base, room: '4411', source: 'Booking', date: '2026-07-17', rating: 8},
+  ]);
+  assert.equal(invalid, 2);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].room, '4411');
 });
 
 test('riconosce le fonti e valuta lo stato sulla scala giusta', () => {

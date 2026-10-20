@@ -364,6 +364,34 @@ def test_review_import_extracts_google_author_and_rejects_freeform_room():
     assert _room("camera\n10") is None
 
 
+def test_room_parser_ignores_vista_dalla_camera_category_score():
+    # Booking category line: the trailing 10 is a score, not room 10 (inesistente a Hotel Giò).
+    assert _room("Categorie extra\nVista dalla camera 10\nWifi 9") is None
+    assert _room("vista dalla camera 10") is None
+    assert _room("camera 10") is None
+    assert _room("CAM: 10") is None
+    assert _room("CAM: 4411\nVista dalla camera 10") == "4411"
+    blocks = split_review_blocks(
+        """Booking.com recensioni
+9,0
+Mario, it in 14/07 out 15/07 cam. 4411
+Numero di prenotazione 123
+Categorie extra Vista dalla camera 10 Wifi 9
+Ottima camera
+8,0
+Luca, it in 15/07 out 16/07 cam. 2208
+Numero di prenotazione 456
+Categorie extra Vista dalla camera 10
+Camera comoda""",
+        "2026-07-15",
+        "Booking",
+        None,
+        "booking.txt",
+    )
+    assert [block["room_code"] for block in blocks] == ["4411", "2208"]
+    assert all(block["room_code"] != "10" for block in blocks)
+
+
 def test_tripadvisor_category_scores_count_as_review_vote():
     assert _rating("TripAdvisor Camere3,0 Servizio3,0 Posizione3,0") == "3.0"
     assert _rating("Camere5,0 Servizio5,0 Posizione5,0 Nessuna recensione Tripadvisor michele") == "5.0"

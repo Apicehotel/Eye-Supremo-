@@ -144,10 +144,32 @@ def _review_date(text: str, fallback: str) -> str:
     return _parse_date(match.group(1) if match else None, fallback)
 
 
+def _room_marker_matches(text: str):
+    """Yield (match, room_code) for CAM/camera/room markers that look like real rooms.
+
+    Booking category lines such as ``Vista dalla camera 10`` must not invent
+    room ``10``. Numeric hotel rooms in these digests are almost always 3–4
+    digits (e.g. 217, 4411), while bare 1–2 digit values are Booking scores.
+    """
+    for match in re.finditer(
+        r"(?:\bCAM\b|\bcamera\b|\broom\b)[ \t]*[:#.\-]?[ \t]*([A-Z0-9-]{1,12})\b",
+        text,
+        re.I,
+    ):
+        prefix = text[max(0, match.start() - 14):match.start()].lower()
+        if re.search(r"\b(?:dalla|della|dallo|alla|nella)\s+$", prefix):
+            continue
+        value = match.group(1)
+        if not value or not re.fullmatch(r"\d{1,4}[A-Z]?", value, re.I):
+            continue
+        # Reject score-like 1–2 digit values ("10", "9") mistaken for rooms.
+        if re.fullmatch(r"\d{1,2}", value):
+            continue
+        yield match, value
+
+
 def _room(text: str):
-    match = re.search(r"(?:\bCAM\b|camera|room)[ \t]*[:#.\-]?[ \t]*([A-Z0-9-]{1,12})", text, re.I)
-    value = match.group(1) if match else None
-    if value and re.fullmatch(r"\d{1,4}[A-Z]?", value, re.I):
+    for _, value in _room_marker_matches(text):
         return value
     # Booking digests often put the room number after the room type, e.g.
     # ``Matrimoniale Superior Jazz 4410 Numero di prenotazione ...``.
@@ -243,15 +265,21 @@ def split_review_blocks(text: str, default_date: str, source_hint: str, author_h
     # Real Hotel Giò messages often contain many Booking reviews. Depending on
     # the export, the room marker may be on its own line (``CAM: 217``) or in
     # the guest line (``camera 2219`` / ``cam:2209``).
-    room_pattern = r"(?i)(?<![A-Z0-9])(?:CAM|CAMERA|ROOM)[ \t]*[:#.\-]?[ \t]*\d{1,4}[A-Z]?\b"
-    room_matches = list(re.finditer(room_pattern, cleaned))
+    # ``_room_marker_matches`` already skips ``Vista dalla camera 10`` scores.
+    room_matches = [match for match, _ in _room_marker_matches(cleaned)]
     starts = [m.start() for m in room_matches]
     if source_hint.lower() == "booking":
         # Booking digests sometimes mark only the first room with ``CAM:``;
         # subsequent reviews use the room type followed by the room number
         # and ``Numero di prenotazione``.
-        booking_room_pattern = r"(?im)(?<![A-Z0-9])(?:CAM|CAMERA|ROOM)[ \t]*[:#.\-]?[ \t]*\d{1,4}[A-Z]?\b|(?<![A-Z0-9])(?:MATRIMONIALE|SUITE|TRIPLA|QUADRUPLA|DOPPIA|SINGOLA|JUNIOR|DELUXE|SUPERIOR|STANDARD)[^\n]{0,80}\b\d{3,4}\b(?=\s+Numero di prenotazione)"
-        starts = sorted({match.start() for match in re.finditer(booking_room_pattern, cleaned)})
+        booking_type_pattern = (
+            r"(?im)(?<![A-Z0-9])(?:MATRIMONIALE|SUITE|TRIPLA|QUADRUPLA|DOPPIA|SINGOLA|JUNIOR|DELUXE|SUPERIOR|STANDARD)"
+            r"[^\n]{0,80}\b\d{3,4}\b(?=\s+Numero di prenotazione)"
+        )
+        starts = sorted({
+            *[m.start() for m in room_matches],
+            *[m.start() for m in re.finditer(booking_type_pattern, cleaned)],
+        })
         # Some Booking exports contain an invalid/missing room code (for
         # example ``camera ???``). Use the metadata line immediately before
         # each reservation number as an additional review boundary so the
@@ -318,9 +346,7 @@ def split_review_blocks(text: str, default_date: str, source_hint: str, author_h
 
     reviews: list[dict] = []
     for idx, block in enumerate(blocks):
-        has_room_marker = bool(re.search(room_pattern, block)) or (
-            source_hint.lower() == "booking" and _room(block) is not None
-        )
+        has_room_marker = _room(block) is not None
         has_booking_boundary = source_hint.lower() == "booking" and bool(re.search(r"(?i)nu\s*mero di prenotazione\b", block))
         has_review_marker = bool(review_marker.search(block))
         if not _looks_like_review(block) and not has_room_marker and not has_booking_boundary and not has_review_marker:
