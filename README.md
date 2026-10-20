@@ -14,7 +14,9 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.25`
+**Versione applicativa:** `2.0.26`
+
+**Novità 2.0.26:** pulsante «Invia a Supabase» in Recensioni: rimanda al centrale le recensioni salvate solo sul PC (mai sincronizzate), senza doppioni (endpoint `POST /api/eye/reviews/sync/push`). Prima la sync partiva solo al momento del caricamento file.
 
 **Novità 2.0.25:** Media camere interattiva: clic su una riga apre le recensioni di quella camera (voto, data, autore, voti per tag, testo); clic su una media Booking/Google/TripAdvisor mostra solo quella fonte.
 

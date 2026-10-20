@@ -358,6 +358,17 @@ async def reviews_sync(role: str = Depends(current_role)):
     return await refresh_review_cache()
 
 
+@router.post("/reviews/sync/push")
+async def reviews_sync_push(role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
+    from ..review_cache import push_local_reviews
+    result = await push_local_reviews(db)
+    if result["pushed"]:
+        try: await refresh_review_cache()
+        except Exception: pass
+    return result
+
+
 @router.get("/reviews/sync/status")
 def reviews_sync_status(role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")

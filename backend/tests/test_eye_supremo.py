@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime
+from app.models import CentralReviewCache
 from decimal import Decimal
 from sqlalchemy import select
 from app.eye_services import add_review, classify_review_text, invoice_search_summary
@@ -842,3 +843,25 @@ def test_rooms_that_are_words_are_not_exposed_as_rooms(client, db):
     add_review(db, hotel_id=hotel.id, text="Camera pulita e spaziosa, personale gentile. Voto 5/5 su Google", review_date=date(2026, 8, 23), rating=Decimal("5"), room_code="pulita", source="Google")
     rooms = [r["room"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()]
     assert "pulita" not in rooms
+
+
+def test_push_local_reviews_sends_only_unsynced_ones(client, db, monkeypatch):
+    import asyncio
+    from app import review_cache
+    _import_digest(client)
+    sent = []
+
+    async def fake_upsert(review):
+        sent.append(review["sync_uuid"])
+        return {"enabled": True, "synced": True}
+
+    monkeypatch.setattr(review_cache, "central_review_upsert", fake_upsert)
+    first = asyncio.run(review_cache.push_local_reviews(db))
+    assert first["pushed"] == 3 and len(sent) == 3 and not first["errors"]
+    # le copie centrali (stesso testo/data/fonte) non vengono reinviate
+    for r in db.scalars(select(Review)).all():
+        db.add(CentralReviewCache(sync_uuid="c-" + r.sync_uuid, hotel_code="gio", review_date=r.date, source=r.source, author=r.author, rating=r.rating, room_code=None, text=r.text, payload_json="{}", synced_at=datetime.now()))
+    db.commit()
+    sent.clear()
+    second = asyncio.run(review_cache.push_local_reviews(db))
+    assert second["pushed"] == 0 and sent == [] and second["skipped_already_central"] == 3
