@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from app.eye_services import add_review, classify_review_text, invoice_search_summary
 from app.search_index import invoice_search
-from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Supplier, UserProfile
+from app.models import AppSetting, CentralInvoiceCache, Hotel, Invoice, InvoiceRow, InvoiceRowPolicy, Review, Supplier, UserProfile
 from app.agent_orchestrator import _max_invoice_context
 from app.report_service import historical_product_report
 from app.review_importers import _author, _rating, _room, clean_review_text, split_review_blocks
@@ -553,6 +553,118 @@ def test_room_rating_timeline_keeps_the_good_period_before_a_drop(db):
     assert room["periods"][1]["from"] == "2026-04-13"
     assert room["periods"][1]["status"] == "attenzione"
     assert "Pulizia" in room["periods"][1]["causes"]
+
+
+BOOKING_DIGEST = """recensioni 27-10-24
+10
+
+Ospite A, it   in 26/10/24  out 27/10/24  cam 4407
+
+Numero di prenotazione 1000000001 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000001&lang=it&hotel_id=1>
+
+27 ott 2024Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+10
+
+Pulizia
+
+10
+
+________________________________
+
+una perfetta sinfonia
+
+Personale ultragentile e colazione ricchissima.
+
+10
+
+Ospite B, it   in 26/10/24  out 27/10/24  cam 1108
+
+Numero di prenotazione 1000000002 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000002&lang=it&hotel_id=1>
+
+27 ott 2024Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+10
+
+Pulizia
+
+10
+
+________________________________
+
+8,0
+
+Ospite C, it   in 04/12/2024  out 06/12/24  cam 3306
+
+Numero di prenotazione 1000000003 <https://admin.booking.com/hotel/hoteladmin/extranet_ng/manage/booking.html?res_id=1000000003&lang=it&hotel_id=1>
+
+23 gen 2025Nuovo!
+
+________________________________
+
+Categorie base
+
+Staff
+
+7,5
+
+Pulizia
+
+10
+
+________________________________
+
+Letto scomodo e stanza rumorosa
+
+Nulla
+"""
+
+
+def _import_digest(client, content: str = BOOKING_DIGEST):
+    return client.post("/api/eye/reviews/import/gio", files=[("files", ("digest.txt", content.encode("utf-8"), "text/plain"))])
+
+
+def test_import_accepts_comma_ratings_and_keeps_every_review_of_the_file(client, db):
+    body = _import_digest(client).json()
+    assert body["imported"] == 3
+    assert not any("non importata" in e["error"] for e in body["errors"])
+    stored = {r.room.code: float(r.rating) for r in db.scalars(select(Review)).all() if r.rating is not None}
+    assert stored == {"4407": 10.0, "1108": 10.0, "3306": 8.0}
+
+
+def test_import_skips_reviews_already_imported(client, db):
+    assert _import_digest(client).json()["imported"] == 3
+    second = _import_digest(client).json()
+    assert second["imported"] == 0 and second["skipped_duplicates"] == 3
+    assert len(db.scalars(select(Review)).all()) == 3
+
+
+def test_import_discards_out_of_scale_ratings_without_losing_the_review():
+    from app.routers.eye import _parse_rating
+    assert _parse_rating("8,0", "Booking") == Decimal("8.0")
+    assert _parse_rating("7,5", "Booking") == Decimal("7.5")
+    assert _parse_rating("26", "Booking") is None
+    assert _parse_rating("6", "Google") is None
+    assert _parse_rating("4,5", "TripAdvisor") == Decimal("4.5")
+    assert _parse_rating("abc", "Booking") is None and _parse_rating(None, "Booking") is None
+
+
+def test_review_list_shows_the_stored_rating_of_imported_reviews(client):
+    _import_digest(client)
+    ratings = {r["room"]: r["rating"] for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()}
+    assert ratings["4407"] == 10.0 and ratings["3306"] == 8.0
 
 
 def test_review_txt_import_endpoint(client):
