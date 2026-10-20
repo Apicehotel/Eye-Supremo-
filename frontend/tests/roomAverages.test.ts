@@ -62,3 +62,24 @@ test('riconosce le fonti e valuta lo stato sulla scala giusta', () => {
   assert.equal(roomStatus(2.9, 5), 'attenzione');
   assert.equal(roomStatus(4, 5), 'ok');
 });
+
+test('voti per tag: la media usa il voto del tag scelto, separata per fonte', async () => {
+  const {roomAverages, scoreCategories} = await import('../src/lib/roomAverages.ts');
+  const base = {hotel: 'Hotel Giò', hotel_code: 'gio', room: '330', date: '2026-01-01'};
+  const items = [
+    {...base, source: 'Booking', rating: 8, scores: {Staff: 10, Colazione: 6}},
+    {...base, source: 'Booking', rating: 9, scores: {Staff: 8}},
+    {...base, source: 'TripAdvisor', rating: 4, scores: {Staff: 5, Posizione: 4}},
+    {...base, source: 'Booking', rating: 7, scores: {Staff: 12}},
+  ];
+  assert.deepEqual(scoreCategories(items), ['Colazione', 'Posizione', 'Staff']);
+  const staff = roomAverages(items, 'Staff');
+  assert.equal(staff.rows[0].bySource.Booking?.average, 9);
+  assert.equal(staff.rows[0].bySource.Booking?.count, 2);
+  assert.equal(staff.rows[0].bySource.TripAdvisor?.average, 5);
+  assert.equal(staff.invalid, 1);
+  const colazione = roomAverages(items, 'Colazione');
+  assert.equal(colazione.rows[0].bySource.Booking?.average, 6);
+  assert.equal(colazione.rows[0].bySource.TripAdvisor, null);
+  assert.equal(roomAverages(items).rows[0].bySource.Booking?.average, 8);
+});

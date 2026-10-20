@@ -20,7 +20,48 @@ def _parse_date(value: str | None, fallback: str) -> str:
     return fallback
 
 
+# Date di soggiorno/recensione (``in 15/10 out 16/10``, ``26/10/24``): non sono mai voti.
+_DATE_LIKE = re.compile(r"\b(?:in|out)\s*:?\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", re.I)
+
+# Voti per categoria (tag) scritti nei digest: etichetta -> nome canonico.
+_CATEGORY_LABELS = (
+    (r"rapporto\s+qualit[àa]\s*/\s*prezzo|qualit[àa]\s*/\s*prezzo", "Qualità/prezzo"),
+    (r"vista\s+dalla\s+camera", "Vista dalla camera"),
+    (r"ristorante\s+sul\s+posto", "Ristorante"),
+    (r"staff", "Staff"),
+    (r"pulizia", "Pulizia"),
+    (r"comfort", "Comfort"),
+    (r"posizione", "Posizione"),
+    (r"servizi|servizio", "Servizi"),
+    (r"letti", "Letti"),
+    (r"colazione", "Colazione"),
+    (r"wi-?fi", "Wi-Fi"),
+    (r"camere", "Camere"),
+)
+_CATEGORY_SCORE = [
+    (re.compile(r"(?<![A-Za-zÀ-ÿ])(?:" + label + r")(?![A-Za-zÀ-ÿ])[ \t\r\n]*[:\-]?[ \t\r\n]*(\d{1,2}(?:[.,]\d)?)(?![\d,./-]|[ \t]*(?:min|minuti|km|metri|persone|notti|stelle|%))", re.I), name)
+    for label, name in _CATEGORY_LABELS
+]
+
+
+def extract_category_scores(text: str, source: str | None = None) -> dict[str, float]:
+    """Voti per categoria letti nella recensione (Staff, Pulizia, Colazione, ...), sulla scala della fonte."""
+    scale = 10 if (source or "Booking").strip().lower() in {"booking", "booking.com", "email", ""} else 5
+    cleaned = _DATE_LIKE.sub(" ", text)
+    scores: dict[str, float] = {}
+    for pattern, name in _CATEGORY_SCORE:
+        if name in scores:
+            continue
+        for match in pattern.finditer(cleaned):
+            value = float(match.group(1).replace(",", "."))
+            if 0 <= value <= scale:
+                scores[name] = value
+                break
+    return scores
+
+
 def _rating(text: str):
+    text = _DATE_LIKE.sub(" ", text)
     # TripAdvisor often omits the overall score and writes only category
     # scores compacted in the digest (for example ``Camere3,0 Servizio3,0``).
     # Treat those values as real votes and use their average as the review

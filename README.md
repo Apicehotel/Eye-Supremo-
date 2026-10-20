@@ -14,7 +14,12 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.17`
+**Versione applicativa:** `2.0.18`
+
+**Novità 2.0.18:**
+
+- **Voti per tag:** i voti per categoria scritti nei digest (Staff, Pulizia, Comfort, Posizione, Servizi, Qualità/prezzo, Letti, Colazione, Wi-Fi, Vista dalla camera, Camere, Ristorante) sono letti per ogni recensione e mostrati come etichette nelle recensioni e nello storico. In **Media camere** un menu "Voto per tag" cambia le medie da generale al tag scelto, sempre separate per fonte e sulla scala della fonte. Lettura in `extract_category_scores` (`backend/app/review_importers.py`); i voti per tag sono calcolati alla lettura dal testo, quindi valgono anche per le recensioni già archiviate.
+- **Date non più lette come voti:** `in 15/10 out 16/10` o `26/10/24` non diventano più "15/10" o "26/10" come voto generale: si legge il voto sulla riga dell'ospite.
 
 **Novità 2.0.17:**
 

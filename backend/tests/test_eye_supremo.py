@@ -771,3 +771,25 @@ def test_review_classifier_understands_empty_buffet_and_its_negation(db):
     assert ("Colazione", "positive") in _polarities(db, "Buffet della colazione non per nulla vuoto.")
     assert ("Colazione", "negative") not in _polarities(db, "Buffet della colazione non per nulla vuoto.")
     assert ("Colazione", "positive") in _polarities(db, "Il buffet della colazione non era vuoto, anzi ricco.")
+
+
+def test_category_scores_are_read_per_tag_and_dates_are_not_votes():
+    from app.review_importers import extract_category_scores
+    booking = "Categorie base\n\nStaff\n\n10\n\nPulizia\n\n9,0\n\nComfort 8,0 Rapporto qualità/prezzo 7,5 Letti 10 7,0 Antonio, it in 25/10 out 26/10"
+    assert extract_category_scores(booking, "Booking") == {"Qualità/prezzo": 7.5, "Staff": 10.0, "Pulizia": 9.0, "Comfort": 8.0, "Letti": 10.0}
+    assert extract_category_scores("Camere5,0 Servizio5,0 Posizione4,0 Punti forti", "TripAdvisor") == {"Posizione": 4.0, "Servizi": 5.0, "Camere": 5.0}
+    # fuori scala, orari/distanze e date non sono voti
+    assert extract_category_scores("Staff 15 Posizione 5 minuti dal centro, Colazione 15/10", "Booking") == {}
+    assert extract_category_scores("Staff 9", "Google") == {}
+
+
+def test_overall_rating_ignores_stay_dates():
+    assert _rating("8,0 Thomas, de in 15/10 out 16/10 camera 221") == "8.0"
+    assert _rating("10 Luca, it in 26/10/24 out 27/10/24 cam 4407") == "10"
+
+
+def test_review_list_exposes_category_scores_for_every_review(client):
+    _import_digest(client)
+    by_room = {r["room"]: r for r in client.get("/api/eye/reviews", params={"hotel_code": "gio"}).json()}
+    assert by_room["4407"]["scores"].get("Staff") == 10.0 and by_room["4407"]["scores"].get("Pulizia") == 10.0
+    assert all(isinstance(r["scores"], dict) for r in by_room.values())

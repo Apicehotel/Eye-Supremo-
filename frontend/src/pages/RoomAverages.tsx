@@ -7,7 +7,7 @@ type Sort = 'room_asc' | `${'Booking' | 'Google' | 'TripAdvisor'}_${'desc' | 'as
 const fmt = (value: number) => value.toFixed(2).replace('.', ',');
 const scaleOf = (key: SourceKey) => SOURCES.find(s => s.key === key)!.scale;
 
-export default function RoomAverages({rows, invalid, scopeLabel}: {rows: RoomAverage[]; invalid: number; scopeLabel: string}) {
+export default function RoomAverages({rows, invalid, scopeLabel, categories, category, onCategory}: {rows: RoomAverage[]; invalid: number; scopeLabel: string; categories: string[]; category: string; onCategory: (value: string) => void}) {
   const [query, setQuery] = useState(''), [sort, setSort] = useState<Sort>('room_asc'), [minReviews, setMinReviews] = useState(1);
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -32,10 +32,14 @@ export default function RoomAverages({rows, invalid, scopeLabel}: {rows: RoomAve
       {SOURCES.map(({key, scale}) => <article className="kpi" key={key}><div><span>Media {key}</span><strong>{overview[key] ? `${fmt(overview[key]!.average)} / ${scale}` : '—'}</strong><small>{overview[key] ? `${overview[key]!.count} voti` : 'nessun voto'}</small></div></article>)}
     </section>
     <section className="panel room-averages-panel">
-      <div className="panel-title"><div><h2>Media voti per camera</h2><span>Una media per fonte, ciascuna sulla sua scala (Booking su 10, Google e TripAdvisor su 5) · incluse le recensioni solo voto</span></div><Status tone="ok">{visible.length} camere</Status></div>
+      <div className="panel-title"><div><h2>{category ? `Media ${category} per camera` : 'Media voti per camera'}</h2><span>Una media per fonte, ciascuna sulla sua scala (Booking su 10, Google e TripAdvisor su 5) · incluse le recensioni solo voto</span></div><Status tone="ok">{visible.length} camere</Status></div>
       {invalid > 0 && <p className="room-averages-warning"><TriangleAlert size={15}/> {invalid} {invalid === 1 ? 'voto fuori scala ignorato' : 'voti fuori scala ignorati'}: probabile errore di lettura in importazione (per esempio un giorno della data scambiato per voto).</p>}
       <div className="room-averages-tools">
         <label className="global-search review-search"><Search/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca camera o hotel…"/></label>
+        <select className="review-control" aria-label="Voto per tag" value={category} onChange={e => onCategory(e.target.value)}>
+          <option value="">Voto generale</option>
+          {categories.map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
         <select className="review-control" aria-label="Ordina camere" value={sort} onChange={e => setSort(e.target.value as Sort)}>
           <option value="room_asc">Numero camera</option>
           {SOURCES.map(({key}) => <option key={`${key}d`} value={`${key}_desc`}>Media {key} più alta</option>)}
