@@ -504,6 +504,13 @@ def test_review_classifier_does_not_mark_negated_problems_as_negative(db):
     assert ("Camere / Arredi", "negative") not in {(tag["category"], tag["polarity"]) for tag in tags}
 
 
+def test_review_classifier_does_not_invert_positive_non_parlare_expression(db):
+    tags = classify_review_text(db, "Non parlare del personale gentile e disponibile.")
+    pairs = {(tag["category"], tag["polarity"]) for tag in tags}
+    assert ("Staff", "positive") in pairs
+    assert ("Staff", "negative") not in pairs
+
+
 def test_review_classifier_uses_distance_context_and_phrase_meaning(db):
     positive = classify_review_text(db, "La posizione non è lontana e si raggiunge in pochi passi.")
     negative = classify_review_text(db, "La posizione è lontana e serve molto tempo per arrivarci.")

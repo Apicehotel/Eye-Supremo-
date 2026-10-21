@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from dataclasses import replace
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -16,6 +17,7 @@ from .models import (
 )
 from .normalization import normalize_text
 from .review_sync import ensure_review_state
+from .model_layers import generate_with_layers, resolve_ai_runtime
 
 HOTEL_SEEDS = [
     ("gio", "Hotel Giò"),
@@ -52,6 +54,111 @@ NEGATIVE_WORDS = {"pessimo", "pessima", "scarso", "scarsa", "sporco", "sporca", 
 # più marcatori nella stessa finestra valgono come una sola negazione, non si annullano a vicenda.
 NEGATIONS = {"non", "mai", "nessun", "nessuna", "senza", "nulla", "niente", "affatto", "nemmeno", "neanche", "mica", "privo", "priva"}
 NEGATION_WINDOW = 4
+# In italiano "non parlare del personale gentile" è un'espressione
+# rafforzativa positiva: la negazione riguarda "parlare", non "gentile".
+POSITIVE_SPEAKING_RE = re.compile(
+    r"\bnon\s+parlare\b[^.!?\n]{0,80}\b(?:gentil\w*|cordial\w*|disponibil\w*|brav\w*)\b",
+    re.IGNORECASE,
+)
+
+QWEN_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sentiment_score": {"type": "number"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string"},
+                    "polarity": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+                    "confidence": {"type": "number"},
+                    "excerpt": {"type": "string"},
+                },
+                "required": ["category", "polarity", "confidence", "excerpt"],
+            },
+        },
+    },
+    "required": ["sentiment_score", "items"],
+}
+
+
+async def interpret_review_with_qwen(db: Session, review: Review) -> dict:
+    """Interpreta una recensione con Qwen e aggiorna i tag persistiti.
+
+    Il modello non decide se il record è valido né modifica testo, fonte, voto
+    o camera. Se Qwen/Ollama non è disponibile, il chiamante conserva i tag
+    deterministici già prodotti da :func:`classify_review_text`.
+    """
+    runtime = resolve_ai_runtime(db)
+    # Per l'interpretazione delle recensioni vogliamo esplicitamente il layer
+    # qualità (Qwen), senza passare dal modello veloce.
+    qwen_runtime = replace(runtime, policy="quality", chat_model_fast=runtime.chat_model_quality)
+    prompt = (
+        "Interpreta questa recensione alberghiera in italiano. "
+        "Riconosci il significato delle frasi complete e delle negazioni: "
+        "'non troppo confortevole' è negativo, mentre 'non scomodo' è positivo. "
+        "Non inventare aspetti assenti. Usa solo queste categorie: "
+        f"{', '.join(REVIEW_CATEGORY_SEEDS)}. "
+        "Restituisci JSON con sentiment_score tra -1 e 1 e items. "
+        "Un item per aspetto realmente presente, polarity positive/negative/neutral, "
+        "confidence tra 0 e 1, excerpt breve copiato dalla recensione. "
+        f"RECENSIONE:\n{review.text[:6000]}"
+    )
+    structured = await generate_with_layers(
+        prompt=prompt,
+        runtime=qwen_runtime,
+        response_format=QWEN_REVIEW_SCHEMA,
+        temperature=0.0,
+        num_predict=420,
+        num_ctx=4096,
+        request_timeout=45.0,
+        escalate_on_low_confidence=False,
+    )
+    categories = {normalize_text(name): name for name in REVIEW_CATEGORY_SEEDS}
+    items = structured.get("items") or []
+    clean_items: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        category = categories.get(normalize_text(str(item.get("category", ""))))
+        polarity = str(item.get("polarity", "")).strip().lower()
+        if not category or polarity not in {"positive", "negative"}:
+            continue
+        try:
+            confidence = max(0.0, min(1.0, float(item.get("confidence", 0))))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < 0.45:
+            continue
+        excerpt = str(item.get("excerpt", "")).strip()[:240]
+        clean_items.append({"category": category, "polarity": polarity, "confidence": confidence, "excerpt": excerpt})
+
+    # Il vincolo DB consente un solo tag per categoria/polarità: se Qwen
+    # ripete lo stesso aspetto teniamo l'evidenza con confidenza maggiore.
+    unique_items: dict[tuple[str, str], dict] = {}
+    for item in clean_items:
+        key = (item["category"], item["polarity"])
+        if key not in unique_items or item["confidence"] > unique_items[key]["confidence"]:
+            unique_items[key] = item
+    clean_items = list(unique_items.values())
+    if not clean_items:
+        raise ValueError("Qwen non ha restituito aspetti utilizzabili")
+    for tag in list(review.tags):
+        db.delete(tag)
+    db.flush()
+    category_ids = {name: db.scalar(select(ReviewCategory.id).where(ReviewCategory.name == name)) for name in REVIEW_CATEGORY_SEEDS}
+    for item in clean_items:
+        category_id = category_ids.get(item["category"])
+        if category_id:
+            db.add(ReviewTag(review_id=review.id, category_id=category_id, polarity=item["polarity"], confidence=item["confidence"], excerpt=item["excerpt"] or None))
+    try:
+        score = max(-1.0, min(1.0, float(structured.get("sentiment_score", 0))))
+        review.sentiment_score = score
+    except (TypeError, ValueError):
+        pass
+    db.commit()
+    return {"source": "qwen", "model": structured.get("_model"), "items": len(clean_items)}
 
 
 def seed_eye_supremo(db: Session) -> None:
@@ -161,7 +268,10 @@ def classify_review_text(db: Session, text: str, hotel_id: int | None = None) ->
             tokens = set(re.findall(r"[a-zà-ÿ]+", sentence))
             positive = 0
             negative = 0
-            ordered_tokens = re.findall(r"[a-zà-ÿ]+", sentence)
+            polarity_sentence = sentence
+            if POSITIVE_SPEAKING_RE.search(sentence):
+                polarity_sentence = re.sub(r"\bnon\s+parlare\b", "parlare", sentence, flags=re.IGNORECASE)
+            ordered_tokens = re.findall(r"[a-zà-ÿ]+", polarity_sentence)
             for index, token in enumerate(ordered_tokens):
                 window = ordered_tokens[max(0, index - NEGATION_WINDOW):index]
                 inverted = any(negation in window for negation in NEGATIONS)
