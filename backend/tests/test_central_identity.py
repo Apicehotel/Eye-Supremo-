@@ -208,14 +208,14 @@ def test_context_uses_personal_token_and_never_shared_credentials(central, monke
     assert _credentials() == ('','')
 
 
-def test_restart_requires_pin_again_and_keeps_offline_access(central_client, db, monkeypatch):
+def test_restart_keeps_local_session_and_offline_access(central_client, db, monkeypatch):
     payload = login(central_client)
     identity._IDENTITIES.clear()
     identity._LOCAL_LOGINS.clear()
-    assert session_user(db, payload['session']) is None
+    assert session_user(db, payload['session']).username == 'alice'
     assert verify_pin(db, 'alice', '654321')
     monkeypatch.setattr(identity, 'remote', unavailable)
-    assert login(central_client)['offline'] is True
+    assert central_client.get('/api/eye/hotels', headers={'X-Eye-Session': payload['session']}).status_code == 200
 
 
 def test_reconnection_requests_fresh_online_login(central_client, central, monkeypatch):

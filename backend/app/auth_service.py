@@ -9,7 +9,9 @@ from .models import UserProfile
 from .config import settings
 
 PBKDF2_ITERATIONS = 310_000
-SESSION_HOURS = 12
+# La sessione locale sopravvive ai riavvii; per gli utenti centrali resta
+# comunque vincolata alla lease offline configurata (di norma 7 giorni).
+SESSION_HOURS = 24 * 7
 DEFAULT_PIN = "000000"
 
 
@@ -76,7 +78,13 @@ def session_user(db: Session, raw_token: str | None) -> UserProfile | None:
         from .auth_models import CentralAccount
         from .central_identity import _LOCAL_LOGINS
         account = db.get(CentralAccount, user.id)
-        if digest not in _LOCAL_LOGINS or not account or not account.offline_until or account.offline_until <= datetime.now(UTC).replace(tzinfo=None):
+        offline_until = account.offline_until if account else None
+        local_lease_valid = bool(offline_until and offline_until > datetime.now(UTC).replace(tzinfo=None))
+        # Dopo un riavvio il token centrale in memoria non esiste più, ma la
+        # sessione locale e la lease offline autorizzano ancora l'uso locale.
+        # Il token remoto non viene persistito e le funzioni centrali potranno
+        # essere riattivate esplicitamente con "Accedi online".
+        if not local_lease_valid:
             db.delete(session); db.commit(); return None
     return user
 

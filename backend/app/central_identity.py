@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth_models import CentralAccount, LocalCredential, LocalSession
-from .auth_service import create_session, set_pin, verify_pin, validate_pin_format
+from .auth_service import SESSION_HOURS, create_session, set_pin, verify_pin, validate_pin_format
 from .config import settings
 from .models import UserProfile
 
@@ -174,7 +174,7 @@ def auth_payload(token: str, user: UserProfile, account: CentralAccount, *, offl
         if expires_at <= now:
             _LOCAL_LOGINS.pop(key, None)
             _OFFLINE_PROBES.pop(key, None)
-    _LOCAL_LOGINS[session_key(token)] = now + timedelta(hours=12)
+    _LOCAL_LOGINS[session_key(token)] = now + timedelta(hours=SESSION_HOURS)
     if offline:
         _OFFLINE_PROBES[session_key(token)] = time.monotonic()
     return {"session": token, "user": {"id": user.id, "username": user.username,
@@ -188,7 +188,8 @@ async def identity_for_request(db: Session, local_token: str, user: UserProfile)
     if identity is None:
         # Dopo un accesso offline, rileva il ritorno del servizio senza inviare
         # il PIN: richiede un nuovo login, che verifica revoche e cambi PIN.
-        if time.monotonic() - _OFFLINE_PROBES.get(key, 0) >= 60:
+        probe_at = _OFFLINE_PROBES.get(key)
+        if probe_at is not None and time.monotonic() - probe_at >= 60:
             _OFFLINE_PROBES[key] = time.monotonic()
             try:
                 result = await remote("availability")
