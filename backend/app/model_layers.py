@@ -13,6 +13,7 @@ Policy:
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -34,6 +35,7 @@ class AiRuntime:
     ollama_url: str
     chat_model_fast: str
     chat_model_quality: str
+    chat_model_alternative: str
     embedding_model: str
     policy: str
 
@@ -49,6 +51,7 @@ def resolve_ai_runtime(db: Session | None = None) -> AiRuntime:
         ollama_url=(stored.get("ollama_url") or settings.ollama_url).rstrip("/"),
         chat_model_fast=(stored.get("chat_model_fast") or settings.chat_model_fast).strip(),
         chat_model_quality=(stored.get("chat_model") or settings.chat_model).strip(),
+        chat_model_alternative=(stored.get("chat_model_alternative") or settings.chat_model_alternative).strip(),
         embedding_model=(stored.get("embedding_model") or settings.embedding_model).strip(),
         policy=policy,
     )
@@ -74,17 +77,58 @@ def is_model_present(installed: Iterable[str], wanted: str) -> bool:
     return False
 
 
-def pick_model_sequence(runtime: AiRuntime, installed: Iterable[str]) -> list[tuple[str, str]]:
+def host_memory_gb() -> float | None:
+    """RAM totale del sistema, senza aggiungere dipendenze al PC installato."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_uint32), ("memory_load", ctypes.c_uint32), ("total", ctypes.c_uint64), ("available", ctypes.c_uint64), ("page_total", ctypes.c_uint64), ("page_available", ctypes.c_uint64), ("virtual_total", ctypes.c_uint64), ("virtual_available", ctypes.c_uint64), ("extended", ctypes.c_uint64)]
+            status = MemoryStatus(); status.length = ctypes.sizeof(MemoryStatus)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return round(status.total / (1024 ** 3), 1)
+        if hasattr(os, "sysconf"):
+            return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1)
+    except (AttributeError, OSError, ValueError):
+        return None
+    return None
+
+
+def ai_hardware_profile(memory_gb: float | None = None) -> str:
+    memory = host_memory_gb() if memory_gb is None else memory_gb
+    if memory is None or memory < 12:
+        return "ufficio"
+    if memory < 20:
+        return "standard"
+    return "potente"
+
+
+def pick_model_sequence(runtime: AiRuntime, installed: Iterable[str], *, profile: str | None = None) -> list[tuple[str, str]]:
     """Restituisce [(layer, model), ...] nell'ordine di tentativo."""
     installed_list = list(installed)
     fast = runtime.chat_model_fast
     quality = runtime.chat_model_quality
+    alternative = runtime.chat_model_alternative
+    hardware = profile or ai_hardware_profile()
     fast_ok = is_model_present(installed_list, fast)
     quality_ok = is_model_present(installed_list, quality)
+    alternative_ok = is_model_present(installed_list, alternative)
+
+    # Sui PC da ufficio non carichiamo automaticamente il 7B alternativo.
+    if hardware == "ufficio":
+        if fast_ok:
+            return [("fast", fast)]
+        if alternative_ok:
+            return [("alternative", alternative)]
+        if quality_ok:
+            return [("quality", quality)]
+        return []
 
     if runtime.policy == "quality":
         if quality_ok:
             return [("quality", quality)]
+        if alternative_ok:
+            return [("alternative", alternative)]
         if fast_ok:
             return [("fast", fast)]
         return []
@@ -94,6 +138,8 @@ def pick_model_sequence(runtime: AiRuntime, installed: Iterable[str]) -> list[tu
             return [("fast", fast)]
         if quality_ok:
             return [("quality", quality)]
+        if alternative_ok:
+            return [("alternative", alternative)]
         return []
 
     # fast_first
@@ -104,6 +150,8 @@ def pick_model_sequence(runtime: AiRuntime, installed: Iterable[str]) -> list[tu
         seq.append(("quality", quality))
     elif quality_ok and not seq:
         seq.append(("quality", quality))
+    if alternative_ok and all(normalize_model_name(alternative) != normalize_model_name(model) for _, model in seq):
+        seq.append(("alternative", alternative))
     return seq
 
 
@@ -166,8 +214,8 @@ async def generate_with_layers(
         for index, (layer, model) in enumerate(sequence):
             has_more = index < len(sequence) - 1
             # Layer veloce: risposte corte; qualità: un po' più di budget.
-            predict = min(220, num_predict) if layer == "fast" else num_predict
-            ctx = min(2048, num_ctx) if layer == "fast" else num_ctx
+            predict = min(220, num_predict) if layer in {"fast", "alternative"} else num_predict
+            ctx = min(2048, num_ctx) if layer in {"fast", "alternative"} else num_ctx
             payload: dict[str, Any] = {
                 "model": model,
                 "prompt": prompt,
@@ -219,7 +267,10 @@ def layer_status_payload(installed: list[str], runtime: AiRuntime) -> dict[str, 
         "policy": runtime.policy,
         "fast_model": runtime.chat_model_fast,
         "quality_model": runtime.chat_model_quality,
+        "alternative_model": runtime.chat_model_alternative,
+        "hardware_profile": ai_hardware_profile(),
         "fast_available": is_model_present(installed, runtime.chat_model_fast),
         "quality_available": is_model_present(installed, runtime.chat_model_quality),
+        "alternative_available": is_model_present(installed, runtime.chat_model_alternative),
         "active_sequence": [{"layer": layer, "model": model} for layer, model in sequence],
     }

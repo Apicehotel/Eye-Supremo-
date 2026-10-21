@@ -335,6 +335,7 @@ def get_settings(db: Session = Depends(get_db)):
         "ollama_url": stored.get("ollama_url", settings.ollama_url),
         "chat_model_fast": stored.get("chat_model_fast", settings.chat_model_fast),
         "chat_model": stored.get("chat_model", settings.chat_model),
+        "chat_model_alternative": stored.get("chat_model_alternative", settings.chat_model_alternative),
         "embedding_model": stored.get("embedding_model", settings.embedding_model),
         "ai_layer_policy": stored.get("ai_layer_policy", settings.ai_layer_policy),
         "max_upload_mb": settings.max_upload_mb,
@@ -343,7 +344,7 @@ def get_settings(db: Session = Depends(get_db)):
 
 @router.put("/settings")
 def put_settings(payload: dict, db: Session = Depends(get_db)):
-    allowed = {"ollama_url", "chat_model_fast", "chat_model", "embedding_model", "ai_layer_policy", "theme"}
+    allowed = {"ollama_url", "chat_model_fast", "chat_model", "chat_model_alternative", "embedding_model", "ai_layer_policy", "theme"}
     for key, value in payload.items():
         if key in allowed:
             if key == "ai_layer_policy" and str(value) not in {"fast_first", "fast_only", "quality"}:

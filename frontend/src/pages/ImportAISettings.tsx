@@ -762,6 +762,16 @@ export function SettingsPage() {
                 />
               </label>
               <label>
+                Modello alternativo (Mistral)
+                <input
+                  value={data.chat_model_alternative || "mistral:7b"}
+                  onChange={(e) =>
+                    setData({ ...data, chat_model_alternative: e.target.value })
+                  }
+                  placeholder="mistral:7b"
+                />
+              </label>
+              <label>
                 Modello embedding
                 <input
                   value={data.embedding_model}
@@ -772,7 +782,7 @@ export function SettingsPage() {
               </label>
               {status?.layers && (
                 <p className="settings-message">
-                  Sequenza attiva:{" "}
+                  Profilo {status.layers.hardware_profile || "automatico"} · Sequenza attiva:{" "}
                   {(status.layers.active_sequence || [])
                     .map((x: { layer: string; model: string }) => `${x.layer}→${x.model}`)
                     .join(" · ") || "nessun modello trovato"}

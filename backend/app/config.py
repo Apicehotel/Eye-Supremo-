@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Layer mirror: fast = PC ufficio; chat_model = qualità (escalation)
     chat_model_fast: str = "llama3.2:3b"
     chat_model: str = "qwen3:8b"
+    chat_model_alternative: str = "mistral:7b"
     embedding_model: str = "qwen3-embedding:0.6b"
     ai_layer_policy: str = "fast_first"
     supabase_url: str | None = "https://ooqlfldcrnkudhgjnied.supabase.co"

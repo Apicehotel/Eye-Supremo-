@@ -11,6 +11,7 @@ def _runtime(policy: str = "fast_first") -> AiRuntime:
         ollama_url="http://127.0.0.1:11434",
         chat_model_fast="llama3.2:3b",
         chat_model_quality="qwen3:8b",
+        chat_model_alternative="mistral:7b",
         embedding_model="qwen3-embedding:0.6b",
         policy=policy,
     )
@@ -21,6 +22,18 @@ def test_is_model_present_matches_exact_and_prefix():
     assert is_model_present(installed, "llama3.2:3b")
     assert is_model_present(installed, "qwen3:8b")
     assert not is_model_present(installed, "mistral:7b")
+
+
+def test_hardware_profile_keeps_office_pcs_on_fast_model():
+    from app.model_layers import ai_hardware_profile
+    assert ai_hardware_profile(8) == "ufficio"
+    assert ai_hardware_profile(16) == "standard"
+    assert ai_hardware_profile(32) == "potente"
+
+
+def test_mistral_is_fallback_for_standard_pc():
+    seq = pick_model_sequence(_runtime("quality"), ["mistral:7b"], profile="standard")
+    assert seq == [("alternative", "mistral:7b")]
 
 
 def test_fast_first_sequence_prefers_office_mirror():
