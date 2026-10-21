@@ -145,11 +145,19 @@ def create_backup() -> Path:
     try:
         with tempfile.TemporaryDirectory(prefix="eye-backup-") as scratch:
             snapshot = Path(scratch) / source.name
-            with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(snapshot) as dst:
+            # Il context manager di sqlite3 gestisce commit/rollback, ma non
+            # chiude la connessione. Su Windows il file snapshot resterebbe
+            # quindi bloccato e TemporaryDirectory fallirebbe con WinError 32.
+            src = sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)
+            dst = sqlite3.connect(snapshot)
+            try:
                 src.backup(dst, pages=256)
                 result = dst.execute("PRAGMA integrity_check").fetchone()
                 if result != ("ok",):
                     raise RuntimeError("La verifica del database di backup non è riuscita")
+            finally:
+                dst.close()
+                src.close()
             with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.write(snapshot, source.name)
                 for path in data_dir.rglob("*"):
