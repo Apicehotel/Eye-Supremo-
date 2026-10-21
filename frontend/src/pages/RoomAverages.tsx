@@ -1,7 +1,7 @@
 import {Fragment, useMemo, useState} from 'react';
 import {BedDouble, Search, TriangleAlert} from 'lucide-react';
 import {Status} from '../components/UI';
-import {GIO_ROOM_GROUPS, roomBrand, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
+import {GIO_ROOM_GROUPS, roomBrand, roomType, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
 import {SOURCES, roomStatus, sourceKey, sourceOverview, type RoomAverage, type SourceKey} from '../lib/roomAverages';
 
 export type RoomReviewItem = {id: number | string; source: string | null; date: string; rating: number | null; author: string | null; text: string; scores: Record<string, number>; tags: {category: string; polarity: string}[]};
@@ -74,7 +74,7 @@ export default function RoomAverages({reviewsByRoom, rows, invalid, scopeLabel, 
           const list = (reviewsByRoom[key] || []).filter(x => openSource === 'all' || sourceKey(x.source) === openSource);
           return <Fragment key={key}>
             <tr className={`room-row-clickable${isOpen ? ' room-row-open' : ''}`} onClick={() => toggle(key, 'all')} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(key, 'all'); } }} aria-expanded={isOpen}>
-              <td><b>{isOpen ? '▾' : '▸'} {r.room}</b>{roomBrand(r.hotel_code, r.room) && <span className={`room-brand-tag room-brand-${roomBrand(r.hotel_code, r.room)!.toLowerCase()}`}>{roomBrand(r.hotel_code, r.room)}</span>}</td><td>{r.hotel}</td>
+              <td><b>{isOpen ? '▾' : '▸'} {r.room}</b>{roomBrand(r.hotel_code, r.room) && <span className={`room-brand-tag room-brand-${roomBrand(r.hotel_code, r.room)!.toLowerCase()}`}>{roomBrand(r.hotel_code, r.room)}</span>}{roomType(r.hotel_code, r.room) && <span className="room-type-tag" title={`Tipologia housekeeping: ${roomType(r.hotel_code, r.room)}`}>{roomType(r.hotel_code, r.room)}</span>}</td><td>{r.hotel}</td>
               {SOURCES.map(({key: sk}) => {
                 const entry = r.bySource[sk];
                 if (!entry) return <td key={sk} className="room-average-empty">—</td>;

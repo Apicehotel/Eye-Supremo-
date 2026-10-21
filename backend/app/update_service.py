@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from .config import settings
 
 GITHUB_LATEST_URL = "https://api.github.com/repos/Apicehotel/Eye-Supremo-/releases/latest"
-CURRENT_VERSION = "2.0.31"
+CURRENT_VERSION = "2.0.32"
 CHECK_TIMEOUT_S = 12
 DOWNLOAD_TIMEOUT_S = 600
 

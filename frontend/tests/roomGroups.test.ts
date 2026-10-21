@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {matchesRoomGroup, roomBrand, roomGroupKey} from '../src/lib/roomGroups.ts';
+import {matchesRoomGroup, roomBrand, roomGroupKey, roomType} from '../src/lib/roomGroups.ts';
 
 test('assegna le camere al piano giusto', () => {
   assert.equal(roomGroupKey('gio', '126'), 'cantine-1');
@@ -17,6 +17,16 @@ test('assegna il brand Jazz/Wine senza contaminare gli altri hotel', () => {
   assert.equal(roomGroupKey('gio', '9999'), 'other');
   assert.equal(roomGroupKey('gio', null), 'other');
   assert.equal(roomGroupKey('choco', '126'), 'other');
+});
+
+test('assegna il tag della tipologia camera dal file housekeeping', () => {
+  assert.equal(roomType('gio', '101'), 'Tripla Standard');
+  assert.equal(roomType('gio', '125'), 'Singola');
+  assert.equal(roomType('gio', '111'), 'Matrimoniale Superior');
+  assert.equal(roomType('gio', '1102'), 'Suite');
+  assert.equal(roomType('gio', '429'), 'Tripla Superior');
+  assert.equal(roomType('choco', '101'), null);
+  assert.equal(roomType('gio', '9999'), null);
 });
 
 test('filtro: tutte, Jazz, Wine, cantine e singolo piano', () => {

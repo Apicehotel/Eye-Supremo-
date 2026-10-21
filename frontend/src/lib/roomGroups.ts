@@ -24,6 +24,27 @@ export const GIO_JAZZ_ROOMS = [
   ...range(4401, 4412), '4414', '4415', '4416', '4418', '4419', '4420', '4421',
 ] as const;
 
+// Tipologie ricavate dal file housekeeping di Hotel Giò. La zona (Wine/Jazz)
+// resta separata dal tipo letto/capienza mostrato nella tabella.
+const GIO_ROOM_TYPES = [
+  {label: 'Matrimoniale Economy', rooms: ['121', '122', '217', '219', '220', '222', '319', '320', '418', '420', '421', '423']},
+  {label: 'Matrimoniale Standard', rooms: ['102', '103', '104', '105', '106', '107', '109', '113', '114', '117', '119', '124', '202', '203', '204', '205', '209', '210', '213', '214', '216', '223', '301', '302', '303', '304', '306', '309', '310', '311', '314', '317', '322', '401', '402', '404', '406', '408', '409', '410', '411', '414', '417', '424']},
+  {label: 'Matrimoniale Superior', rooms: ['111', '112', '126', '127', '128', '129', '130', '131', '225', '226', '229', '230', '232', '233', '324', '325', '328', '329', '330', '331', '332', '426', '427', '428', '430', '431', '432', '433', '434', '1101', '1103', '1104', '1105', '1106', '1107', '1108', '1109', '1110', '1111', '1112', '1114', '1115', '1116', '1118', '1119', '1121', '2201', '2203', '2204', '2205', '2206', '2207', '2208', '2209', '2210', '2211', '2212', '2214', '2215', '2216', '2218', '2219', '2221', '3301', '3303', '3304', '3305', '3306', '3307', '3308', '3309', '3310', '3311', '3314', '3315', '3318', '3319', '3321', '4401', '4403', '4404', '4405', '4406', '4407', '4408', '4409', '4410', '4411', '4414', '4415', '4416', '4418', '4419', '4421']},
+  {label: 'Quadrupla', rooms: ['116', '120', '123', '206', '318', '321']},
+  {label: 'Singola', rooms: ['125', '211', '218', '221', '224', '312', '323', '412', '419', '422', '425']},
+  {label: 'Suite', rooms: ['1102', '2202', '3302', '4402']},
+  {label: 'Tripla Standard', rooms: ['101', '108', '110', '115', '201', '207', '208', '212', '305', '307', '308', '313', '315', '403', '405', '407', '413', '415']},
+  {label: 'Tripla Superior', rooms: ['227', '228', '231', '326', '327', '429', '1120', '2220', '3312', '3316', '3320', '4412', '4420']},
+] as const;
+
+export type RoomType = typeof GIO_ROOM_TYPES[number]['label'];
+
+export function roomType(hotelCode: string, room: string | null | undefined): RoomType | null {
+  if (hotelCode !== 'gio') return null;
+  const clean = (room || '').trim();
+  return GIO_ROOM_TYPES.find(type => (type.rooms as readonly string[]).includes(clean))?.label ?? null;
+}
+
 export type RoomBrand = 'Jazz' | 'Wine';
 export type RoomGroupKey = 'all' | 'jazz' | 'wine' | 'cantine' | 'other' | typeof GIO_ROOM_GROUPS[number]['key'];
 
