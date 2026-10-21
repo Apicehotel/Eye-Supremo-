@@ -3,6 +3,7 @@
 Layer 0 — deterministico (SQLite): calcoli e retrieval, sempre.
 Layer 1 — fast mirror (es. llama3.2:3b): sintesi veloce di default.
 Layer 2 — quality (es. qwen3:8b): solo se il veloce fallisce o ha confidenza bassa.
+Layer 3 — alternative (es. mistral:7b): fallback sui PC standard quando la qualità non è disponibile.
 
 Policy:
   fast_first — default ufficio: prova il veloce, scala alla qualità se serve

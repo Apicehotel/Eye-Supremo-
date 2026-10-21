@@ -2,7 +2,7 @@
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.34
+AppVersion=2.0.35
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 AppPublisherURL=https://github.com/Apicehotel/Eye-Supremo-
@@ -12,7 +12,7 @@ AppMutex=EyeSupremoApplication
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.34
+OutputBaseFilename=EyeSupremo-Setup-2.0.35
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
@@ -49,7 +49,7 @@ Name: "desktopicon"; Description: "Crea un'icona sul desktop"; GroupDescription:
 Name: "localai"; Description: "Installa Ollama e i modelli IA locali"; GroupDescription: "Componenti opzionali:"; Flags: unchecked
 
 [Run]
-Filename: "{cmd}"; Parameters: "/c ""{app}\scarica-modelli-ia.bat"" /silent"; Description: "Installa Ollama e i modelli IA locali (Qwen + Llama)"; StatusMsg: "Installazione modelli IA in corso..."; Tasks: localai; Flags: waituntilterminated
+Filename: "{cmd}"; Parameters: "/c ""{app}\scarica-modelli-ia.bat"" /silent"; Description: "Installa Ollama e i modelli IA locali (Qwen + Llama + Mistral se compatibile)"; StatusMsg: "Installazione modelli IA in corso..."; Tasks: localai; Flags: waituntilterminated
 Filename: "{app}\EyeSupremo.exe"; Description: "Avvia Eye Supremo"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
