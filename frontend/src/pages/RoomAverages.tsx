@@ -1,7 +1,7 @@
 import {Fragment, useMemo, useState} from 'react';
 import {BedDouble, Search, TriangleAlert} from 'lucide-react';
 import {Status} from '../components/UI';
-import {GIO_ROOM_GROUPS, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
+import {GIO_ROOM_GROUPS, roomBrand, type FloorFilter, type RoomGroupKey} from '../lib/roomGroups';
 import {SOURCES, roomStatus, sourceKey, sourceOverview, type RoomAverage, type SourceKey} from '../lib/roomAverages';
 
 export type RoomReviewItem = {id: number | string; source: string | null; date: string; rating: number | null; author: string | null; text: string; scores: Record<string, number>; tags: {category: string; polarity: string}[]};
@@ -42,6 +42,8 @@ export default function RoomAverages({reviewsByRoom, rows, invalid, scopeLabel, 
         <label className="global-search review-search"><Search/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca camera o hotel…"/></label>
         <select className="review-control" aria-label="Filtra per zona camere" value={group} onChange={e => onGroup(e.target.value as RoomGroupKey)}>
           <option value="all">Tutte le camere</option>
+          <option value="jazz">Camere Jazz</option>
+          <option value="wine">Camere Wine</option>
           <option value="cantine">Tutte le Cantine Wine</option>
           {GIO_ROOM_GROUPS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
         </select>
@@ -72,7 +74,7 @@ export default function RoomAverages({reviewsByRoom, rows, invalid, scopeLabel, 
           const list = (reviewsByRoom[key] || []).filter(x => openSource === 'all' || sourceKey(x.source) === openSource);
           return <Fragment key={key}>
             <tr className={`room-row-clickable${isOpen ? ' room-row-open' : ''}`} onClick={() => toggle(key, 'all')} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(key, 'all'); } }} aria-expanded={isOpen}>
-              <td><b>{isOpen ? '▾' : '▸'} {r.room}</b></td><td>{r.hotel}</td>
+              <td><b>{isOpen ? '▾' : '▸'} {r.room}</b>{roomBrand(r.hotel_code, r.room) && <span className={`room-brand-tag room-brand-${roomBrand(r.hotel_code, r.room)!.toLowerCase()}`}>{roomBrand(r.hotel_code, r.room)}</span>}</td><td>{r.hotel}</td>
               {SOURCES.map(({key: sk}) => {
                 const entry = r.bySource[sk];
                 if (!entry) return <td key={sk} className="room-average-empty">—</td>;
@@ -82,7 +84,7 @@ export default function RoomAverages({reviewsByRoom, rows, invalid, scopeLabel, 
               <td>{r.lastDate}</td>
             </tr>
             {isOpen && <tr key={`${key}-d`} className="room-detail-row"><td colSpan={3 + SOURCES.length}>
-              <div className="room-detail-head"><b>Camera {r.room} · {openSource === 'all' ? 'tutte le fonti' : openSource}</b><span>{list.length} {list.length === 1 ? 'recensione' : 'recensioni'}</span>{openSource !== 'all' && <button className="secondary-btn" onClick={() => setOpenSource('all')}>Mostra tutte</button>}<button className="secondary-btn" onClick={() => setOpen(null)}>Chiudi</button></div>
+              <div className="room-detail-head"><b>Camera {r.room}{roomBrand(r.hotel_code, r.room) && ` · ${roomBrand(r.hotel_code, r.room)}`} · {openSource === 'all' ? 'tutte le fonti' : openSource}</b><span>{list.length} {list.length === 1 ? 'recensione' : 'recensioni'}</span>{openSource !== 'all' && <button className="secondary-btn" onClick={() => setOpenSource('all')}>Mostra tutte</button>}<button className="secondary-btn" onClick={() => setOpen(null)}>Chiudi</button></div>
               {list.length ? <div className="room-detail-list">{list.map(x => <article key={x.id}>
                 <header><b>{x.source || 'Fonte non indicata'}</b><span>{x.date}{x.rating !== null ? ` · ${String(x.rating).replace('.', ',')}${sourceKey(x.source) === 'Booking' ? '/10' : '/5'}` : ''}{x.author ? ` · ${x.author}` : ''}</span></header>
                 {Object.keys(x.scores).length > 0 && <div className="score-chips">{Object.entries(x.scores).map(([name, v]) => <span key={name}>{name} {String(v).replace('.', ',')}</span>)}</div>}

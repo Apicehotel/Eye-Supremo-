@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {matchesRoomGroup, roomGroupKey} from '../src/lib/roomGroups.ts';
+import {matchesRoomGroup, roomBrand, roomGroupKey} from '../src/lib/roomGroups.ts';
 
 test('assegna le camere al piano giusto', () => {
   assert.equal(roomGroupKey('gio', '126'), 'cantine-1');
@@ -10,14 +10,21 @@ test('assegna le camere al piano giusto', () => {
   assert.equal(roomGroupKey('gio', '434'), 'cantine-4');
 });
 
-test('camere fuori elenco, altri hotel e senza camera vanno in altre', () => {
-  assert.equal(roomGroupKey('gio', '4407'), 'other');
+test('assegna il brand Jazz/Wine senza contaminare gli altri hotel', () => {
+  assert.equal(roomBrand('gio', '4407'), 'Jazz');
+  assert.equal(roomBrand('gio', '126'), 'Wine');
+  assert.equal(roomBrand('choco', '101'), null);
+  assert.equal(roomGroupKey('gio', '9999'), 'other');
   assert.equal(roomGroupKey('gio', null), 'other');
   assert.equal(roomGroupKey('choco', '126'), 'other');
 });
 
-test('filtro: tutte, tutte le cantine, singolo piano', () => {
+test('filtro: tutte, Jazz, Wine, cantine e singolo piano', () => {
   assert.equal(matchesRoomGroup('all', 'gio', null), true);
+  assert.equal(matchesRoomGroup('jazz', 'gio', '4407'), true);
+  assert.equal(matchesRoomGroup('jazz', 'gio', '126'), false);
+  assert.equal(matchesRoomGroup('wine', 'gio', '126'), true);
+  assert.equal(matchesRoomGroup('wine', 'gio', '4407'), false);
   assert.equal(matchesRoomGroup('cantine', 'gio', '227'), true);
   assert.equal(matchesRoomGroup('cantine', 'gio', '4407'), false);
   assert.equal(matchesRoomGroup('cantine-3', 'gio', '326'), true);
