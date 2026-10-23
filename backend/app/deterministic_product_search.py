@@ -29,12 +29,13 @@ def product_score(query: str, description: str, *, code: str | None = None) -> f
     numeric = {t for t in qset if t.isdigit()}
     if numeric and not numeric.issubset(dset | code_tokens):
         return 0.0
-    if code_tokens and code_tokens.issubset(qset) and code_tokens:
+    if code_tokens and code_tokens.issubset(qset) and (not numeric or numeric.issubset(code_tokens)):
         return 1.0
     if not d:
         return 0.0
-    exact = len(qset & dset) / len(qset)
-    soft = sum(max((SequenceMatcher(None, t, x).ratio() for x in dset), default=0.0) for t in qset) / len(qset)
+    matched = qset & (dset | code_tokens)
+    exact = len(matched) / len(qset)
+    soft = sum(1.0 if t in code_tokens else max((SequenceMatcher(None, t, x).ratio() for x in dset), default=0.0) for t in qset) / len(qset)
     # Numeric identifiers and pack sizes must not be approximated.
     return round(0.8 * exact + 0.2 * soft, 4)
 
