@@ -21,3 +21,19 @@ def test_non_mutating_ranking():
     products = [{"description": "SMART BOX 1814"}]
     assert rank_products("SMART BOX 1814", products)[0]["match_score"] > 0.9
     assert "match_score" not in products[0]
+
+
+def test_code_matches_when_description_does_not_contain_code():
+    assert product_score("SMART BOX 1814", "SMART BOX detergente", code="1814") == 1
+
+
+def test_code_mismatch_is_rejected_even_when_description_similar():
+    assert product_score("SMART BOX 1814", "SMART BOX detergente 1815", code="1815") == 0
+
+
+def test_accent_insensitive():
+    assert product_score("caffe", "CAFFÈ") == 1
+
+
+def test_different_numeric_pack_size_is_not_fuzzy_matched():
+    assert product_score("ACQUA 500", "ACQUA 750") == 0
