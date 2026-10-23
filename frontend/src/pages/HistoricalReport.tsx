@@ -66,7 +66,7 @@ export function HistoricalReportPage({embedded=false}:{embedded?:boolean}){
  {data?.summary&&<div className="history-report" id="history-report-print">
    {visibleStatistics&&<section className="hist-summary screen-only">
     <article><span>Prezzo iniziale</span><strong>{euro(visibleStatistics!.initial_price)}</strong><small>{shortDate(visibleStatistics!.initial_date)}</small></article>
-    <article><span>Prezzo medio</span><strong>{euro(visibleStatistics!.average_price)}</strong><small>per {visibleStatistics!.unit}</small></article>
+    <article><span>Prezzo medio</span><strong>{euro(visibleStatistics!.average_price)}</strong><small>per {data.summary.unit}</small></article>
     <article><span>Miglior prezzo</span><strong>{euro(visibleStatistics!.best_price)}</strong><small>{shortDate(visibleStatistics!.best_date)}</small></article>
     <article><span>Ultimo prezzo</span><strong>{euro(visibleStatistics!.latest_price)}</strong><small>{shortDate(visibleStatistics!.latest_date)}</small></article>
     <article className="best"><span>Fornitore più conveniente</span><strong>{visibleStatistics!.best_supplier}</strong><small>media {euro(visibleStatistics!.best_supplier_average)} · {visibleStatistics!.best_supplier_observations} rilevazioni</small></article>
