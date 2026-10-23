@@ -267,3 +267,62 @@ def invoice_search_page(
         "engine": "fts5+rapidfuzz",
         "scope": "full-archive-unlimited",
     }
+
+
+def deterministic_invoice_search(
+    db: Session,
+    query: str,
+    role_name: str = "developer",
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Classical SQL candidate retrieval with deterministic ranking.
+
+    No FTS dependency and no AI. Role restrictions are checked before output.
+    Candidate rows are fetched in bounded batches to avoid unbounded memory.
+    """
+    from .deterministic_product_search import tokens as query_tokens, product_score
+    from sqlalchemy import func
+
+    needle, year = _clean_query(query)
+    terms = [t for t in query_tokens(needle) if len(t) >= 2]
+    if not terms:
+        return {"query": query, "results": [], "count": 0, "total": 0,
+                "offset": offset, "limit": limit, "engine": "sql-deterministic-v2"}
+
+    fields = (InvoiceRow.descrizione_originale, InvoiceRow.descrizione_normalizzata)
+    predicates = []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        predicates.append(or_(*[field.ilike(pattern, escape="\\") for field in fields]))
+    stmt = _base_stmt().where(or_(*predicates))
+    if year:
+        stmt = stmt.where(func.strftime("%Y", Invoice.data) == year)
+
+    # SQL narrows the archive before scoring. Stream rows instead of .all().
+    # No artificial top-N cut-off: totals remain accurate for the matched set.
+    stmt = stmt.order_by(Invoice.data.desc(), InvoiceRow.id.desc())
+    ranked = []
+    for row, inv, supplier in db.execute(stmt).yield_per(250):
+        if not row_visible_to_role(db, role_name, row, supplier):
+            continue
+        score = product_score(needle, row.descrizione_originale,
+                              code=row.product.codice if row.product else None)
+        if score < 0.55:
+            continue
+        item = _serialize_row(row, inv, supplier)
+        item["match_score"] = score
+        ranked.append(item)
+    ranked.sort(key=lambda item: (-item["match_score"], -item["row_id"]))
+    return {
+        "query": query,
+        "results": ranked[offset:offset + limit],
+        "count": len(ranked[offset:offset + limit]),
+        "total": len(ranked),
+        "offset": offset,
+        "limit": limit,
+        "engine": "sql-deterministic-v2",
+        "source": "invoice_rows",
+    }
