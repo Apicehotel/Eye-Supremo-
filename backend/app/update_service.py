@@ -52,7 +52,22 @@ def pick_installer_asset(assets: list[dict] | None) -> dict | None:
     return ranked[0][1]
 
 
-def latest_release() -> dict:
+SUPABASE_UPDATES_URL = 'https://ooqlfldcrnkudhgjnied.supabase.co/functions/v1/eye-update-download'
+
+def supabase_latest_release() -> dict:
+    request = Request(SUPABASE_UPDATES_URL, headers={'User-Agent': 'Eye-Supremo-Updater', 'Accept': 'application/json'})
+    with urlopen(request, timeout=CHECK_TIMEOUT_S) as response:
+        payload = json.loads(response.read().decode('utf-8'))
+    version = str(payload.get('version') or '')
+    url = str(payload.get('download_url') or '')
+    filename = str(payload.get('filename') or '')
+    if not version or not filename.startswith('EyeSupremo-Setup-') or not filename.endswith('.exe'):
+        raise ValueError('Manifest Supabase non valido')
+    if not url.startswith('https://ooqlfldcrnkudhgjnied.supabase.co/storage/v1/object/sign/eye-updates/'):
+        raise ValueError('URL Supabase non autorizzato')
+    return {'current_version': CURRENT_VERSION, 'latest_version': version, 'update_available': _version(version) > _version(CURRENT_VERSION), 'installer_available': True, 'release_url': SUPABASE_UPDATES_URL, 'published_at': payload.get('published_at'), 'asset_name': filename, 'download_url': url, 'source': 'supabase', 'sha256': payload.get('sha256'), 'message': None}
+
+def github_latest_release() -> dict:
     request = Request(
         GITHUB_LATEST_URL,
         headers={
@@ -92,6 +107,13 @@ def latest_release() -> dict:
     }
 
 
+def latest_release() -> dict:
+    try:
+        return supabase_latest_release()
+    except (HTTPError, URLError, ValueError, OSError, json.JSONDecodeError):
+        return github_latest_release()
+
+
 def download_latest_installer(release: dict | None = None) -> Path:
     info = release or latest_release()
     url = info.get("download_url")
@@ -125,6 +147,14 @@ def download_latest_installer(release: dict | None = None) -> Path:
         raise
     if not target.exists() or target.stat().st_size <= 0:
         raise RuntimeError("Download installer incompleto")
+    expected = str(info.get('sha256') or '').lower()
+    if expected:
+        import hashlib
+        with target.open('rb') as installer_file:
+            actual = hashlib.file_digest(installer_file, 'sha256').hexdigest()
+        if actual != expected:
+            target.unlink(missing_ok=True)
+            raise RuntimeError('Checksum SHA256 non valido: aggiornamento annullato')
     return target
 
 
