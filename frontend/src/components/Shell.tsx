@@ -2,6 +2,7 @@ import { ReactNode, useState } from "react";
 import {
   LayoutDashboard,
   FileText,
+  FolderOpen,
   Package,
   Users,
   Upload,
@@ -32,6 +33,7 @@ import { CacheChip } from "./CacheStatus";
 export type Page =
   | "dashboard"
   | "invoices"
+  | "invoice-files"
   | "products"
   | "suppliers"
   | "import"
@@ -49,6 +51,7 @@ export type Page =
 const nav: [Page, string, any][] = [
   ["dashboard", "Dashboard", LayoutDashboard],
   ["invoices", "Fatture", FileText],
+  ["invoice-files", "Archivio file", FolderOpen],
   ["products", "Prodotti", Package],
   ["suppliers", "Fornitori", Users],
   ["import", "Importa", Upload],
