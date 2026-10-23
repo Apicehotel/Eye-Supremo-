@@ -1,0 +1,82 @@
+name: Publish Eye Supremo to Supabase
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-windows:
+    if: ${{ startsWith(github.event.release.tag_name, 'v2.0.') && !github.event.release.prerelease }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Verify tag matches application version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          $expected = $tag.Substring(1)
+          $package = Get-Content frontend/package.json | ConvertFrom-Json
+          if ($package.version -ne $expected) { throw "Release tag and app version mismatch" }
+      - name: Run backend tests
+        shell: pwsh
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pytest backend/tests -q
+      - name: Build Windows package
+        shell: powershell
+        run: ./scripts/build_windows.ps1
+      - name: Smoke test packaged executable
+        shell: powershell
+        run: |
+          $env:EYE_SUPREMO_HEADLESS = '1'
+          $env:EYE_SUPREMO_NO_BROWSER = '1'
+          $proc = Start-Process -FilePath "$PWD\dist\EyeSupremo\EyeSupremo.exe" -PassThru
+          $ok = $false
+          try {
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 500
+              if ($proc.HasExited) { break }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { $ok = $true; break }
+              } catch {}
+            }
+            if (-not $ok) { throw 'Packaged executable smoke test failed' }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+      - name: Compile installer
+        shell: powershell
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\EyeSupremo.iss'
+      - name: Publish validated installer to Supabase
+        shell: pwsh
+        env:
+          SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+          SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+        run: |
+          if (-not $env:SUPABASE_S3_ACCESS_KEY_ID -or -not $env:SUPABASE_S3_SECRET_ACCESS_KEY) {
+            throw 'Missing Supabase S3 GitHub Actions secrets'
+          }
+          python -m pip install boto3
+          $expected = "${{ github.event.release.tag_name }}".Substring(1)
+          $installer = "release/EyeSupremo-Setup-$expected.exe"
+          if (-not (Test-Path $installer)) { throw 'Expected Windows installer not found' }
+          python scripts/publish_eye_update.py $installer
