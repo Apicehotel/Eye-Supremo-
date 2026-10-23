@@ -36,24 +36,12 @@ def live_search(
 def deterministic_search(
     q: str = Query(min_length=1, max_length=160),
     limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     x_eye_role: str = Header(default="developer", alias="X-Eye-Role"),
     db: Session = Depends(get_db),
 ):
-    """Opt-in classical product ranking over real, role-filtered invoice rows.
-
-    Existing /live remains unchanged until regression testing is complete.
-    """
-    from ..search_index import invoice_search
-    from ..deterministic_product_search import rank_products
+    """Search invoice rows through SQL and deterministic product matching."""
+    from ..search_index import deterministic_invoice_search
 
     role = role_from_header(x_eye_role)
-    candidates = invoice_search(db, q, role_name=role)
-    ranked = rank_products(q, candidates)
-    return {
-        "query": q,
-        "results": ranked[:limit],
-        "count": min(limit, len(ranked)),
-        "total": len(ranked),
-        "engine": "deterministic-v1",
-        "source": "invoice_rows",
-    }
+    return deterministic_invoice_search(db, q, role_name=role, limit=limit, offset=offset)
