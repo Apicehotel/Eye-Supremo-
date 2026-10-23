@@ -913,9 +913,9 @@ export function SystemPage() {
       const info = update || (await eyeApi<any>("/updates/check"));
       setUpdate(info);
       if (!info?.download_url && !info?.installer_available) {
-        throw new Error(info?.message || "Installer Windows non disponibile nella release GitHub");
+        throw new Error(info?.message || "Installer Windows non ancora disponibile nell'archivio aggiornamenti");
       }
-      // Download diretto da GitHub: evita timeout locale su file da ~60MB.
+      // Download diretto con collegamento temporaneo: Supabase Storage oppure fallback GitHub.
       if (!preferProxy && info?.download_url) {
         const link = document.createElement("a");
         link.href = info.download_url;
@@ -935,7 +935,7 @@ export function SystemPage() {
       });
       if (!response.ok) throw new Error(await response.text());
       const blob = await response.blob();
-      if (!blob.size) throw new Error("Download vuoto: riprova o usa il link GitHub");
+      if (!blob.size) throw new Error("Download vuoto: riprova con il collegamento diretto");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -987,10 +987,13 @@ export function SystemPage() {
     <section className="panel update-panel">
       <div className="panel-title">
         <h2>Aggiornamenti</h2>
+        <a href="https://supabase.com/dashboard/project/ooqlfldcrnkudhgjnied/storage/buckets/eye-updates" target="_blank" rel="noopener noreferrer" className="secondary-btn">Archivio Supabase</a>
         <button className="secondary-btn" onClick={checkForUpdate} disabled={updateBusy}>
           <RefreshCw size={15} /> Controlla
         </button>
       </div>
+      <p className="muted">Canale principale: Supabase Storage (eye-updates). GitHub resta disponibile come riserva.</p>
+      {update?.source && <p className="muted">Origine installer: {update.source === 'supabase' ? 'Supabase' : 'GitHub'}</p>}
       {updateError && <div className="error">{updateError}</div>}
       {update?.update_available ? (
         <>
