@@ -2,7 +2,7 @@ import re
 from rapidfuzz import fuzz
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session, selectinload
-from .models import Invoice, InvoiceRow, Supplier
+from .models import Invoice, InvoiceRow, Supplier, Product
 from .normalization import normalize_text
 from .eye_services import row_visible_to_role
 from .product_taxonomy import (
@@ -297,7 +297,8 @@ def deterministic_invoice_search(
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         predicates.append(or_(*[field.ilike(pattern, escape="\\") for field in fields]))
-    stmt = _base_stmt().where(or_(*predicates))
+    stmt = _base_stmt().outerjoin(Product, InvoiceRow.product_id == Product.id)
+    stmt = stmt.where(or_(*predicates, *[Product.codice.ilike(f"%{t}%") for t in terms]))
     if year:
         stmt = stmt.where(func.strftime("%Y", Invoice.data) == year)
 
