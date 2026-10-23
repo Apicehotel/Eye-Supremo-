@@ -6,6 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from ..ai_service import eye_ai_answer
@@ -23,7 +24,7 @@ from ..eye_services import (
     review_rankings, room_rating_timeline, seed_eye_supremo, classify_review_text,
 )
 from ..models import (
-    Alert, AppSetting, AuditLog, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, Product, Review, ReviewCategory,
+    Alert, AppSetting, AuditLog, ImportJob, EmergingTheme, Hotel, Invoice, InvoiceMeta, InvoiceRow, Product, Review, ReviewCategory,
     ReviewTag, Room, Supplier, CentralInvoiceCache, CentralReviewCache, RoleExclusion, UserProfile,
 )
 from ..normalization import normalize_text
@@ -706,6 +707,66 @@ def _local_invoice_ref(db: Session, invoice: Invoice) -> dict:
         } for r in rows],
     }
 
+
+
+def _original_xml_path(db: Session, invoice: Invoice) -> Path | None:
+    """Only serve imported XML files physically inside this PC's uploads directory."""
+    uploads = (settings.data_dir / "uploads").resolve()
+    jobs = db.scalars(
+        select(ImportJob).where(ImportJob.file_hash == invoice.hash_file)
+        .order_by(ImportJob.id.desc())
+    ).all() if invoice.hash_file else []
+    candidates = [Path(j.stored_path) for j in jobs if j.stored_path]
+    if invoice.file_originale:
+        candidates.append(uploads / Path(invoice.file_originale).name)
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(uploads) and resolved.is_file() and resolved.suffix.lower() == ".xml":
+            return resolved
+    return None
+
+
+@router.get("/invoice-files")
+async def invoice_files(q: str = "", limit: int = 100, offset: int = 0,
+                        role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Search locally indexed invoice originals; never calls AI or a cloud service."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    limit = min(200, max(1, limit))
+    offset = max(0, offset)
+    stmt = select(Invoice).options(selectinload(Invoice.supplier))
+    value = q.strip()
+    if value:
+        from sqlalchemy import or_
+        pattern = f"%{value.replace('%', r'\%').replace('_', r'\_')}%"
+        matching_ids = select(InvoiceRow.invoice_id).where(InvoiceRow.descrizione_originale.ilike(pattern, escape="\\"))
+        supplier_ids = select(Supplier.id).where(Supplier.ragione_sociale.ilike(pattern, escape="\\"))
+        stmt = stmt.where(or_(
+            Invoice.numero.ilike(pattern, escape="\\"),
+            Invoice.file_originale.ilike(pattern, escape="\\"),
+            Invoice.supplier_id.in_(supplier_ids), Invoice.id.in_(matching_ids),
+        ))
+    invoices = db.scalars(stmt.order_by(Invoice.data.desc(), Invoice.id.desc()).offset(offset).limit(limit)).all()
+    return {"items": [{
+        "id": inv.id, "number": inv.numero, "date": inv.data.isoformat(),
+        "supplier": inv.supplier.ragione_sociale if inv.supplier else "",
+        "filename": Path(inv.file_originale).name if inv.file_originale else "",
+        "available": _original_xml_path(db, inv) is not None,
+    } for inv in invoices], "limit": limit, "offset": offset}
+
+
+@router.get("/invoice-files/{invoice_id}/original")
+async def invoice_original_xml(invoice_id: int, role: str = Depends(current_role),
+                               db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    invoice = db.get(Invoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(404, "Fattura non trovata")
+    original = _original_xml_path(db, invoice)
+    if original is None:
+        raise HTTPException(404, "XML originale non disponibile su questo PC")
+    return FileResponse(original, media_type="application/xml", filename=original.name)
 
 @router.get("/invoice-ref/{ref}")
 async def invoice_reference(ref: str, role: str = Depends(current_role), db: Session = Depends(get_db)):
