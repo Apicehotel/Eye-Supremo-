@@ -22,17 +22,20 @@ def product_score(query: str, description: str, *, code: str | None = None) -> f
     """Return a score between 0 and 1. Codes match as whole tokens only."""
     q = tokens(query)
     d = tokens(description)
-    if not q or not d:
+    if not q:
         return 0.0
     qset, dset = set(q), set(d)
-    if code and set(tokens(code)) & qset:
+    code_tokens = set(tokens(code or ""))
+    numeric = {t for t in qset if t.isdigit()}
+    if numeric and not numeric.issubset(dset | code_tokens):
+        return 0.0
+    if code_tokens and code_tokens.issubset(qset) and code_tokens:
         return 1.0
+    if not d:
+        return 0.0
     exact = len(qset & dset) / len(qset)
     soft = sum(max((SequenceMatcher(None, t, x).ratio() for x in dset), default=0.0) for t in qset) / len(qset)
     # Numeric identifiers and pack sizes must not be approximated.
-    numeric = {t for t in qset if t.isdigit()}
-    if numeric and not numeric.issubset(dset):
-        return 0.0
     return round(0.8 * exact + 0.2 * soft, 4)
 
 
