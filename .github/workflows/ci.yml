@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, feat/eye-supremo-foundations]
   push:
-    branches: [main]
+    branches: [main, 'refactor/deterministic-product-search']
   workflow_dispatch:
 
 jobs:
