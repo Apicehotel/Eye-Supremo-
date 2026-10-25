@@ -1,0 +1,13 @@
+# Dipendenze per l'hosting online (container): come requirements.txt ma senza pywebview (solo desktop Windows) e senza i pacchetti di test.
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.38
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+httpx==0.28.1
+rapidfuzz==3.12.1
+pypdf==5.2.0
+pillow==11.1.0
+python-dateutil==2.9.0.post0
+extract-msg>=0.54.0,<0.60.0
+markitdown[outlook]>=0.1.0

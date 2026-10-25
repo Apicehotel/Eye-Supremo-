@@ -9,6 +9,7 @@ Eye Supremo è un applicativo **standalone, local-first e multi-hotel** per anal
 - **Supabase = ponte opzionale**: sync autenticata push/pull, separata dal funzionamento locale.
 - **Ollama/Qwen = IA locale**: interpreta dati già recuperati; non rilegge l'intero archivio a ogni domanda.
 - **Freeze main**: modifiche generate da agenti solo su branch + PR + revisione umana.
+- **Hosting online (opzionale)**: un solo container Docker (`Dockerfile`) con API + frontend e dati nel volume `/data`; vedi [docs/DEPLOY_ONLINE.md](docs/DEPLOY_ONLINE.md). Non sostituisce l'uso locale sul PC.
 
 La sezione **Feedback** consente di descrivere un problema, allegare uno screenshot, salvare la segnalazione localmente ed esportarla in JSON per inviarla allo sviluppatore.
 
