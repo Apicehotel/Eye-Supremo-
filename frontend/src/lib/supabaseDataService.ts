@@ -53,6 +53,50 @@ const withEnabled = async (r: Response) => (r.ok ? reply({ enabled: true, ...(aw
 const gateway = (body: object) => call("eye-central-gateway", { username: storedUser()?.username || "", pin: token(), ...body });
 const failure = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status === 200 ? 500 : r.status);
 
+// ---- Gestione utenti centrali (eye-identity: list_users / create_user / set_pin / set_active) ----
+// La UI lavora con id numerici: online li ricaviamo dall'ordine dell'elenco e li risolviamo in username.
+let userIds: string[] = [];
+const idOf = (username: string) => userIds.indexOf(username) + 1;
+const asUser = (u: any) => ({ id: idOf(u.username), username: u.username, display_name: u.display_name, role_name: u.role, active: u.active, pin_configured: true, central: true });
+
+async function listUsers() {
+  const r = await call("eye-identity", { action: "list_users" }, token());
+  if (r.status === 200) userIds = (r.data.users || []).map((u: any) => u.username);
+  return r;
+}
+
+async function usersRequest(route: string, method: string, options?: RequestInit): Promise<Response> {
+  const body = options?.body ? JSON.parse(String(options.body)) : {};
+  const fail = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status);
+  if (route === "/auth/users" && method === "GET") {
+    const r = await listUsers();
+    return r.status === 200 ? reply((r.data.users || []).map(asUser)) : fail(r);
+  }
+  if (route === "/auth/users" && method === "POST") {
+    const r = await call("eye-identity", { action: "create_user", username: body.username, display_name: body.display_name, pin: body.pin }, token());
+    if (r.status !== 200) return fail(r);
+    await listUsers();
+    return reply(asUser(r.data.user));
+  }
+  const m = route.match(/^\/auth\/users\/(\d+)(\/pin)?$/);
+  if (!m) return unavailable();
+  const id = Number(m[1]);
+  if (!userIds[id - 1]) await listUsers();
+  const username = userIds[id - 1];
+  if (!username) return reply({ detail: "Utente non trovato" }, 404);
+  const self = storedUser()?.username === username;
+  if (m[2] && method === "PUT") {
+    const r = await call("eye-identity", { action: "set_pin", username, pin: body.pin }, token());
+    return r.status === 200 ? reply({ ok: true, user_id: id, reauthenticate: self }) : fail(r);
+  }
+  if (!m[2] && method === "PATCH") {
+    if (self && body.active === false) return reply({ detail: "Non puoi disattivare l'utente attualmente collegato" }, 400);
+    const r = await call("eye-identity", { action: "set_active", username, active: body.active }, token());
+    return r.status === 200 ? reply({ id, active: r.data.user.active }) : fail(r);
+  }
+  return unavailable();
+}
+
 async function eyeRequest(path: string, options?: RequestInit): Promise<Response> {
   const url = new URL(path, "http://x");
   const route = url.pathname.replace(/\/+$/, "");
@@ -79,6 +123,7 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
     return reply({ ok: true });
   }
 
+  if (route === "/auth/users" || route.startsWith("/auth/users/")) return usersRequest(route, method, options);
   if (method !== "GET") return unavailable();
 
   const detail = (prefix: string) => (route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : "");

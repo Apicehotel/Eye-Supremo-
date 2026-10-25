@@ -32,7 +32,7 @@ import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
 import { supabaseOnline } from "../lib/supabaseDataService";
 // Versione online (sola lettura): solo le pagine servite da Supabase.
-const ONLINE_PAGES: Page[] = ["invoices", "products", "suppliers"];
+const ONLINE_PAGES: Page[] = ["invoices", "products", "suppliers", "users"];
 export type Page =
   | "dashboard"
   | "invoices"
@@ -50,7 +50,8 @@ export type Page =
   | "settings"
   | "system"
   | "feedback"
-  | "health";
+  | "health"
+  | "users";
 const nav: [Page, string, any][] = [
   ["dashboard", "Dashboard", LayoutDashboard],
   ["invoices", "Fatture", FileText],
@@ -68,6 +69,7 @@ const nav: [Page, string, any][] = [
   ["settings", "Impostazioni", Settings],
   ["health", "Salute dati", HeartPulse],
   ["system", "Sistema", MonitorCog],
+  ["users", "Utenti", Users],
   ["feedback", "Feedback", MessageSquareWarning],
 ];
 export function Shell({
@@ -100,7 +102,7 @@ export function Shell({
   const isFullAccess = Boolean(user);
   const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history" | "room-averages">("overview");
   const visibleNav = nav.filter(
-    ([id]) => (supabaseOnline ? ONLINE_PAGES.includes(id) : isFullAccess || !["settings", "system"].includes(id)),
+    ([id]) => (supabaseOnline ? ONLINE_PAGES.includes(id) : id !== "users" && (isFullAccess || !["settings", "system"].includes(id))),
   );
   async function logout() {
     try {

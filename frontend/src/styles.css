@@ -260,3 +260,4 @@ body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-ri
   table:has(td[data-label]) tr[style*="cursor"]:active{background:#f1f6f6}
 }
 @media(max-width:760px){table:has(td[data-label]) td:not([data-label]){text-align:left;justify-content:flex-start}}
+@media(max-width:760px){table:has(td[data-label]) td[data-label="PIN"]{flex-wrap:wrap}table:has(td[data-label]) td[data-label="PIN"] input{flex:1;min-width:0}.pin-state{flex-basis:100%;text-align:right}.user-admin-panel .form-actions{margin-bottom:14px}}
