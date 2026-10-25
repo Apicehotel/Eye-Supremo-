@@ -7,6 +7,9 @@ type AuthStatus = {configured: boolean; central: boolean};
 type IdentityStatus = {offline?: boolean; offline_until?: string | null};
 type LoginResponse = IdentityStatus & {session: string; user: {id: number; username: string; display_name: string; role_name: string}};
 
+type PwdCred = {id: string; password?: string};
+const credApi = () => (navigator as unknown as {credentials?: {get: (o: object) => Promise<PwdCred | null>; store: (c: unknown) => Promise<unknown>}}).credentials;
+
 async function publicJson<T>(path: string): Promise<T> {
   return publicApi<T>(`/${path}`);
 }
@@ -40,6 +43,13 @@ export function AuthGate({children}: {children: React.ReactNode}) {
         // Anche con identità centrale il profilo locale può essere preselezionato:
         // il campo resta modificabile e il PIN non viene mai memorizzato.
         if (options.length) setUsername(current => current || options[0].username);
+        if (!currentSession()) {
+          // Chrome: propone le credenziali salvate dal gestore password (senza finestra se ce n'e' una sola).
+          try {
+            const saved = await credApi()?.get({password: true, mediation: 'optional'});
+            if (active && saved?.password) {setUsername(saved.id); setPin(saved.password);}
+          } catch { /* gestore password non disponibile */ }
+        }
         if (currentSession()) {
           try {
             const me = await eyeApi<IdentityStatus>('/auth/me');
@@ -67,6 +77,10 @@ export function AuthGate({children}: {children: React.ReactNode}) {
       });
       const login = payload as LoginResponse;
       saveAuth(login);
+      try {
+        const Cred = (window as unknown as {PasswordCredential?: new (d: object) => unknown}).PasswordCredential;
+        if (Cred) await credApi()?.store(new Cred({id: username.trim(), password: pin, name: login.user.display_name}));
+      } catch { /* salvataggio facoltativo */ }
       try {localStorage.setItem('eye-supremo.last-username', username.trim());} catch { /* facoltativo */ }
       setIdentity(login);
       setAuthenticated(true);
