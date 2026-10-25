@@ -112,12 +112,12 @@ export function Suppliers() {
                 {visibleItems.map((s) => (
                   <Fragment key={s.id}>
                     <tr onClick={() => openDetail(s.id)} style={{ cursor: "pointer" }} title="Apri dettaglio fornitore">
-                      <td><b>{s.ragione_sociale}</b></td>
-                      <td>{s.partita_iva || "—"}</td>
-                      <td>{s.codice_fiscale || "—"}</td>
-                      <td>{s.invoice_count ?? "—"}</td>
-                      <td>{s.total_spent != null ? euro(Number(s.total_spent)) : "—"}</td>
-                      <td>{s.last_invoice_date ? shortDate(s.last_invoice_date) : "—"}</td>
+                      <td data-label="Fornitore"><b>{s.ragione_sociale}</b></td>
+                      <td data-label="Partita IVA">{s.partita_iva || "—"}</td>
+                      <td data-label="Codice fiscale">{s.codice_fiscale || "—"}</td>
+                      <td data-label="Fatture">{s.invoice_count ?? "—"}</td>
+                      <td data-label="Spesa fatture">{s.total_spent != null ? euro(Number(s.total_spent)) : "—"}</td>
+                      <td data-label="Ultima fattura">{s.last_invoice_date ? shortDate(s.last_invoice_date) : "—"}</td>
                     </tr>
                     {selectedSupplierId === s.id && detail && <tr>
                       <td colSpan={6}>

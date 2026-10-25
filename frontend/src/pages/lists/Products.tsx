@@ -138,12 +138,12 @@ export function Products() {
                       <b>{configs[p.nome_canonico]?.configured_name || p.nome_canonico}</b>
                       {p.user_group && <small className="recognized-tag" onClick={(e) => e.stopPropagation()}> {p.canonical_names.length} nomi uniti <button type="button" onClick={() => splitItem(p)}>separa</button></small>}
                     </td>
-                    <td>{p.categoria || "—"}</td>
-                    <td>{configs[p.nome_canonico]?.manufacturer || p.marca || p.recognition?.brand || "—"}{p.recognition?.category && <small className="recognized-tag" title="Riconosciuto da Open Food Facts">{[p.recognition.category, p.recognition.subcategory].filter(Boolean).join(" › ")}</small>}</td>
-                    <td>{p.purchases}</td>
-                    <td>{p.min_price ? euro(p.min_price) : "—"}</td>
-                    <td>{p.avg_price ? euro(p.avg_price) : "—"}</td>
-                    <td>{p.max_price ? euro(p.max_price) : "—"}</td>
+                    <td data-label="Categoria">{p.categoria || "—"}</td>
+                    <td data-label="Marca">{configs[p.nome_canonico]?.manufacturer || p.marca || p.recognition?.brand || "—"}{p.recognition?.category && <small className="recognized-tag" title="Riconosciuto da Open Food Facts">{[p.recognition.category, p.recognition.subcategory].filter(Boolean).join(" › ")}</small>}</td>
+                    <td data-label="Acquisti">{p.purchases}</td>
+                    <td data-label="Minimo">{p.min_price ? euro(p.min_price) : "—"}</td>
+                    <td data-label="Media">{p.avg_price ? euro(p.avg_price) : "—"}</td>
+                    <td data-label="Massimo">{p.max_price ? euro(p.max_price) : "—"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -31,6 +31,25 @@ async function call(fn: "eye-identity" | "eye-central-gateway", body: object, be
   }
 }
 
+// Funzioni RPC di Supabase (schema public): stesse usate dal backend locale, accettano il token di sessione.
+async function rpc(name: string, args: object): Promise<Response> {
+  try {
+    const res = await fetch(`${baseUrl}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: publishableKey },
+      body: JSON.stringify({ p_username: storedUser()?.username || "", p_pin: token(), ...args }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return reply(data);
+    const message = String(data?.message || "");
+    if (/credenziali/i.test(message)) return reply({ detail: "Sessione scaduta" }, 401);
+    return reply({ detail: message || "Operazione non riuscita" }, res.status);
+  } catch {
+    return reply({ detail: "Servizio non raggiungibile" }, 503);
+  }
+}
+const withEnabled = async (r: Response) => (r.ok ? reply({ enabled: true, ...(await r.json()) }) : r);
+
 const gateway = (body: object) => call("eye-central-gateway", { username: storedUser()?.username || "", pin: token(), ...body });
 const failure = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status === 200 ? 500 : r.status);
 
@@ -62,6 +81,32 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
 
   if (method !== "GET") return unavailable();
 
+  const detail = (prefix: string) => (route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : "");
+  const invoiceHash = detail("/central/invoices/") || detail("/invoice-ref/");
+  if (invoiceHash) {
+    const r = await rpc("eye_central_invoice_detail", { p_source_hash: invoiceHash });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.invoice_number ? reply({ ...data, source: "central" }) : reply({ detail: "Fattura non trovata" }, 404);
+  }
+  if (route === "/central/suppliers") {
+    return withEnabled(await rpc("eye_central_supplier_page", { p_query: url.searchParams.get("q") || "", p_limit: Number(url.searchParams.get("limit")) || 2000 }));
+  }
+  const supplierId = detail("/central/suppliers/");
+  if (supplierId) {
+    const r = await rpc("eye_central_supplier_detail", { p_supplier_id: supplierId });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.supplier ? reply(data) : reply({ detail: "Fornitore non trovato" }, 404);
+  }
+  const productName = detail("/central/products/");
+  if (productName) {
+    const r = await rpc("eye_central_product_detail", { p_canonical_name: productName });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.product ? reply(data) : reply({ detail: "Prodotto non trovato" }, 404);
+  }
+
   if (route === "/central/invoices") {
     const q = (url.searchParams.get("q") || "").trim();
     const limit = Number(url.searchParams.get("limit")) || 50;
@@ -79,11 +124,24 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
   return unavailable();
 }
 
+// Area "core": elenchi che il backend locale arricchisce con regole Python; online arriva il catalogo grezzo.
+async function coreRequest(path: string, options?: RequestInit): Promise<Response> {
+  const url = new URL(path, "http://x");
+  const route = url.pathname.replace(/\/+$/, "");
+  if ((options?.method || "GET").toUpperCase() !== "GET") return unavailable();
+  if (route === "/products") {
+    const r = await rpc("eye_central_product_page", { p_query: url.searchParams.get("q") || "", p_limit: Math.min(Number(url.searchParams.get("limit")) || 200, 500) });
+    return r.ok ? reply((await r.json()).items || []) : r;
+  }
+  if (route === "/product-config" || route === "/product-tracking") return reply({});
+  return unavailable();
+}
+
 export const supabaseDataService: DataService = {
   async request<T>(area: ApiArea, path: string, options?: RequestInit) {
     const response = await supabaseDataService.raw(area, path, options);
     if (!response.ok) throw response;
     return response.json() as Promise<T>;
   },
-  raw: async (area, path, options) => (area === "eye" ? eyeRequest(path, options) : unavailable()),
+  raw: async (area, path, options) => (area === "eye" ? eyeRequest(path, options) : coreRequest(path, options)),
 };

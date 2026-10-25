@@ -32,7 +32,7 @@ import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
 import { supabaseOnline } from "../lib/supabaseDataService";
 // Versione online (sola lettura): solo le pagine servite da Supabase.
-const ONLINE_PAGES: Page[] = ["invoices"];
+const ONLINE_PAGES: Page[] = ["invoices", "products", "suppliers"];
 export type Page =
   | "dashboard"
   | "invoices"
