@@ -1,0 +1,16 @@
+.git
+.github
+**/node_modules
+frontend/dist
+frontend/tests
+backend/tests
+backend/**/__pycache__
+data
+installer
+docs
+supabase
+*.bat
+*.spec
+.env
+.env.*
+!.env.example
