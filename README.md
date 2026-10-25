@@ -301,6 +301,14 @@ EYESUPREMO_SUPABASE_ACCESS_TOKEN=
 
 La replica centrale usa il token personale ottenuto dal login online; nessun PIN centrale condiviso viene usato nella nuova modalità. L'app continua a funzionare offline sui dati già replicati; il percorso legacy JWT resta opzionale per gli oggetti multi-hotel.
 
+## Versione online (sola lettura, Vercel + Supabase)
+
+Il frontend puo' essere pubblicato su **Vercel** (progetto `eye-supremo`, Root Directory `frontend`) e parlare direttamente con le Edge Functions Supabase `eye-identity` (login) e `eye-central-gateway` (dati), senza backend FastAPI. Si attiva con le variabili di build `VITE_EYE_BACKEND=supabase`, `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` (chiave pubblicabile, non segreta). Codice: `frontend/src/lib/supabaseDataService.ts`.
+
+- **Disponibile**: login con profilo centrale (sessione 12 h) e elenco/ricerca fatture.
+- **Non ancora online**: dettaglio fattura, fornitori, prodotti, recensioni, report storico. Restano sul PC insieme a import file, Ollama/IA e calcoli del backend Python (classifiche, medie camere).
+- **Sicurezza**: prima di esporre fatture reali, cambiare il PIN predefinito del profilo centrale (`EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` / `EYESUPREMO_CENTRAL_PIN_OVERRIDE`).
+
 ## Avvio sviluppo
 
 Requisiti: Python 3.11+ e Node 22.12+.

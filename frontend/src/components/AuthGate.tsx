@@ -47,7 +47,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
           } catch {clearAuth(); if (active) setAuthenticated(false);}
         }
       } catch {
-        if (active) setError('Backend locale non raggiungibile. Verifica che Eye Supremo sia avviato e riprova.');
+        if (active) setError('Servizio non raggiungibile. Verifica la connessione (o che Eye Supremo sia avviato sul PC) e riprova.');
       } finally {if (active) setLoading(false);}
     }
     void refresh();
