@@ -3,6 +3,8 @@
 // Implementa la stessa interfaccia `DataService` e restituisce oggetti Response, cosi'
 // le pagine esistenti non cambiano. Endpoint non coperti rispondono 404 "non disponibile online".
 import type { ApiArea, DataService } from "./dataService.ts";
+import { HOTELS } from "./reviewLexicon.ts";
+import * as reviewsEngine from "./reviewsEngine.ts";
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
 const baseUrl = String(env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
@@ -52,6 +54,47 @@ const withEnabled = async (r: Response) => (r.ok ? reply({ enabled: true, ...(aw
 
 const gateway = (body: object) => call("eye-central-gateway", { username: storedUser()?.username || "", pin: token(), ...body });
 const failure = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status === 200 ? 500 : r.status);
+
+// ---- Recensioni: scaricate una volta per sessione (poche migliaia) e calcolate nel browser ----
+let reviewsCache: Promise<reviewsEngine.Processed> | null = null;
+async function loadReviews(): Promise<reviewsEngine.Processed | Response> {
+  if (!reviewsCache) {
+    reviewsCache = (async () => {
+      const all: reviewsEngine.CentralReview[] = [];
+      for (let offset = 0; offset < 20000; offset += 500) {
+        const r = await rpc("eye_central_review_page", { p_offset: offset, p_limit: 500, p_since: null });
+        if (!r.ok) throw r;
+        const data = await r.json();
+        all.push(...(data.items || []));
+        if (!(data.items || []).length || all.length >= Number(data.total ?? 0)) break;
+      }
+      return reviewsEngine.process(all);
+    })();
+  }
+  try { return await reviewsCache; } catch (e) { reviewsCache = null; return e instanceof Response ? e : reply({ detail: "Recensioni non disponibili" }, 503); }
+}
+
+async function reviewsRequest(route: string, url: URL): Promise<Response> {
+  const loaded = await loadReviews();
+  if (loaded instanceof Response) return loaded;
+  const hotel = url.searchParams.get("hotel_code");
+  const scoped = reviewsEngine.forHotel(loaded.valid, hotel);
+  if (route === "/hotels") return reply(HOTELS.map((h, i) => ({ id: i + 1, code: h.code, name: h.name, active: true })));
+  if (route === "/reviews") {
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+    const items = q ? scoped.filter((r) => `${r.text} ${r.room || ""} ${r.hotel}`.toLowerCase().includes(q)) : scoped;
+    return reply(items);
+  }
+  if (route === "/reviews/stats") {
+    if (!hotel) return reply(loaded.stats);
+    const raw = reviewsEngine.forHotel(loaded.all, hotel);
+    const valid = reviewsEngine.forHotel(loaded.valid, hotel);
+    return reply({ raw: raw.length, expanded: raw.length, normalized: valid.length, valid: valid.length, excluded: raw.filter((r) => !r.valid).length, valid_votes: valid.filter((r) => r.rating !== null).length, without_room: valid.filter((r) => !r.room).length, without_rating: valid.filter((r) => r.rating === null).length, duplicates: raw.filter((r) => r.valid).length - valid.length });
+  }
+  if (route === "/rankings") return reply(reviewsEngine.rankings(scoped, Number(url.searchParams.get("limit")) || 5));
+  if (route === "/rankings/timeline") return reply({ rooms: reviewsEngine.roomTimeline(scoped) });
+  return unavailable();
+}
 
 // ---- Gestione utenti centrali (eye-identity: list_users / create_user / set_pin / set_active) ----
 // La UI lavora con id numerici: online li ricaviamo dall'ordine dell'elenco e li risolviamo in username.
@@ -125,6 +168,7 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
 
   if (route === "/auth/users" || route.startsWith("/auth/users/")) return usersRequest(route, method, options);
   if (method !== "GET") return unavailable();
+  if (["/hotels", "/reviews", "/reviews/stats", "/rankings", "/rankings/timeline"].includes(route)) return reviewsRequest(route, url);
 
   const detail = (prefix: string) => (route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : "");
   const invoiceHash = detail("/central/invoices/") || detail("/invoice-ref/");

@@ -118,7 +118,7 @@ export function Shell({
           <img className="brand-logo" src="/eye-supremo-logo.png" alt="Eye Supremo" />
           <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · {supabaseOnline ? "Online" : "Local first"}</span></div>
         </div>
-        {!supabaseOnline && <div className="area-switch" role="group" aria-label="Cambia area">
+        <div className="area-switch" role="group" aria-label="Cambia area">
           <button
             className={area === "invoices" ? "active" : ""}
             onClick={() => {
@@ -136,7 +136,7 @@ export function Shell({
             <MessageSquareText />
             Recensioni
           </button>
-        </div>}
+        </div>
         <div className="sidebar-top-tools" hidden={supabaseOnline}>
           <button className={pinned ? "sidebar-pin active" : "sidebar-pin"} aria-label={pinned ? "Sblocca menu" : "Fissa menu aperto"} title={pinned ? "Sblocca menu" : "Fissa menu aperto"} onClick={() => setPinned(!pinned)}>
             <Pin size={14} /> <span>{pinned ? "Menu fissato" : "Fissa menu"}</span>
