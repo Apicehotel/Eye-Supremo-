@@ -261,3 +261,30 @@ body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-ri
 }
 @media(max-width:760px){table:has(td[data-label]) td:not([data-label]){text-align:left;justify-content:flex-start}}
 @media(max-width:760px){table:has(td[data-label]) td[data-label="PIN"]{flex-wrap:wrap}table:has(td[data-label]) td[data-label="PIN"] input{flex:1;min-width:0}.pin-state{flex-basis:100%;text-align:right}.user-admin-panel .form-actions{margin-bottom:14px}}
+
+/* ---- Barra di navigazione inferiore (versione online su smartphone) ---- */
+.bottom-bar{display:none}
+@media(max-width:760px){
+  .app-shell.online .mobile-menu{display:none}
+  .app-shell.online main{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+  .app-shell.online .sidebar{z-index:30;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  .app-shell.online .scrim{z-index:25}
+  .bottom-bar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;background:#fff;border-top:1px solid var(--border);box-shadow:0 -4px 16px #12203310;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+  .bottom-bar button{flex:1;min-width:0;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:0;background:transparent;color:#707a8d;border-radius:12px;font-size:11px;font-weight:600;padding:4px 2px}
+  .bottom-bar button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bottom-bar button.active{color:var(--accent,#ed531f);background:#fff0ea}
+  .page-header{margin-bottom:12px}
+  .page-header h1{margin:0}
+  .panel,.list-panel{border-radius:14px}
+}
+@media(max-width:360px){.bottom-bar button{font-size:10px}}
+@media(max-width:760px){
+  .app-shell.online .page-header>div>p{display:none}
+  .app-shell.online .page-size-control{display:none!important}
+  .app-shell.online .area-switch,.app-shell.online .sidebar-top-tools{display:none}
+  .app-shell.online .pagination.header-pagination{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .app-shell.online .pagination.header-pagination span{grid-column:1/-1;text-align:center}
+  .app-shell.online .list-panel{padding:12px}
+  .app-shell.online .list-header-controls,.app-shell.online .list-header-main{width:100%}
+  .app-shell.online .search-box{position:sticky;top:8px;z-index:5;box-shadow:0 4px 14px #1220331a}
+}

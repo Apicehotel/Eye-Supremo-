@@ -93,7 +93,7 @@ export function Invoices() {
           <SearchBox
             value={q}
             onChange={setQ}
-            placeholder="Cerca prodotto, fornitore, fattura…"
+            placeholder="Cerca fattura, fornitore…"
           />
           <label className="page-size-control" style={{ height: 42, display: "flex", alignItems: "center", gap: 7, border: "1px solid #ccd5e0", background: "#fff", borderRadius: 8, padding: "0 10px", color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
             <span>Mostra</span>
@@ -296,7 +296,7 @@ export function Invoices() {
           </section>}
           <section className="panel list-panel">
             <div className="panel-title">
-              <h2>Archivio centrale Supabase</h2>
+              <h2>{supabaseOnline ? "Ultime fatture" : "Archivio centrale Supabase"}</h2>
               {remote?.count != null && (
                 <Status tone="ok">
                   {remote.total ?? remote.count} fatture totali · pagina {page + 1}

@@ -112,7 +112,7 @@ export function Shell({
     window.dispatchEvent(new Event("eye-auth-expired"));
   }
   return (
-    <div className="app-shell">
+    <div className={`app-shell${supabaseOnline ? " online" : ""}`}>
       <aside className={`sidebar ${open ? "open" : ""} ${pinned ? "pinned" : ""}`}>
         <div className="brand">
           <img className="brand-logo" src="/eye-supremo-logo.png" alt="Eye Supremo" />
@@ -325,6 +325,22 @@ export function Shell({
           aria-label="Chiudi menu"
           onClick={() => setOpen(false)}
         />
+      )}
+      {supabaseOnline && (
+        <nav className="bottom-bar" aria-label="Navigazione principale">
+          {([
+            ["Fatture", FileText, area === "invoices" && page === "invoices", () => { setArea("invoices"); setPage("invoices"); setOpen(false); }],
+            ["Fornitori", Users, area === "invoices" && page === "suppliers", () => { setArea("invoices"); setPage("suppliers"); setOpen(false); }],
+            ["Prodotti", Package, area === "invoices" && page === "products", () => { setArea("invoices"); setPage("products"); setOpen(false); }],
+            ["Recensioni", MessageSquareText, area === "reviews", () => { setArea("reviews"); setOpen(false); }],
+            ["Menu", open ? X : Menu, open, () => setOpen(!open)],
+          ] as [string, any, boolean, () => void][]).map(([label, Icon, active, go]) => (
+            <button key={label} className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={go}>
+              <Icon size={22} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
       )}
       <main>
         <button className="mobile-menu" onClick={() => setOpen(!open)}>
