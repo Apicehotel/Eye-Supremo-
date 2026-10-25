@@ -231,3 +231,25 @@ body{background:#f7f8fa;color:var(--ink)}
 .room-row-clickable{cursor:pointer}.room-row-clickable:hover,.room-row-open{background:#f3f8fb}.room-average-source:hover{background:#e6f2f7}.room-detail-row>td{background:#f8fafc;padding:12px 16px!important;white-space:normal!important}.room-detail-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:10px}.room-detail-head span{color:var(--muted);font-size:12px;margin-right:auto}.room-detail-list{display:grid;gap:8px;max-height:420px;overflow:auto}.room-detail-list article{background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px 12px}.room-detail-list header{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.room-detail-list header span{color:var(--muted);font-size:11px}.room-detail-list p{margin:6px 0 0;font-size:12px;line-height:1.45;color:#3b485b;white-space:pre-wrap}
 .room-brand-tag{display:inline-flex;align-items:center;margin-left:7px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;vertical-align:middle}.room-brand-wine{background:#fff0d5;color:#925b00}.room-brand-jazz{background:#e9e1ff;color:#5e3a9d}
 .ranking-grid + .room-defects-panel{display:none}
+
+/* ---- Smartphone ---- */
+html{-webkit-text-size-adjust:100%}
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+@media(max-width:760px){
+  .app-shell main{padding:14px 12px calc(28px + env(safe-area-inset-bottom));padding-top:calc(14px + env(safe-area-inset-top))}
+  input,select,textarea{font-size:16px!important}
+  button{min-height:40px}
+  .mobile-menu{min-height:44px;min-width:44px}
+  .sidebar{width:min(84vw,300px)}
+  .page-header h1{font-size:22px}
+  .pagination{flex-wrap:wrap;gap:8px}
+  .pagination button{flex:1}
+  /* Tabelle con etichette -> schede */
+  table:has(td[data-label]){display:block;min-width:0!important;width:100%}
+  table:has(td[data-label]) thead{display:none}
+  table:has(td[data-label]) tbody{display:block}
+  table:has(td[data-label]) tr{display:block;border:1px solid var(--border);border-radius:10px;background:#fff;margin:0 0 10px;padding:10px 12px}
+  table:has(td[data-label]) td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:4px 0;border:0;text-align:right;word-break:break-word}
+  table:has(td[data-label]) td::before{content:attr(data-label);color:var(--muted);font-size:12px;text-align:left;flex:none}
+  table:has(td[data-label]) td:first-child{font-size:15px}
+}

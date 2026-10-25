@@ -41,8 +41,8 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
 
   if (route === "/auth/status") return reply({ configured: true, bootstrap_required: false, central: true });
   if (route === "/auth/login-options") return reply([
-    { username: "supremo", display_name: "Supremo (supremo)", role_name: "supremo" },
-    { username: "sviluppatore", display_name: "Sviluppatore (developer)", role_name: "developer" },
+    { username: "supremo", display_name: "Supremo", role_name: "supremo" },
+    { username: "sviluppatore", display_name: "Sviluppatore", role_name: "developer" },
   ]);
   if (route === "/auth/login" && method === "POST") {
     const body = JSON.parse(String(options?.body || "{}"));

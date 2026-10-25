@@ -30,6 +30,9 @@ import {
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
+import { supabaseOnline } from "../lib/supabaseDataService";
+// Versione online (sola lettura): solo le pagine servite da Supabase.
+const ONLINE_PAGES: Page[] = ["invoices"];
 export type Page =
   | "dashboard"
   | "invoices"
@@ -97,7 +100,7 @@ export function Shell({
   const isFullAccess = Boolean(user);
   const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history" | "room-averages">("overview");
   const visibleNav = nav.filter(
-    ([id]) => isFullAccess || !["settings", "system"].includes(id),
+    ([id]) => (supabaseOnline ? ONLINE_PAGES.includes(id) : isFullAccess || !["settings", "system"].includes(id)),
   );
   async function logout() {
     try {
@@ -111,9 +114,9 @@ export function Shell({
       <aside className={`sidebar ${open ? "open" : ""} ${pinned ? "pinned" : ""}`}>
         <div className="brand">
           <img className="brand-logo" src="/eye-supremo-logo.png" alt="Eye Supremo" />
-          <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · Local first</span></div>
+          <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · {supabaseOnline ? "Online" : "Local first"}</span></div>
         </div>
-        <div className="area-switch" role="group" aria-label="Cambia area">
+        {!supabaseOnline && <div className="area-switch" role="group" aria-label="Cambia area">
           <button
             className={area === "invoices" ? "active" : ""}
             onClick={() => {
@@ -131,8 +134,8 @@ export function Shell({
             <MessageSquareText />
             Recensioni
           </button>
-        </div>
-        <div className="sidebar-top-tools">
+        </div>}
+        <div className="sidebar-top-tools" hidden={supabaseOnline}>
           <button className={pinned ? "sidebar-pin active" : "sidebar-pin"} aria-label={pinned ? "Sblocca menu" : "Fissa menu aperto"} title={pinned ? "Sblocca menu" : "Fissa menu aperto"} onClick={() => setPinned(!pinned)}>
             <Pin size={14} /> <span>{pinned ? "Menu fissato" : "Fissa menu"}</span>
           </button>
@@ -308,10 +311,10 @@ export function Shell({
             Esci
           </button>
         </div>
-        <CacheChip />
+        {!supabaseOnline && <CacheChip />}
         <div className="local-status">
           <i />
-          Archivio locale<small>Windows · Offline first · Sync opzionale</small>
+          {supabaseOnline ? <>Archivio centrale<small>Online · sola lettura</small></> : <>Archivio locale<small>Windows · Offline first · Sync opzionale</small></>}
         </div>
       </aside>
       {open && (
