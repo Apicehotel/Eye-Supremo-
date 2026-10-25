@@ -42,7 +42,11 @@ export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> =>
 
 export const publicApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
   const response = await activeDataService.raw('eye', `/auth${path}`, options);
-  if (!response.ok) throw new Error('Servizio di accesso non disponibile. Riprova.');
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    if ([401, 422, 429].includes(response.status) && typeof body?.detail === 'string') throw new Error(body.detail);
+    throw new Error('Servizio di accesso non disponibile. Riprova.');
+  }
   return response.json() as Promise<T>;
 };
 
