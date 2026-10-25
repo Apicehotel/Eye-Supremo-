@@ -307,6 +307,7 @@ Il frontend puo' essere pubblicato su **Vercel** (progetto `eye-supremo`, Root D
 
 - **Disponibile**: login con profilo centrale (sessione 12 h) e elenco/ricerca fatture.
 - **Non ancora online**: dettaglio fattura, fornitori, prodotti, recensioni, report storico. Restano sul PC insieme a import file, Ollama/IA e calcoli del backend Python (classifiche, medie camere).
+- **Login**: i campi hanno `name`/`autocomplete` standard, quindi il gestore password del browser/telefono compila nome utente e PIN; l'ultimo nome utente usato viene ricordato sul dispositivo (mai il PIN).
 - **Sicurezza**: prima di esporre fatture reali, cambiare il PIN predefinito del profilo centrale (`EYESUPREMO_CENTRAL_USERNAME_OVERRIDE` / `EYESUPREMO_CENTRAL_PIN_OVERRIDE`).
 
 ## Avvio sviluppo

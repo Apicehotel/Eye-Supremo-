@@ -16,7 +16,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
   const [status, setStatus] = useState<AuthStatus>();
   const [users, setUsers] = useState<LoginUser[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {try {return localStorage.getItem('eye-supremo.last-username') || '';} catch {return '';}});
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,6 +67,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
       });
       const login = payload as LoginResponse;
       saveAuth(login);
+      try {localStorage.setItem('eye-supremo.last-username', username.trim());} catch { /* facoltativo */ }
       setIdentity(login);
       setAuthenticated(true);
       setPin('');
@@ -87,9 +88,9 @@ export function AuthGate({children}: {children: React.ReactNode}) {
   return <div className="auth-screen"><form className="auth-card" onSubmit={submit}>
     <LockKeyhole size={38}/><h1>Accedi a Eye Supremo</h1>
     <p>{status?.central ? 'Usa il tuo profilo centrale. Il primo accesso su questo PC richiede Internet.' : 'Seleziona il profilo e inserisci il tuo PIN.'}</p>
-    {status?.central ? <label>Nome utente<input autoComplete="username" value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)}/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist></label>
+    {status?.central ? <label>Nome utente<input id="eye-username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)}/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist></label>
       : <label>Profilo utente<select value={username} onChange={e => setUsername(e.target.value)}>{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</select></label>}
-    <label>PIN<input autoComplete="current-password" inputMode="numeric" pattern="[0-9]*" minLength={6} maxLength={12} type="password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="Il tuo PIN"/></label>
+    <label>PIN<input id="eye-pin" name="password" autoComplete="current-password" inputMode="numeric" pattern="[0-9]*" minLength={6} maxLength={12} type="password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="Il tuo PIN"/></label>
     {error && <div className="error" role="alert">{error}</div>}
     <button className="primary-btn" disabled={!status || !username.trim() || pin.length < 6 || busy}>{busy ? 'Verifica…' : status?.configured ? 'Accedi' : 'Attiva profilo'}</button>
     {!status && <button type="button" className="secondary-btn" onClick={() => setRetry(value => value + 1)}>Riprova</button>}
