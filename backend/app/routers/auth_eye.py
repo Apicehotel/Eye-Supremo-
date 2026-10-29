@@ -46,7 +46,8 @@ def bootstrap(payload: dict, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     token = create_session(db, user)
-    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
+    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name,
+            "role_name": user.role_name, "can_view_reviews": user.can_view_reviews}}
 
 
 @router.post("/login")
@@ -57,7 +58,8 @@ async def login(payload: dict, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(401, "Utente o PIN non validi")
     token = create_session(db, user)
-    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name}}
+    return {"session": token, "user": {"id": user.id, "username": user.username, "display_name": user.display_name,
+            "role_name": user.role_name, "can_view_reviews": user.can_view_reviews}}
 
 
 @router.get("/me")
@@ -68,6 +70,7 @@ async def me(x_eye_session: str | None = Header(default=None, alias="X-Eye-Sessi
     identity = await central_identity.identity_for_request(db, x_eye_session, user) if central_identity.enabled() else None
     account = db.get(CentralAccount, user.id) if central_identity.enabled() else None
     return {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name, "can_manage_config": user.can_manage_config,
+            "can_view_reviews": user.can_view_reviews,
             "central": central_identity.enabled(), "offline": central_identity.enabled() and identity is None,
             "offline_until": account.offline_until.isoformat(timespec="seconds") + "Z" if account and account.offline_until else None}
 
@@ -110,8 +113,23 @@ async def set_user_status(user_id: int, payload: dict, x_eye_session: str | None
     target = db.get(UserProfile, user_id)
     if not target:
         raise HTTPException(404, "Utente non trovato")
-    if not isinstance(payload.get("active"), bool):
-        raise HTTPException(422, "Stato utente non valido")
+    changing_active = isinstance(payload.get("active"), bool)
+    changing_reviews = isinstance(payload.get("can_view_reviews"), bool)
+    if changing_active == changing_reviews:
+        raise HTTPException(422, "Indica un solo permesso da modificare")
+    if changing_reviews:
+        can_view_reviews = payload["can_view_reviews"]
+        if central_identity.enabled():
+            result = await central_identity.manage(
+                db, x_eye_session, "set_reviews_access",
+                username=target.username, can_view_reviews=can_view_reviews,
+            )
+            central_identity.mirror(db, result["user"])
+        else:
+            target.can_view_reviews = can_view_reviews
+            db.query(LocalSession).filter(LocalSession.user_id == target.id).delete(synchronize_session=False)
+            db.commit()
+        return {"id": target.id, "can_view_reviews": target.can_view_reviews}
     active = payload["active"]
     if not active and target.id == actor.id:
         raise HTTPException(400, "Non puoi disattivare l'utente attualmente collegato")
@@ -139,11 +157,14 @@ async def auth_users(x_eye_session: str | None = Header(default=None, alias="X-E
         for item in result["users"]:
             user = central_identity.mirror(db, item)
             users.append({"id": user.id, "username": user.username, "display_name": user.display_name,
-                          "role_name": user.role_name, "active": user.active, "pin_configured": True, "central": True})
+                          "role_name": user.role_name, "active": user.active, "pin_configured": True,
+                          "can_view_reviews": user.can_view_reviews, "central": True})
         return users
     credentials = set(db.scalars(select(LocalCredential.user_id)).all())
     users = db.scalars(select(UserProfile).order_by(UserProfile.id)).all()
-    return [{"id": u.id, "username": u.username, "display_name": u.display_name, "role_name": u.role_name, "pin_configured": u.id in credentials, "active": u.active} for u in users]
+    return [{"id": u.id, "username": u.username, "display_name": u.display_name, "role_name": u.role_name,
+             "pin_configured": u.id in credentials, "active": u.active,
+             "can_view_reviews": u.can_view_reviews} for u in users]
 
 
 @router.post("/users")
@@ -156,6 +177,9 @@ async def create_user(payload: dict, x_eye_session: str | None = Header(default=
     # Livelli utente eliminati: ogni nuovo profilo ha gli stessi permessi operativi.
     role_name = "supremo"
     pin = str(payload.get("pin") or DEFAULT_PIN)
+    can_view_reviews = payload.get("can_view_reviews", True)
+    if not isinstance(can_view_reviews, bool):
+        raise HTTPException(422, "Permesso recensioni non valido")
     if not username or not username.replace("_", "").replace("-", "").isalnum() or len(username) > 80:
         raise HTTPException(422, "Username non valido")
     if not display_name or len(display_name) > 160:
@@ -166,15 +190,22 @@ async def create_user(payload: dict, x_eye_session: str | None = Header(default=
         if central_identity.enabled():
             if "pin" not in payload or not payload["pin"]:
                 raise HTTPException(422, "Scegli un PIN iniziale personale")
-            result = await central_identity.manage(db, x_eye_session, "create_user", username=username, display_name=display_name, pin=pin)
+            result = await central_identity.manage(
+                db, x_eye_session, "create_user", username=username,
+                display_name=display_name, pin=pin, can_view_reviews=can_view_reviews,
+            )
             user = central_identity.mirror(db, result["user"])
             return {"id": user.id, "username": user.username, "display_name": user.display_name,
-                    "role_name": user.role_name, "pin_configured": True, "active": user.active, "central": True}
-        user = UserProfile(username=username, display_name=display_name, role_name=role_name, can_manage_config=True)
+                    "role_name": user.role_name, "pin_configured": True, "active": user.active,
+                    "can_view_reviews": user.can_view_reviews, "central": True}
+        user = UserProfile(username=username, display_name=display_name, role_name=role_name,
+                           can_manage_config=True, can_view_reviews=can_view_reviews)
         db.add(user); db.flush(); set_pin(db, user, pin)
     except ValueError as exc:
         db.rollback(); raise HTTPException(422, str(exc))
     except IntegrityError:
         db.rollback(); raise HTTPException(409, "Username già esistente")
-    return {"id": user.id, "username": user.username, "display_name": user.display_name, "role_name": user.role_name, "pin_configured": True, "active": True}
+    return {"id": user.id, "username": user.username, "display_name": user.display_name,
+            "role_name": user.role_name, "pin_configured": True, "active": True,
+            "can_view_reviews": user.can_view_reviews}
 

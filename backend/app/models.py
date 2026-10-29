@@ -134,6 +134,7 @@ class UserProfile(Base):
     home_hotel_id: Mapped[int | None] = mapped_column(ForeignKey("hotels.id"), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     can_manage_config: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_view_reviews: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     home_hotel: Mapped[Hotel | None] = relationship()
 

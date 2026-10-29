@@ -783,6 +783,48 @@ def test_created_user_has_same_access_level_after_login(client):
     assert protected.status_code == 200
 
 
+def test_user_without_review_permission_cannot_read_reviews(client, db):
+    developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
+    created = client.post(
+        "/api/eye/auth/users",
+        json={"username":"fatture","display_name":"Solo Fatture","pin":"654321","can_view_reviews":False},
+        headers={"X-Eye-Session":developer_token},
+    )
+    assert created.status_code == 200
+    assert created.json()["can_view_reviews"] is False
+
+    login = client.post("/api/eye/auth/login", json={"username":"fatture","pin":"654321"})
+    assert login.status_code == 200
+    assert login.json()["user"]["can_view_reviews"] is False
+    token = login.json()["session"]
+
+    assert client.get("/api/eye/reviews", headers={"X-Eye-Session":token}).status_code == 403
+    assert client.get("/api/eye/rankings", headers={"X-Eye-Session":token}).status_code == 403
+    assert client.post(
+        "/api/eye/agents/ask",
+        json={"question":"Riassumi le recensioni", "area":"reviews"},
+        headers={"X-Eye-Session":token},
+    ).status_code == 403
+    assert client.get("/api/eye/hotels", headers={"X-Eye-Session":token}).status_code == 200
+
+
+def test_review_permission_can_be_changed_per_user(client):
+    token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
+    created = client.post(
+        "/api/eye/auth/users",
+        json={"username":"reception2","display_name":"Reception 2","pin":"654321"},
+        headers={"X-Eye-Session":token},
+    ).json()
+    assert created["can_view_reviews"] is True
+    changed = client.patch(
+        f"/api/eye/auth/users/{created['id']}",
+        json={"can_view_reviews":False},
+        headers={"X-Eye-Session":token},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["can_view_reviews"] is False
+
+
 def test_create_user_defaults_to_standard_pin(client):
     developer_token = client.post("/api/eye/auth/login", json={"username":"sviluppatore", "pin":"000000"}).json()["session"]
     created = client.post("/api/eye/auth/users", json={"username":"reception","display_name":"Reception"}, headers={"X-Eye-Session":developer_token})

@@ -15,6 +15,7 @@ from .config import settings
 MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("2026-10-20-01", "CREATE INDEX IF NOT EXISTS ix_audit_log_created_at ON audit_log(created_at)"),
     ("2026-10-20-02", "CREATE INDEX IF NOT EXISTS ix_sync_state_status ON sync_state(status)"),
+    ("2026-10-29-01", "ALTER TABLE user_profiles ADD COLUMN can_view_reviews BOOLEAN NOT NULL DEFAULT 1"),
 )
 
 
@@ -73,7 +74,15 @@ def run_safe_migrations(engine: Engine) -> dict[str, object]:
             "(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
         for version, sql in pending:
-            connection.execute(sql)
+            # Base.metadata.create_all runs before these migrations. On a new
+            # installation the ORM may therefore have already created a newly
+            # introduced column, while existing databases still need ALTER.
+            if version == "2026-10-29-01":
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(user_profiles)")}
+                if columns and "can_view_reviews" not in columns:
+                    connection.execute(sql)
+            else:
+                connection.execute(sql)
             connection.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, datetime.now().isoformat(timespec="seconds")),
