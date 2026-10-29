@@ -11,20 +11,20 @@ def check_update():
     try:
         return latest_release()
     except Exception as exc:
-        raise HTTPException(502, f"Impossibile controllare le release GitHub: {exc}") from exc
+        raise HTTPException(502, f"Impossibile controllare gli aggiornamenti Supabase: {exc}") from exc
 
 
 @router.get("/download")
 def download_update(mode: str = Query("redirect", pattern="^(redirect|proxy)$")):
     """Scarica l'installer.
 
-    - redirect (default): apre il download GitHub diretto (affidabile su PC ufficio)
+    - redirect (default): apre il download Supabase firmato
     - proxy: scarica via backend locale (fallback)
     """
     try:
         release = latest_release()
     except Exception as exc:
-        raise HTTPException(502, f"Impossibile controllare le release GitHub: {exc}") from exc
+        raise HTTPException(502, f"Impossibile controllare gli aggiornamenti Supabase: {exc}") from exc
 
     if not release.get("download_url"):
         raise HTTPException(404, release.get("message") or "Installer Windows non disponibile")
