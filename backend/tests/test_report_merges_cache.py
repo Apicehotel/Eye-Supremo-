@@ -1,4 +1,5 @@
 import json
+import asyncio
 from datetime import date
 from decimal import Decimal
 
@@ -88,4 +89,22 @@ def test_pieces_per_pack_makes_price_per_piece(db, monkeypatch):
     monkeypatch.setattr(reports_eye, "historical_product_report", lambda db, q: {})
     res = asyncio.run(reports_eye.history_product("crostata marmellata", db))
     p = res["suppliers"][0]["points"][0]
-    assert p["price"] == 2.0 and p["unit"] == "pz" and p["quantity"] == 12
+    assert p["price"] == 2.0 and p["unit"] == "pz" and p["quantity"] == 2
+
+
+def test_pieces_per_pack_applies_to_unlinked_invoice_description(db):
+    from app.routers import api
+
+    supplier = Supplier(ragione_sociale="Fornitore bicchieri")
+    db.add(supplier); db.flush()
+    description = "Bicchiere in carta 240 ml imbustato sing pz 1000"
+    inv = Invoice(supplier_id=supplier.id, numero="B-1", data=date(2026, 4, 3), imponibile=Decimal("72.05"), iva=0, totale=Decimal("72.05"))
+    db.add(inv); db.flush()
+    db.add(InvoiceRow(invoice_id=inv.id, descrizione_originale=description, descrizione_normalizzata=description.lower(), quantita=1, unita_normalizzata="pz", prezzo_unitario=Decimal("72.05"), totale_riga=Decimal("72.05")))
+    db.commit()
+
+    api.update_product_config({"source_name": description, "configured_name": "Bicchiere carta 240 ml", "pieces_per_pack": 1000, "normalization_unit": "pz"}, db)
+    report = historical_product_report(db, "bicchiere carta")
+    point = report["suppliers"][0]["points"][0]
+    assert point["price"] == 0.0721
+    assert point["unit"] == "pz"

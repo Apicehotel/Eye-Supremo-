@@ -11,6 +11,13 @@ type SupplierBlock={supplier_id:number|string;supplier:string;unit:string;manufa
 type Report={query:string;sources?:{local:number;cache:number;suppliers:number;cache_complete:boolean|null};summary:any;suppliers:SupplierBlock[];dates:string[];units:string[];comparison_note:string;matches?:Array<{canonical_name:string;canonical_names?:string[];brand?:string|null;purchases?:number;avg_price?:number|null;recognition?:{category?:string|null;subcategory?:string|null;brand?:string|null}}>};
 
 type Suggestion={nome_canonico:string;canonical_names?:string[];purchases?:number;avg_price?:number|null;marca?:string|null;unita_base?:string|null};
+function isUsefulHistoryMatch(name:string, query:string){
+ const text=name.toLocaleLowerCase('it-IT').normalize('NFD').replace(/[\u0300-\u036f]/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
+ const needle=query.toLocaleLowerCase('it-IT').trim();
+ if(needle!=='carta')return true;
+ const excluded=/(^| )(capocollo|salame|prosciutto|formaggio|carne|coppa|mortadella|pancetta|salsiccia|bresaola|pirottini|bicchiere|bicchieri|borsa|borse|busta|buste|sacchetto|sacchetti|shopper|sacco|sacchi|coppetta|tovaglietta|tovagliette|confezione|imballo|imballaggio|involucro|contenitore|contenitori)( |$)/;
+ return !excluded.test(text) && /(^| )(carta|cartaceo|cartacea)( |$)/.test(text);
+}
 function HistorySearch({value,onChange,onSearch,disabled,closeSignal,placeholder}:{value:string;onChange:(value:string)=>void;onSearch:(value?:string)=>void;disabled?:boolean;closeSignal?:number;placeholder:string}){
  const [items,setItems]=useState<Suggestion[]>([]),[open,setOpen]=useState(false),[completionEnabled,setCompletionEnabled]=useState(true);
  useEffect(()=>{if(disabled){setOpen(false);setCompletionEnabled(false)}},[disabled]);
@@ -56,7 +63,7 @@ export function HistoricalReportPage({embedded=false}:{embedded?:boolean}){
   return {initial_price:all[0].price,initial_date:all[0].date,average_price:all.reduce((sum,p)=>sum+p.price,0)/all.length,best_price:best.price,best_date:best.date,latest_price:all[all.length-1].price,latest_date:all[all.length-1].date,best_supplier:perSupplier[0].name,best_supplier_average:perSupplier[0].average,best_supplier_observations:perSupplier[0].count};
  },[filteredSuppliers]);
  const sortedSuppliers=useMemo(()=>[...filteredSuppliers].map(s=>{const prices=s.points.map(p=>p.price),chronological=[...s.points].sort((a,b)=>a.date.localeCompare(b.date));return {...s,initial_price:chronological[0].price,latest_price:chronological[chronological.length-1].price,average_price:prices.reduce((a,b)=>a+b,0)/prices.length,best_price:Math.min(...prices)};}).sort((a,b)=>supplierSort==='name'?a.supplier.localeCompare(b.supplier):supplierSort==='best'?a.best_price-b.best_price:supplierSort==='latest'?a.latest_price-b.latest_price:a.average_price-b.average_price),[filteredSuppliers,supplierSort]);
- const sortedMatches=useMemo(()=>data?.matches?[...data.matches].sort((a,b)=>{const pieces=(x:string)=>Number((x.match(/(?:^|\s)(\d+)\s*(?:pz|pezzi|pcs|bott)/i)||[])[1]||0);return pieces(a.canonical_name)-pieces(b.canonical_name)||a.canonical_name.localeCompare(b.canonical_name)}):[],[data]);
+ const sortedMatches=useMemo(()=>data?.matches?[...data.matches].filter(item=>isUsefulHistoryMatch(item.canonical_name,submitted)).sort((a,b)=>{const pieces=(x:string)=>Number((x.match(/(?:^|\s)(\d+)\s*(?:pz|pezzi|pcs|bott)/i)||[])[1]||0);return pieces(a.canonical_name)-pieces(b.canonical_name)||a.canonical_name.localeCompare(b.canonical_name)}):[],[data,submitted]);
  // Keep one continuous matrix: suppliers are listed once and all purchases
  // remain horizontally scrollable instead of being duplicated on each page.
  const pages=useMemo(()=>visibleDates.length?[dateDirection==='asc'?visibleDates:[...visibleDates].reverse()]:[],[visibleDates,dateDirection]);

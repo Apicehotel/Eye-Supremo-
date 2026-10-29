@@ -164,26 +164,9 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
         rows = payload.get("rows") or []
         invoice_date = record.invoice_date.isoformat() if record.invoice_date else None
         if not rows:
-            hay = f"{record.search_text} {record.supplier_name} {record.invoice_number}".lower()
-            words = re.findall(r"[a-zàèéìòù0-9]+", hay)
-            score = _row_matches(hay, words)
-            if score is None or score < 70:
-                continue
-            ranked.append((float(score), {
-                "id": record.source_hash,
-                "source_hash": record.source_hash,
-                "source_filename": payload.get("source_filename"),
-                "invoice_number": record.invoice_number,
-                "invoice_date": invoice_date,
-                "supplier_name": record.supplier_name,
-                "original_description": record.supplier_name,
-                "normalized_description": record.supplier_name,
-                "quantity": 1,
-                "unit_price": float(record.total or 0),
-                "line_total": float(record.total or 0),
-                "analysis_status": "product",
-                "local_cache": True,
-            }))
+            # Un'intestazione fattura senza righe non è un prodotto. Prima il
+            # nome del fornitore veniva esposto come descrizione prodotto,
+            # creando falsi risultati come ``CARTAA`` per "carta".
             continue
         for idx, row in enumerate(rows):
             desc = str(row.get("original_description") or row.get("normalized_description") or "")

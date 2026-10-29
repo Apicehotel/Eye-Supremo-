@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from decimal import Decimal
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from .models import Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
+from .models import AppSetting, Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import extract_content, normalize_text, normalize_unit
-from .product_taxonomy import extract_product_query, product_stem, row_matches_product_query, search_terms
+from .product_taxonomy import extract_product_query, is_product_search_match, product_stem, row_matches_product_query, search_terms
 
 
 def _money(value) -> float:
@@ -29,10 +30,21 @@ def _point_order(point: dict) -> tuple:
     return (point["date"], isinstance(row_id, str), row_id if isinstance(row_id, int) else 0, str(row_id))
 
 
+def _config_for_row(configs: dict, row: InvoiceRow, product: Product | None) -> dict | None:
+    if product and product.nome_canonico and isinstance(configs.get(product.nome_canonico), dict):
+        return configs[product.nome_canonico]
+    # Le righe importate possono non avere ancora product_id. In quel caso la
+    # configurazione salvata dalla schermata Prodotti deve comunque applicarsi
+    # alla descrizione originale della fattura.
+    description = normalize_text(row.descrizione_originale or row.descrizione_normalizzata or "")
+    for source_name, config in configs.items():
+        if isinstance(config, dict) and normalize_text(str(source_name)) == description:
+            return config
+    return None
+
+
 def _cache_complete(db: Session) -> bool | None:
     """True/False se la cache fatture è stata verificata completa/incompleta, None se non verificata."""
-    from .models import AppSetting
-
     row = db.get(AppSetting, "central_sync_complete")
     value = row.value if row else None
     return True if value == "yes" else False if value == "no" else None
@@ -52,6 +64,8 @@ def _cache_observations(db: Session, product_query: str) -> list[dict]:
             continue
         description = str(item.get("original_description") or item.get("normalized_description") or "")
         if not row_matches_product_query(description, product_query):
+            continue
+        if not is_product_search_match(description, product_query):
             continue
         raw = item.get("normalized_price")
         price = _money(raw if raw not in (None, 0, "0") else item.get("unit_price"))
@@ -112,6 +126,14 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         stmt = stmt.limit(limit)
     records = db.execute(stmt).all()
 
+    config_row = db.get(AppSetting, "product_configs")
+    try:
+        product_configs = json.loads(config_row.value) if config_row and config_row.value else {}
+    except (TypeError, ValueError):
+        product_configs = {}
+    if not isinstance(product_configs, dict):
+        product_configs = {}
+
     grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
     supplier_names: dict[str, str] = {}
     supplier_ids: dict[str, object] = {}
@@ -121,9 +143,17 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
     local_invoice_keys: set[tuple[str, str, str]] = set()
     local_points = 0
     for row, invoice, supplier, product, _policy in records:
+        description = row.descrizione_originale or row.descrizione_normalizzata or ""
+        if not is_product_search_match(description, product_query):
+            continue
         unit = (row.unita_normalizzata or row.unita_originale or (product.unita_base if product else None) or "pz").lower()
         raw_price = row.prezzo_normalizzato if row.prezzo_normalizzato not in (None, Decimal("0")) else row.prezzo_unitario
         price = _money(raw_price)
+        product_config = _config_for_row(product_configs, row, product)
+        pieces = float(product_config.get("pieces_per_pack") or 0) if isinstance(product_config, dict) else 0
+        if pieces > 0 and row.prezzo_unitario:
+            price = _money(Decimal(str(row.prezzo_unitario)) / Decimal(str(pieces)))
+            unit = str(product_config.get("normalization_unit") or "pz")
         if price <= 0:
             continue
         manufacturer = (product.marca if product and product.marca else "").strip()
