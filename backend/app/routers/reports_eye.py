@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -77,7 +78,59 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     page = {"items": annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))}
     product = next((x for x in page["items"] if x.get("nome_canonico")), None)
     if not product:
-        return result
+        # Il catalogo centrale può essere vuoto/non aggiornato mentre le righe
+        # delle fatture sono già disponibili nella vista di ricerca centrale.
+        # In quel caso non lasciare il report vuoto: usa le righe reali,
+        # mantenendo il filtro prodotto per evitare fornitori o descrizioni
+        # casualmente simili.
+        remote = await central_invoice_search(q, 500)
+        rows = []
+        for item in remote.get("items", []):
+            description = str(item.get("original_description") or item.get("normalized_description") or "").strip()
+            if not description or not is_product_search_match(description, q):
+                continue
+            if item.get("analysis_status") not in (None, "product"):
+                continue
+            raw_price = item.get("normalized_price") or item.get("unit_price")
+            if raw_price is None or float(raw_price) <= 0:
+                continue
+            rows.append({**item, "description": description, "price": float(raw_price)})
+        if not rows:
+            return result
+        variants = defaultdict(list)
+        for row in rows:
+            variants[normalize_text(row["description"])].append(row)
+        if len(variants) > 1:
+            return {
+                **result,
+                "matches": [
+                    {"canonical_name": values[0]["description"], "canonical_names": [values[0]["description"]], "purchases": len(values), "avg_price": round(sum(x["price"] for x in values) / len(values), 4)}
+                    for values in sorted(variants.values(), key=lambda values: values[0]["description"].lower())
+                ],
+            }
+        product_name = next(iter(variants.values()))[0]["description"]
+        grouped = defaultdict(list)
+        pieces, configured_unit = _normalization_config(db, [product_name])
+        for row in sorted(rows, key=lambda x: (str(x.get("invoice_date") or ""), str(x.get("supplier_name") or ""))):
+            unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
+            price = row["price"]
+            if pieces and row.get("unit_price"):
+                price = float(row["unit_price"]) / pieces
+                unit = configured_unit
+            supplier = str(row.get("supplier_name") or "Fornitore")
+            points = grouped[(supplier, unit)]
+            previous = points[-1]["price"] if points else None
+            delta = None if previous is None else round(price - previous, 4)
+            points.append({"date": str(row.get("invoice_date") or "")[:10], "price": round(price, 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("id"), "description": product_name})
+        blocks = []
+        for (supplier, unit), points in grouped.items():
+            prices = [point["price"] for point in points]
+            best = min(points, key=lambda point: point["price"])
+            blocks.append({"supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": None, "initial_price": prices[0], "initial_date": points[0]["date"], "average_price": round(sum(prices) / len(prices), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": prices[-1], "latest_date": points[-1]["date"], "observations": len(points), "points": points})
+        all_points = [point for block in blocks for point in block["points"]]
+        best = min(all_points, key=lambda point: point["price"])
+        best_supplier = min(blocks, key=lambda block: block["average_price"])
+        return {"query": q, "summary": {"product": product_name, "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda point: point["date"])["price"], "initial_date": min(point["date"] for point in all_points), "average_price": round(sum(point["price"] for point in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda point: point["date"])["price"], "latest_date": max(all_points, key=lambda point: point["date"])["date"], "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({point["date"] for point in all_points}), "units": sorted({point["unit"] for point in all_points}), "comparison_note": "Storico costruito direttamente sulle righe fattura centrali."}
     matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price"), "recognition": x.get("recognition")} for x in page.get("items", []) if x.get("nome_canonico")]
     # A one-word family search (for example "acqua") is intentionally not
     # collapsed into the first catalogue row: let the user choose the exact
@@ -103,11 +156,10 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
         unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
         price = row.get("normalized_price") or row.get("unit_price")
         if pieces and row.get("unit_price"):
-            # Pezzi per confezione indicati a mano: prezzo e quantità si esprimono in pezzi.
+            # Pezzi per confezione indicati a mano: normalizza solo il prezzo;
+            # la quantità resta quella riportata in fattura.
             price = float(row["unit_price"]) / pieces
             unit = "pz"
-            if row.get("quantity") is not None:
-                row = {**row, "quantity": round(float(row["quantity"]) * pieces, 2)}
         if price is None or float(price) <= 0:
             continue
         key = (str(row.get("supplier_name") or "Fornitore"), unit)

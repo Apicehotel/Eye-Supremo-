@@ -19,3 +19,12 @@ def test_unrelated_products_are_still_rejected():
 def test_carta_igienica_alias_does_not_crash():
     assert is_product_search_match("CARTA IGIENICA 10 ROTOLI", "carta igienica")
     assert not is_product_search_match("DETERSIVO PIATTI", "carta igienica")
+
+
+def test_carta_search_excludes_packaging_context_and_keeps_paper_products():
+    assert is_product_search_match("Carta A4 160 gr", "carta")
+    assert is_product_search_match("Carta da forno 60 x 40", "carta")
+    assert is_product_search_match("Carta vetrata resinata", "carta")
+    assert not is_product_search_match("Capocollo in carta stagionato", "carta")
+    assert not is_product_search_match("Bicchiere in carta 240 ml", "carta")
+    assert not is_product_search_match("Acqua Acqua 1 l", "carta")

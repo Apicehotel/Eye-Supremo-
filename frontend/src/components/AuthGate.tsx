@@ -65,8 +65,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
     return () => {active = false; window.removeEventListener('eye-auth-expired', expired);};
   }, [retry]);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function login(pinValue: string) {
     if (busy) return;
     setBusy(true);
     setError('');
@@ -74,20 +73,31 @@ export function AuthGate({children}: {children: React.ReactNode}) {
       const endpoint = status?.configured ? 'login' : 'bootstrap';
       const payload = await publicApi<LoginResponse>(`/${endpoint}`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username: username.trim(), pin}),
+        body: JSON.stringify({username: username.trim(), pin: pinValue}),
       });
-      const login = payload as LoginResponse;
-      saveAuth(login);
+      const result = payload as LoginResponse;
+      saveAuth(result);
       try {
         const Cred = (window as unknown as {PasswordCredential?: new (d: object) => unknown}).PasswordCredential;
-        if (Cred) await credApi()?.store(new Cred({id: username.trim(), password: pin, name: login.user.display_name}));
+        if (Cred) await credApi()?.store(new Cred({id: username.trim(), password: pinValue, name: result.user.display_name}));
       } catch { /* salvataggio facoltativo */ }
       try {localStorage.setItem('eye-supremo.last-username', username.trim());} catch { /* facoltativo */ }
-      setIdentity(login);
+      setIdentity(result);
       setAuthenticated(true);
       setPin('');
     } catch (err) {setError(err instanceof Error ? err.message : 'Accesso non riuscito');}
     finally {setBusy(false);}
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (pin.length === 6) void login(pin);
+  }
+
+  function changePin(value: string) {
+    const next = value.replace(/\D/g, '').slice(0, 6);
+    setPin(next);
+    if (next.length === 6 && username.trim() && status && !busy) void login(next);
   }
 
   async function reconnect() {
@@ -102,10 +112,9 @@ export function AuthGate({children}: {children: React.ReactNode}) {
   </>;
   return <div className="auth-screen"><form className="auth-card" onSubmit={submit}>
     <LockKeyhole size={38}/><h1>Accedi a Eye Supremo</h1>
-    <p>{status?.central ? (supabaseOnline ? 'Usa il tuo profilo centrale.' : 'Usa il tuo profilo centrale. Il primo accesso su questo PC richiede Internet.') : 'Seleziona il profilo e inserisci il tuo PIN.'}</p>
-    {status?.central ? <label>Nome utente<input id="eye-username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)}/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist>{users.length > 0 && <span className="login-roles">{users.map(user => <button type="button" key={user.username} className={`secondary-btn${username === user.username ? ' active' : ''}`} onClick={() => setUsername(user.username)}>{user.display_name}</button>)}</span>}</label>
-      : <label>Profilo utente<select value={username} onChange={e => setUsername(e.target.value)}>{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</select></label>}
-    <label>PIN<input id="eye-pin" name="password" autoComplete="current-password" inputMode="numeric" pattern="[0-9]*" minLength={6} maxLength={12} type="password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="Il tuo PIN"/></label>
+    <p>{status?.central ? (supabaseOnline ? 'Scrivi il nome utente e inserisci il PIN di 6 cifre.' : 'Scrivi il nome utente e inserisci il PIN di 6 cifre. Il primo accesso su questo PC richiede Internet.') : 'Scrivi il profilo utente e inserisci il PIN di 6 cifre.'}</p>
+    <label>Nome utente<input id="eye-username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)} placeholder="Inizia a scrivere…"/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist></label>
+    <label>PIN a 6 cifre<input id="eye-pin" name="password" autoComplete="current-password" inputMode="numeric" pattern="[0-9]{6}" minLength={6} maxLength={6} type="password" value={pin} onChange={e => changePin(e.target.value)} placeholder="••••••"/></label>
     {error && <div className="error" role="alert">{error}</div>}
     <button className="primary-btn" disabled={!status || !username.trim() || pin.length < 6 || busy}>{busy ? 'Verifica…' : status?.configured ? 'Accedi' : 'Attiva profilo'}</button>
     {!status && <button type="button" className="secondary-btn" onClick={() => setRetry(value => value + 1)}>Riprova</button>}

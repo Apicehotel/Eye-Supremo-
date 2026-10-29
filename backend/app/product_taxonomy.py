@@ -365,6 +365,23 @@ def is_family_match(description: str, query: str) -> bool:
         if tokens & {"tullia", "lilia", "leviss", "benedetto", "levissima", "sanbenedetto"}:
             return True
         return ("acqua" in tokens or "acque" in tokens) and bool(tokens & beverage)
+    if normalized == "carta":
+        # "carta" da sola deve indicare il materiale/prodotto cercato, non
+        # qualsiasi descrizione che lo citi come involucro o contesto
+        # (es. "capocollo in carta", "bicchiere in carta").
+        excluded = {
+            "capocollo", "salame", "prosciutto", "formaggio", "carne", "coppa",
+            "mortadella", "pancetta", "salsiccia", "bresaola", "pirottini",
+            "bicchiere", "bicchieri", "borsa", "borse", "busta", "buste",
+            "sacchetto", "sacchetti", "shopper", "sacco", "sacchi", "coppetta",
+            "tovaglietta", "tovagliette", "confezione", "imballo", "imballaggio",
+            "involucro", "contenitore", "contenitori",
+        }
+        if tokens & excluded:
+            return False
+        # La parola deve essere presente come token: non basta una collisione
+        # dentro un nome o dentro il fornitore.
+        return "carta" in tokens or "cartaceo" in tokens or "cartacea" in tokens
     return True
 
 
@@ -385,6 +402,8 @@ def is_product_search_match(description: str, query: str) -> bool:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
         if query_text in {"acqua", "acque", "lampadine", "lamp", "lampada", "a4", "carta a4"}:
             return is_family_match(description, query_text)
+    if query_text == "carta":
+        return is_family_match(description, query_text)
     terms = match_terms(query_text)
 
     def matches(token: str) -> bool:
