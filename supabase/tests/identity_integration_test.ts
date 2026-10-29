@@ -21,8 +21,11 @@ Deno.test({name: "identity: utenti centrali, sessioni, revoca e permessi SQL", i
       create table if not exists eye_supremo.eye_central_users(username text primary key,pin_hash text not null,role text not null,
         active boolean not null default true,created_at timestamptz not null default now());`);
     const migration = await Deno.readTextFile(new URL("../migrations/20261019212228_central_identity_sessions.sql", import.meta.url));
+    const reviewPermissionMigration = await Deno.readTextFile(new URL("../migrations/20261029095503_add_review_visibility_permission.sql", import.meta.url));
     await sql.unsafe(migration);
     await sql.unsafe(migration); // Migrazione ripetibile anche sullo schema già aggiornato.
+    await sql.unsafe(reviewPermissionMigration);
+    await sql.unsafe(reviewPermissionMigration); // Anche il nuovo permesso deve essere ripetibile.
     await sql.unsafe("create table if not exists eye_supremo.eye_central_product_catalog(canonical_name text); truncate eye_supremo.eye_central_product_catalog; insert into eye_supremo.eye_central_product_catalog values('Test A'),('Test B');");
     await sql`delete from eye_supremo.eye_identity_sessions`;
     await sql`delete from eye_supremo.eye_identity_limits`;
@@ -68,14 +71,19 @@ Deno.test({name: "identity: utenti centrali, sessioni, revoca e permessi SQL", i
     assert(summary[0].result.distinct_products===2, "La RPC dati deve funzionare col token e il ruolo anon");
     assert((await sql`select eye_supremo.eye_credentials_valid('admin',${token}) ok`)[0].ok);
     assert(!(await sql`select eye_supremo.eye_credentials_valid('someone_else',${token}) ok`)[0].ok);
-    const created = await request({action:"create_user",username:"bob",display_name:"Bob",pin:"789654",role:"developer"},token);
-    assert(created.status===200 && created.body.user.role==="supremo");
+    const created = await request({action:"create_user",username:"bob",display_name:"Bob",pin:"789654",role:"developer",can_view_reviews:false},token);
+    assert(created.status===200 && created.body.user.role==="supremo" && created.body.user.can_view_reviews===false);
     assert((await request({action:"create_user",username:"bob",display_name:"Bob",pin:"789654"},token)).status===409);
     assert((await request({action:"set_active",username:"bob",active:"false"},token)).status===422);
     assert((await request({action:"set_active",username:"admin",active:false},token)).status===403);
-    const pc2 = await request({action:"login",username:"bob",pin:"789654"});
+    let pc2 = await request({action:"login",username:"bob",pin:"789654"});
     assert(pc2.status===200);
+    assert(pc2.body.user.can_view_reviews===false);
     assert((await request({action:"list_users"},pc2.body.token)).body.users.length===2);
+    assert((await request({action:"set_reviews_access",username:"bob",can_view_reviews:true},token)).body.user.can_view_reviews===true);
+    assert((await request({action:"me"},pc2.body.token)).status===401);
+    pc2 = await request({action:"login",username:"bob",pin:"789654"});
+    assert(pc2.status===200 && pc2.body.user.can_view_reviews===true);
     assert((await request({action:"set_active",username:"bob",active:false},token)).status===200);
     assert((await request({action:"me"},pc2.body.token)).status===401);
     assert(!(await sql`select eye_supremo.eye_credentials_valid('bob',${pc2.body.token}) ok`)[0].ok);

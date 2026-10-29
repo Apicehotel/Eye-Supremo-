@@ -16,7 +16,7 @@ const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const unavailable = () => reply({ detail: "Funzione non disponibile nella versione online" }, 404);
 
-const storedUser = (): { username?: string } | null => {
+const storedUser = (): { username?: string; can_view_reviews?: boolean } | null => {
   try { return JSON.parse(localStorage.getItem("eye-supremo.user") || "null"); } catch { return null; }
 };
 const token = () => localStorage.getItem("eye-supremo.session") || "";
@@ -75,6 +75,7 @@ async function loadReviews(): Promise<reviewsEngine.Processed | Response> {
 }
 
 async function reviewsRequest(route: string, url: URL): Promise<Response> {
+  if (storedUser()?.can_view_reviews === false) return reply({ detail: "Accesso alle recensioni non autorizzato" }, 403);
   const loaded = await loadReviews();
   if (loaded instanceof Response) return loaded;
   const hotel = url.searchParams.get("hotel_code");
@@ -100,7 +101,7 @@ async function reviewsRequest(route: string, url: URL): Promise<Response> {
 // La UI lavora con id numerici: online li ricaviamo dall'ordine dell'elenco e li risolviamo in username.
 let userIds: string[] = [];
 const idOf = (username: string) => userIds.indexOf(username) + 1;
-const asUser = (u: any) => ({ id: idOf(u.username), username: u.username, display_name: u.display_name, role_name: u.role, active: u.active, pin_configured: true, central: true });
+const asUser = (u: any) => ({ id: idOf(u.username), username: u.username, display_name: u.display_name, role_name: u.role, active: u.active, can_view_reviews: u.can_view_reviews !== false, pin_configured: true, central: true });
 
 async function listUsers() {
   const r = await call("eye-identity", { action: "list_users" }, token());
@@ -116,7 +117,7 @@ async function usersRequest(route: string, method: string, options?: RequestInit
     return r.status === 200 ? reply((r.data.users || []).map(asUser)) : fail(r);
   }
   if (route === "/auth/users" && method === "POST") {
-    const r = await call("eye-identity", { action: "create_user", username: body.username, display_name: body.display_name, pin: body.pin }, token());
+    const r = await call("eye-identity", { action: "create_user", username: body.username, display_name: body.display_name, pin: body.pin, can_view_reviews: body.can_view_reviews }, token());
     if (r.status !== 200) return fail(r);
     await listUsers();
     return reply(asUser(r.data.user));
@@ -134,8 +135,11 @@ async function usersRequest(route: string, method: string, options?: RequestInit
   }
   if (!m[2] && method === "PATCH") {
     if (self && body.active === false) return reply({ detail: "Non puoi disattivare l'utente attualmente collegato" }, 400);
-    const r = await call("eye-identity", { action: "set_active", username, active: body.active }, token());
-    return r.status === 200 ? reply({ id, active: r.data.user.active }) : fail(r);
+    const changingReviews = typeof body.can_view_reviews === "boolean";
+    const r = await call("eye-identity", changingReviews
+      ? { action: "set_reviews_access", username, can_view_reviews: body.can_view_reviews }
+      : { action: "set_active", username, active: body.active }, token());
+    return r.status === 200 ? reply({ id, active: r.data.user.active, can_view_reviews: r.data.user.can_view_reviews !== false }) : fail(r);
   }
   return unavailable();
 }
@@ -155,11 +159,11 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
     const r = await call("eye-identity", { action: "login", username: body.username, pin: body.pin });
     if (r.status !== 200) return reply({ detail: r.data?.error || "Accesso non riuscito" }, r.status);
     const u = r.data.user;
-    return reply({ session: r.data.token, user: { id: 0, username: u.username, display_name: u.display_name, role_name: u.role } });
+    return reply({ session: r.data.token, user: { id: 0, username: u.username, display_name: u.display_name, role_name: u.role, can_view_reviews: u.can_view_reviews !== false } });
   }
   if (route === "/auth/me") {
     const r = await call("eye-identity", { action: "me" }, token());
-    return r.status === 200 ? reply({ offline: false }) : reply({ detail: "Sessione non valida" }, 401);
+    return r.status === 200 ? reply({ offline: false, can_view_reviews: r.data.user?.can_view_reviews !== false }) : reply({ detail: "Sessione non valida" }, 401);
   }
   if (route === "/auth/logout" && method === "POST") {
     await call("eye-identity", { action: "logout" }, token());

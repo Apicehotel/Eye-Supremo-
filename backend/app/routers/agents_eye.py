@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..agent_orchestrator import AGENTS, run_orchestrated_query
 from ..database import get_db
-from ..models import Hotel
+from ..models import Hotel, UserProfile
 
 router = APIRouter(prefix="/api/eye/agents", tags=["Eye Supremo agents"])
 
@@ -40,6 +40,14 @@ async def ask_agents(payload: dict, role: str = Depends(current_role), username:
             area = "invoices"
         else:
             area = "all"
+
+    actor = db.scalar(select(UserProfile).where(UserProfile.username == username))
+    if actor and not actor.can_view_reviews:
+        if area == "reviews":
+            raise HTTPException(403, "Accesso alle recensioni non autorizzato")
+        # Le domande generiche restano disponibili, ma vengono confinate ai
+        # dati fattura per evitare che l'orchestratore includa recensioni.
+        area = "invoices"
 
     hotel_id = None
     hotel_code = str(payload.get("hotel_code") or "").strip().lower()

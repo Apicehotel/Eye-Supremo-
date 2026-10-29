@@ -58,6 +58,9 @@ app.add_middleware(
 )
 
 DEVELOPER_ONLY_PREFIXES = ("/api/settings", "/api/backups", "/api/logs")
+REVIEW_ONLY_PREFIXES = (
+    "/api/eye/reviews", "/api/eye/rankings", "/api/eye/emerging-themes",
+)
 
 
 @app.middleware("http")
@@ -79,6 +82,8 @@ async def local_auth_guard(request: Request, call_next):
                     return JSONResponse({"detail": "Sessione Eye Supremo richiesta"}, status_code=401)
                 if legacy_admin and user.role_name not in {"developer", "supremo"}:
                     return JSONResponse({"detail": "Profilo non autorizzato"}, status_code=403)
+                if path.startswith(REVIEW_ONLY_PREFIXES) and not user.can_view_reviews:
+                    return JSONResponse({"detail": "Accesso alle recensioni non autorizzato"}, status_code=403)
                 if central_identity.enabled():
                     try:
                         identity = await central_identity.identity_for_request(db, token, user)

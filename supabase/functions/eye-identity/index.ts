@@ -8,7 +8,7 @@ const usernameOf = (v: unknown) => typeof v === "string" ? v.trim().toLowerCase(
 const validUsername = (v: string) => /^[a-z0-9_-]{1,80}$/.test(v);
 const validPin = (v: unknown): v is string => typeof v === "string" && /^[0-9]{6,12}$/.test(v);
 const tokenHash = async (v: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v)))].map(x => x.toString(16).padStart(2, "0")).join("");
-const publicUser = (u: any) => ({username: u.username, display_name: u.display_name || u.username, role: u.role, active: u.active, auth_version: u.auth_version});
+const publicUser = (u: any) => ({username: u.username, display_name: u.display_name || u.username, role: u.role, active: u.active, can_view_reviews: u.can_view_reviews !== false, auth_version: u.auth_version});
 
 async function limited(key: string, max: number) {
   const digest = await tokenHash(key);
@@ -73,16 +73,17 @@ Deno.serve({port: Number(Deno.env.get("PORT") || 8000)}, async req => {
       return json({ok: true});
     }
     if (action === "list_users") {
-      const users = await sql`select username,display_name,role,active,auth_version from eye_supremo.eye_central_users order by display_name,username`;
+      const users = await sql`select username,display_name,role,active,can_view_reviews,auth_version from eye_supremo.eye_central_users order by display_name,username`;
       return json({users: users.map(publicUser)});
     }
     const username = usernameOf(body.username);
     if (!validUsername(username)) return json({error: "Username non valido"}, 422);
-    if (!["create_user", "set_pin", "set_active"].includes(action)) return json({error: "Azione non consentita"}, 403);
+    if (!["create_user", "set_pin", "set_active", "set_reviews_access"].includes(action)) return json({error: "Azione non consentita"}, 403);
     if ((action === "create_user" || action === "set_pin") && !validPin(body.pin)) return json({error: "PIN non valido"}, 422);
     const display = typeof body.display_name === "string" ? body.display_name.trim() : "";
     if (action === "create_user" && (!display || display.length > 160)) return json({error: "Nome non valido"}, 422);
     if (action === "set_active" && typeof body.active !== "boolean") return json({error: "Stato non valido"}, 422);
+    if (action === "set_reviews_access" && typeof body.can_view_reviews !== "boolean") return json({error: "Permesso recensioni non valido"}, 422);
     if (action === "set_active" && username === user.username && !body.active) return json({error: "Non puoi disattivare il tuo profilo"}, 403);
     const hash = validPin(body.pin) ? await bcrypt.hash(body.pin, 12) : null;
     const result = await sql.begin(async tx => {
@@ -94,7 +95,8 @@ Deno.serve({port: Number(Deno.env.get("PORT") || 8000)}, async req => {
           and u.active and u.auth_version=s.auth_version and u.role in ('developer','supremo')`;
       if (!fresh[0]) throw new Error("AUTH_CHANGED");
       if (action === "create_user") {
-        const users = await tx`insert into eye_supremo.eye_central_users(username,display_name,pin_hash,role,active) values(${username},${display},${hash},'supremo',true) returning *`;
+        const canViewReviews = typeof body.can_view_reviews === "boolean" ? body.can_view_reviews : true;
+        const users = await tx`insert into eye_supremo.eye_central_users(username,display_name,pin_hash,role,active,can_view_reviews) values(${username},${display},${hash},'supremo',true,${canViewReviews}) returning *`;
         return users[0];
       }
       if (action === "set_active" && !body.active) {
@@ -103,7 +105,9 @@ Deno.serve({port: Number(Deno.env.get("PORT") || 8000)}, async req => {
       }
       const users = action === "set_pin"
         ? await tx`update eye_supremo.eye_central_users set pin_hash=${hash},auth_version=auth_version+1 where username=${username} returning *`
-        : await tx`update eye_supremo.eye_central_users set active=${body.active},auth_version=auth_version+1 where username=${username} returning *`;
+        : action === "set_active"
+          ? await tx`update eye_supremo.eye_central_users set active=${body.active},auth_version=auth_version+1 where username=${username} returning *`
+          : await tx`update eye_supremo.eye_central_users set can_view_reviews=${body.can_view_reviews},auth_version=auth_version+1 where username=${username} returning *`;
       if (!users[0]) throw new Error("NOT_FOUND");
       await tx`delete from eye_supremo.eye_identity_sessions where username=${username}`;
       return users[0];

@@ -116,6 +116,7 @@ def mirror(db: Session, item: dict) -> UserProfile:
     user.display_name = item["display_name"]
     user.role_name = item["role"]
     user.can_manage_config = item["role"] in {"supremo", "developer"}
+    user.can_view_reviews = bool(item.get("can_view_reviews", True))
     user.active = bool(item["active"])
     db.commit()
     return user
@@ -178,7 +179,8 @@ def auth_payload(token: str, user: UserProfile, account: CentralAccount, *, offl
     if offline:
         _OFFLINE_PROBES[session_key(token)] = time.monotonic()
     return {"session": token, "user": {"id": user.id, "username": user.username,
-            "display_name": user.display_name, "role_name": user.role_name},
+            "display_name": user.display_name, "role_name": user.role_name,
+            "can_view_reviews": user.can_view_reviews},
             "offline": offline, "offline_until": account.offline_until.isoformat(timespec="seconds") + "Z" if account.offline_until else None}
 
 

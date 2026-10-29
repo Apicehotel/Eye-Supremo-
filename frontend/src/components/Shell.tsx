@@ -80,6 +80,7 @@ export function Shell({
   setPage,
   area,
   setArea,
+  canViewReviews,
   reviewPage,
   setReviewPage,
   children,
@@ -92,6 +93,7 @@ export function Shell({
   setPage: (p: Page) => void;
   area: "invoices" | "reviews";
   setArea: (a: "invoices" | "reviews") => void;
+  canViewReviews: boolean;
   reviewPage: "reviews" | "ai";
   setReviewPage: (p: "reviews" | "ai") => void;
   children: ReactNode;
@@ -109,12 +111,13 @@ export function Shell({
   );
   const online = supabaseOnline;
   const goReview = (view: typeof reviewView) => {
+    if (!canViewReviews) return;
     setReviewPage("reviews");
     setReviewView(view);
     if (online) { setPage("reviews" as Page); setOpen(false); }
     setTimeout(() => window.dispatchEvent(new CustomEvent("eye-review-view", { detail: view })), 60);
   };
-  const pickArea = (next: "invoices" | "reviews") => { setArea(next); if (online) { setPage("home"); setOpen(false); } };
+  const pickArea = (next: "invoices" | "reviews") => { if (next === "reviews" && !canViewReviews) return; setArea(next); if (online) { setPage("home"); setOpen(false); } };
   async function logout() {
     try {
       await eyeApi("/auth/logout", { method: "POST" });
@@ -140,13 +143,13 @@ export function Shell({
             <ReceiptText />
             Fatture
           </button>
-          <button
+          {canViewReviews && <button
             className={area === "reviews" ? "active" : ""}
             onClick={() => setArea("reviews")}
           >
             <MessageSquareText />
             Recensioni
-          </button>
+          </button>}
         </div>
         <div className="sidebar-top-tools" hidden={supabaseOnline}>
           <button className={pinned ? "sidebar-pin active" : "sidebar-pin"} aria-label={pinned ? "Sblocca menu" : "Fissa menu aperto"} title={pinned ? "Sblocca menu" : "Fissa menu aperto"} onClick={() => setPinned(!pinned)}>
@@ -263,7 +266,7 @@ export function Shell({
         {supabaseOnline && (
           <div className="top-switch" role="group" aria-label="Cambia area">
             <button className={area === "invoices" ? "active" : ""} onClick={() => pickArea("invoices")}><ReceiptText size={17} />Fatture</button>
-            <button className={area === "reviews" ? "active" : ""} onClick={() => pickArea("reviews")}><MessageSquareText size={17} />Recensioni</button>
+            {canViewReviews && <button className={area === "reviews" ? "active" : ""} onClick={() => pickArea("reviews")}><MessageSquareText size={17} />Recensioni</button>}
           </div>
         )}
         <button className="mobile-menu" onClick={() => setOpen(!open)}>
