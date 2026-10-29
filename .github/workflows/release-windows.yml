@@ -14,32 +14,10 @@ on:
     paths: ['installer/EyeSupremo.iss']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # Su main la release parte da sola quando cambia installer/EyeSupremo.iss (filtro `paths` sopra)
-  # e la versione non è già stata pubblicata; resta possibile avviarla a mano o con `[release]`.
-  decide:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ] || [ "$GITHUB_REF_TYPE" = 'tag' ]; then echo run=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          version=$(sed -n 's/^AppVersion=//p' installer/EyeSupremo.iss | head -1 | tr -d '\r ')
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "Release v$version già pubblicata: nessuna nuova build."; echo run=false >> "$GITHUB_OUTPUT"
-          else
-            echo run=true >> "$GITHUB_OUTPUT"
-          fi
-
   release-windows:
-    needs: decide
-    if: needs.decide.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,13 +93,15 @@ jobs:
           & $iscc 'installer\EyeSupremo.iss'
           if (-not (Test-Path 'release\EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe')) { throw 'Installer con versione nel nome non prodotto (controlla OutputBaseFilename in installer\EyeSupremo.iss)' }
 
-      - name: Pubblica GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: Eye Supremo ${{ steps.version.outputs.name }}
-          files: release/EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+      - name: Pubblica aggiornamento su Supabase
+        shell: pwsh
+        env:
+          SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+          SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+        run: |
+          if (-not $env:SUPABASE_S3_ACCESS_KEY_ID -or -not $env:SUPABASE_S3_SECRET_ACCESS_KEY) {
+            throw 'Credenziali Supabase S3 mancanti'
+          }
+          python -m pip install boto3
+          python scripts/publish_eye_update.py "release/EyeSupremo-Setup-${{ steps.version.outputs.name }}.exe"
 

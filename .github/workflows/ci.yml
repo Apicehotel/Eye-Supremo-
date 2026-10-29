@@ -94,7 +94,7 @@ jobs:
         with:
           deno-version: v2.9.6
       - name: Check central functions
-        run: deno check --node-modules-dir=auto supabase/functions/eye-identity/index.ts supabase/functions/eye-central-gateway/index.ts
+        run: deno check --node-modules-dir=auto supabase/functions/eye-identity/index.ts supabase/functions/eye-central-gateway/index.ts supabase/functions/eye-updates/index.ts
       - name: Test central identity on PostgreSQL
         env:
           EYE_IDENTITY_TEST_DB: postgresql://postgres:test-only@127.0.0.1:5432/eye_identity_test

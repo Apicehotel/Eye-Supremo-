@@ -913,9 +913,9 @@ export function SystemPage() {
       const info = update || (await eyeApi<any>("/updates/check"));
       setUpdate(info);
       if (!info?.download_url && !info?.installer_available) {
-        throw new Error(info?.message || "Installer Windows non disponibile nella release GitHub");
+        throw new Error(info?.message || "Installer Windows non disponibile su Supabase");
       }
-      // Download diretto da GitHub: evita timeout locale su file da ~60MB.
+      // URL Supabase firmato e temporaneo: evita timeout locale su file grandi.
       if (!preferProxy && info?.download_url) {
         const link = document.createElement("a");
         link.href = info.download_url;
@@ -935,7 +935,7 @@ export function SystemPage() {
       });
       if (!response.ok) throw new Error(await response.text());
       const blob = await response.blob();
-      if (!blob.size) throw new Error("Download vuoto: riprova o usa il link GitHub");
+      if (!blob.size) throw new Error("Download vuoto: riprova il collegamento Supabase");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1023,7 +1023,7 @@ export function SystemPage() {
       ) : (
         <p>
           {updateBusy
-            ? "Controllo la GitHub Release…"
+            ? "Controllo Supabase…"
             : update
               ? update.installer_available === false
                 ? `Versione ${update.current_version}: release trovata ma senza installer scaricabile.`

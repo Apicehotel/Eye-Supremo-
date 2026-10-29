@@ -1,28 +1,10 @@
-from app.update_service import _version, pick_installer_asset
+from app.update_service import _version
 
 
 def test_version_compare_handles_v_prefix_numbers():
     assert _version("v2.0.1") > _version("2.0.0")
     assert _version("2.0.0") == _version("v2.0.0")
     assert _version("") == (0,)
-
-
-def test_pick_installer_prefers_setup_exe():
-    assets = [
-        {"name": "notes.txt", "browser_download_url": "https://example/notes"},
-        {"name": "EyeSupremo.exe", "browser_download_url": "https://example/exe"},
-        {"name": "EyeSupremo-Setup.exe", "browser_download_url": "https://example/setup"},
-    ]
-    picked = pick_installer_asset(assets)
-    assert picked is not None
-    assert picked["name"] == "EyeSupremo-Setup.exe"
-
-
-def test_pick_installer_accepts_setup_without_hyphen_prefix():
-    assets = [{"name": "EyeSupremoSetup.exe", "browser_download_url": "https://example/setup"}]
-    picked = pick_installer_asset(assets)
-    assert picked is not None
-    assert picked["name"] == "EyeSupremoSetup.exe"
 
 
 def test_latest_release_marks_update_when_newer(monkeypatch):
@@ -38,22 +20,23 @@ def test_latest_release_marks_update_when_newer(monkeypatch):
         def read(self):
             import json
             return json.dumps({
-                "tag_name": "v2.0.1",
-                "html_url": "https://github.com/Apicehotel/Eye-Supremo-/releases/tag/v2.0.1",
+                "version": "2.0.1",
                 "published_at": "2026-10-07T00:00:00Z",
-                "assets": [{
-                    "name": "EyeSupremo-Setup.exe",
-                    "browser_download_url": "https://github.com/Apicehotel/Eye-Supremo-/releases/download/v2.0.1/EyeSupremo-Setup.exe",
-                }],
+                "filename": "EyeSupremo-Setup-2.0.1.exe",
+                "download_url": "https://example.supabase.co/storage/v1/object/sign/eye-updates/EyeSupremo-Setup-2.0.1.exe?token=x",
+                "sha256": "a" * 64,
+                "size": 123456,
             }).encode()
 
     monkeypatch.setattr(update_service, "CURRENT_VERSION", "2.0.0")
+    monkeypatch.setattr(update_service, "_central_update_identity", lambda: ("admin", "eye1_" + "a" * 64))
     monkeypatch.setattr(update_service, "urlopen", lambda *a, **k: FakeResp())
     release = update_service.latest_release()
     assert release["update_available"] is True
     assert release["installer_available"] is True
     assert release["latest_version"] == "2.0.1"
-    assert release["download_url"].endswith("EyeSupremo-Setup.exe")
+    assert "supabase.co" in release["download_url"]
+    assert release["sha256"] == "a" * 64
 
 
 def test_check_endpoint(client, monkeypatch):
@@ -74,7 +57,7 @@ def test_check_endpoint(client, monkeypatch):
     assert response.json()["update_available"] is True
 
 
-def test_download_redirects_to_github(client, monkeypatch):
+def test_download_redirects_to_supabase(client, monkeypatch):
     payload = {
         "current_version": "2.0.0",
         "latest_version": "2.0.1",
@@ -90,9 +73,3 @@ def test_download_redirects_to_github(client, monkeypatch):
     response = client.get("/api/eye/updates/download", follow_redirects=False)
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "https://example.test/EyeSupremo-Setup.exe"
-
-
-def test_pick_installer_asset_accepts_versioned_name():
-    from app.update_service import pick_installer_asset
-    asset = pick_installer_asset([{"name": "EyeSupremo-Setup-2.0.14.exe", "browser_download_url": "https://x/y.exe"}])
-    assert asset and asset["name"] == "EyeSupremo-Setup-2.0.14.exe"
