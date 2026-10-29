@@ -27,10 +27,15 @@ import {
   Globe2,
   BedDouble,
   HeartPulse,
+  House as Home,
 } from "lucide-react";
 import { clearAuth, currentUser, eyeApi } from "../lib/api";
 import { CacheChip } from "./CacheStatus";
+import { supabaseOnline } from "../lib/supabaseDataService";
+// Versione online (sola lettura): solo le pagine servite da Supabase.
+const ONLINE_PAGES: Page[] = ["home", "invoices", "products", "suppliers", "users"];
 export type Page =
+  | "home"
   | "dashboard"
   | "invoices"
   | "invoice-files"
@@ -47,8 +52,10 @@ export type Page =
   | "settings"
   | "system"
   | "feedback"
-  | "health";
+  | "health"
+  | "users";
 const nav: [Page, string, any][] = [
+  ["home", "Home", Home],
   ["dashboard", "Dashboard", LayoutDashboard],
   ["invoices", "Fatture", FileText],
   ["invoice-files", "Archivio file", FolderOpen],
@@ -65,6 +72,7 @@ const nav: [Page, string, any][] = [
   ["settings", "Impostazioni", Settings],
   ["health", "Salute dati", HeartPulse],
   ["system", "Sistema", MonitorCog],
+  ["users", "Utenti", Users],
   ["feedback", "Feedback", MessageSquareWarning],
 ];
 export function Shell({
@@ -97,8 +105,16 @@ export function Shell({
   const isFullAccess = Boolean(user);
   const [reviewView, setReviewView] = useState<"overview" | "ranking" | "reviews" | "anonymous" | "anonymous-ranking" | "online" | "history" | "room-averages">("overview");
   const visibleNav = nav.filter(
-    ([id]) => isFullAccess || !["settings", "system"].includes(id),
+    ([id]) => (supabaseOnline ? ONLINE_PAGES.includes(id) : id !== "users" && (isFullAccess || !["settings", "system"].includes(id))),
   );
+  const online = supabaseOnline;
+  const goReview = (view: typeof reviewView) => {
+    setReviewPage("reviews");
+    setReviewView(view);
+    if (online) { setPage("reviews" as Page); setOpen(false); }
+    setTimeout(() => window.dispatchEvent(new CustomEvent("eye-review-view", { detail: view })), 60);
+  };
+  const pickArea = (next: "invoices" | "reviews") => { setArea(next); if (online) { setPage("home"); setOpen(false); } };
   async function logout() {
     try {
       await eyeApi("/auth/logout", { method: "POST" });
@@ -107,11 +123,11 @@ export function Shell({
     window.dispatchEvent(new Event("eye-auth-expired"));
   }
   return (
-    <div className="app-shell">
+    <div className={`app-shell${supabaseOnline ? " online" : ""}`}>
       <aside className={`sidebar ${open ? "open" : ""} ${pinned ? "pinned" : ""}`}>
         <div className="brand">
           <img className="brand-logo" src="/eye-supremo-logo.png" alt="Eye Supremo" />
-          <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · Local first</span></div>
+          <div className="brand-copy"><b>EYE</b><span className="brand-name"> SUPREMO</span><span className="brand-subtitle">Hotel intelligence · {supabaseOnline ? "Online" : "Local first"}</span></div>
         </div>
         <div className="area-switch" role="group" aria-label="Cambia area">
           <button
@@ -132,7 +148,7 @@ export function Shell({
             Recensioni
           </button>
         </div>
-        <div className="sidebar-top-tools">
+        <div className="sidebar-top-tools" hidden={supabaseOnline}>
           <button className={pinned ? "sidebar-pin active" : "sidebar-pin"} aria-label={pinned ? "Sblocca menu" : "Fissa menu aperto"} title={pinned ? "Sblocca menu" : "Fissa menu aperto"} onClick={() => setPinned(!pinned)}>
             <Pin size={14} /> <span>{pinned ? "Menu fissato" : "Fissa menu"}</span>
           </button>
@@ -156,144 +172,46 @@ export function Shell({
           </nav>
         ) : (
           <nav>
-            <button
-              aria-label="Panoramica"
-              className={reviewPage === "reviews" && reviewView === "overview" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("overview");
-                window.dispatchEvent(
-                  new CustomEvent("eye-review-view", { detail: "overview" }),
-                );
-              }}
-            >
-              <LayoutDashboard size={19} />
-              <span>Panoramica</span>
-            </button>
-            <button
-              aria-label="Ranking"
-              className={reviewPage === "reviews" && reviewView === "ranking" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("ranking");
-                window.dispatchEvent(
-                  new CustomEvent("eye-review-view", { detail: "ranking" }),
-                );
-                setTimeout(
-                  () =>
-                    document
-                      .getElementById("reviews-ranking")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-                  0,
-                );
-              }}
-            >
-              <Trophy size={19} />
-              <span>Ranking</span>
-            </button>
-            <button
-              aria-label="Media voti per camera"
-              className={reviewPage === "reviews" && reviewView === "room-averages" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("room-averages");
-                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "room-averages" }));
-              }}
-            >
-              <BedDouble size={19} />
-              <span>Media camere</span>
-            </button>
-            <button
-              aria-label="Recensioni"
-              className={reviewPage === "reviews" && reviewView === "reviews" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("reviews");
-                window.dispatchEvent(
-                  new CustomEvent("eye-review-view", { detail: "reviews" }),
-                );
-              }}
-            >
-              <MessageSquareText size={19} />
-              <span>Recensioni</span>
-            </button>
-            <button
-              aria-label="Recensioni anonime"
-              className={reviewPage === "reviews" && reviewView === "anonymous" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("anonymous");
-                window.dispatchEvent(
-                  new CustomEvent("eye-review-view", { detail: "anonymous" }),
-                );
-              }}
-            >
-              <MessageSquareWarning size={19} />
-              <span>Recensioni anonime</span>
-            </button>
-            <button
-              aria-label="Ranking segnalazioni anonime"
-              className={reviewPage === "reviews" && reviewView === "anonymous-ranking" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("anonymous-ranking");
-                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "anonymous-ranking" }));
-              }}
-            >
-              <TriangleAlert size={17} />
-              <span>Ranking anonime</span>
-            </button>
-            <button
-              aria-label="Recensioni online"
-              className={reviewPage === "reviews" && reviewView === "online" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("online");
-                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "online" }));
-              }}
-            >
-              <Globe2 size={17} />
-              <span>Recensioni online</span>
-            </button>
-            <button
-              aria-label="Analisi IA"
-              className={reviewPage === "ai" ? "active" : ""}
-              onClick={() => setReviewPage("ai")}
-            >
-              <Sparkles size={19} />
-              <span>Analisi IA</span>
-            </button>
-            <button
-              aria-label="Feedback"
-              className={page === "feedback" ? "active" : ""}
-              onClick={() => { setArea("invoices"); setPage("feedback"); setOpen(false); }}
-            >
-              <MessageSquareWarning size={19} />
-              <span>Feedback</span>
-            </button>
-            <button
-              aria-label="Storico recensioni"
-              className={reviewPage === "reviews" && reviewView === "history" ? "active" : ""}
-              onClick={() => {
-                setReviewPage("reviews");
-                setReviewView("history");
-                window.dispatchEvent(new CustomEvent("eye-review-view", { detail: "history" }));
-              }}
-            >
-              <History size={19} />
-              <span>Storico recensioni</span>
-            </button>
-            {isFullAccess && (
+            {([
+              ["overview", "Panoramica", LayoutDashboard, true],
+              ["ranking", "Ranking", Trophy, true],
+              ["room-averages", "Media camere", BedDouble, true],
+              ["reviews", "Recensioni", MessageSquareText, true],
+              ["anonymous", "Recensioni anonime", MessageSquareWarning, true],
+              ["anonymous-ranking", "Ranking anonime", TriangleAlert, true],
+              ["online", "Recensioni online", Globe2, false],
+              ["history", "Storico recensioni", History, true],
+            ] as [typeof reviewView, string, any, boolean][]).filter(([, , , onlineOk]) => !supabaseOnline || onlineOk).map(([view, label, Icon]) => (
               <button
-                aria-label="Impostazioni"
+                key={view}
+                aria-label={label}
+                className={(!supabaseOnline || page === ("reviews" as Page)) && reviewPage === "reviews" && reviewView === view ? "active" : ""}
                 onClick={() => {
-                  setArea("invoices");
-                  setPage("settings");
+                  goReview(view);
+                  if (view === "ranking") setTimeout(() => document.getElementById("reviews-ranking")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
                 }}
               >
-                <Settings size={19} />
-                <span>Impostazioni</span>
+                <Icon size={19} />
+                <span>{label}</span>
               </button>
+            ))}
+            {!supabaseOnline && (
+              <>
+                <button aria-label="Analisi IA" className={reviewPage === "ai" ? "active" : ""} onClick={() => setReviewPage("ai")}>
+                  <Sparkles size={19} />
+                  <span>Analisi IA</span>
+                </button>
+                <button aria-label="Feedback" className={page === "feedback" ? "active" : ""} onClick={() => { setArea("invoices"); setPage("feedback"); setOpen(false); }}>
+                  <MessageSquareWarning size={19} />
+                  <span>Feedback</span>
+                </button>
+                {isFullAccess && (
+                  <button aria-label="Impostazioni" onClick={() => { setArea("invoices"); setPage("settings"); }}>
+                    <Settings size={19} />
+                    <span>Impostazioni</span>
+                  </button>
+                )}
+              </>
             )}
           </nav>
         )}
@@ -308,10 +226,10 @@ export function Shell({
             Esci
           </button>
         </div>
-        <CacheChip />
+        {!supabaseOnline && <CacheChip />}
         <div className="local-status">
           <i />
-          Archivio locale<small>Windows · Offline first · Sync opzionale</small>
+          {supabaseOnline ? <>Archivio centrale<small>Online · sola lettura</small></> : <>Archivio locale<small>Windows · Offline first · Sync opzionale</small></>}
         </div>
       </aside>
       {open && (
@@ -321,7 +239,33 @@ export function Shell({
           onClick={() => setOpen(false)}
         />
       )}
+      {supabaseOnline && (
+        <nav className="bottom-bar" aria-label="Navigazione principale">
+          {((area === "invoices" ? [
+            ["Home", Home, page === "home", () => { setPage("home"); setOpen(false); }],
+            ["Fatture", FileText, page === "invoices", () => { setPage("invoices"); setOpen(false); }],
+            ["Fornitori", Users, page === "suppliers", () => { setPage("suppliers"); setOpen(false); }],
+            ["Prodotti", Package, page === "products", () => { setPage("products"); setOpen(false); }],
+          ] : [
+            ["Home", Home, page === "home", () => { setPage("home"); setOpen(false); }],
+            ["Panoramica", LayoutDashboard, page !== "home" && reviewView === "overview", () => goReview("overview")],
+            ["Ranking", Trophy, page !== "home" && reviewView === "ranking", () => goReview("ranking")],
+            ["Recensioni", MessageSquareText, page !== "home" && reviewView === "reviews", () => goReview("reviews")],
+          ]).concat([["Menu", open ? X : Menu, open, () => setOpen(!open)]]) as [string, any, boolean, () => void][]).map(([label, Icon, active, go]) => (
+            <button key={label} className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={go}>
+              <Icon size={22} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
       <main>
+        {supabaseOnline && (
+          <div className="top-switch" role="group" aria-label="Cambia area">
+            <button className={area === "invoices" ? "active" : ""} onClick={() => pickArea("invoices")}><ReceiptText size={17} />Fatture</button>
+            <button className={area === "reviews" ? "active" : ""} onClick={() => pickArea("reviews")}><MessageSquareText size={17} />Recensioni</button>
+          </div>
+        )}
         <button className="mobile-menu" onClick={() => setOpen(!open)}>
           {open ? <X /> : <Menu />}
         </button>

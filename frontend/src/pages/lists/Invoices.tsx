@@ -14,6 +14,7 @@ import {useLatestRequest} from "../../hooks/useLatestRequest";
 import { HistoricalReportPage } from "../HistoricalReport";
 
 import {SortHeader, compareValues, sortIndicator, type SortDirection, type SortKey} from "./TableSort";
+import { supabaseOnline } from "../../lib/supabaseDataService";
 export function Invoices() {
   const requests = useLatestRequest();
   const detailRequests = useLatestRequest();
@@ -92,7 +93,7 @@ export function Invoices() {
           <SearchBox
             value={q}
             onChange={setQ}
-            placeholder="Cerca prodotto, fornitore, fattura…"
+            placeholder="Cerca fattura, fornitore…"
           />
           <label className="page-size-control" style={{ height: 42, display: "flex", alignItems: "center", gap: 7, border: "1px solid #ccd5e0", background: "#fff", borderRadius: 8, padding: "0 10px", color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
             <span>Mostra</span>
@@ -112,7 +113,7 @@ export function Invoices() {
       </PageHeader>
       {q.trim() ? (
         <>
-          <section className="panel list-panel">
+          {!supabaseOnline && <section className="panel list-panel">
             <div className="panel-title">
               <h2>
                 <Search size={18} /> Ricerca locale (archivio completo, senza limite)
@@ -175,7 +176,7 @@ export function Invoices() {
                 text="La ricerca interroga tutto l’indice fatture (FTS). Prova un altro nome prodotto o verifica import/cache."
               />
             )}
-          </section>
+          </section>}
           <section className="panel list-panel">
             <div className="panel-title">
               <h2>Risultati cache / centrale</h2>
@@ -211,15 +212,15 @@ export function Invoices() {
                   <tbody>
                     {sortedRemoteItems.map((r: any, i: number) => (
                       <tr key={`${r.id}-${r.original_description}-${i}`} onClick={() => openDetail(r.source_hash || r.id)} style={{ cursor: "pointer" }}>
-                        <td>
+                        <td data-label="Descrizione">
                           <b>{r.original_description}</b>
                         </td>
-                        <td>{shortDate(r.invoice_date)}</td>
-                        <td>{r.supplier_name}</td>
-                        <td>{r.invoice_number}</td>
-                        <td>{r.quantity}</td>
-                        <td>{euro(Number(r.unit_price))}</td>
-                        <td>
+                        <td data-label="Data">{shortDate(r.invoice_date)}</td>
+                        <td data-label="Fornitore">{r.supplier_name}</td>
+                        <td data-label="Fattura">{r.invoice_number}</td>
+                        <td data-label="Quantità">{r.quantity}</td>
+                        <td data-label="Prezzo">{euro(Number(r.unit_price))}</td>
+                        <td data-label="Totale">
                           <b>{euro(Number(r.line_total))}</b>
                         </td><td><OpenInvoiceButton id={r.source_hash || r.id} highlight={q} onOpen={setInvoiceRef} /></td>
                       </tr>
@@ -295,7 +296,7 @@ export function Invoices() {
           </section>}
           <section className="panel list-panel">
             <div className="panel-title">
-              <h2>Archivio centrale Supabase</h2>
+              <h2>{supabaseOnline ? "Ultime fatture" : "Archivio centrale Supabase"}</h2>
               {remote?.count != null && (
                 <Status tone="ok">
                   {remote.total ?? remote.count} fatture totali · pagina {page + 1}
@@ -320,15 +321,15 @@ export function Invoices() {
                     <tbody>
                       {sortedRemoteItems.map((r: any, i: number) => (
                         <tr key={`${r.id}-${r.original_description}-${i}`} onClick={() => openDetail(r.source_hash || r.id)} style={{ cursor: "pointer" }}>
-                          <td>
+                          <td data-label="Descrizione">
                             <b>{r.original_description}</b>
                           </td>
-                          <td>{shortDate(r.invoice_date)}</td>
-                          <td>{r.supplier_name}</td>
-                          <td>{r.invoice_number}</td>
-                          <td>{r.quantity}</td>
-                          <td>{euro(Number(r.unit_price))}</td>
-                          <td>
+                          <td data-label="Data">{shortDate(r.invoice_date)}</td>
+                          <td data-label="Fornitore">{r.supplier_name}</td>
+                          <td data-label="Fattura">{r.invoice_number}</td>
+                          <td data-label="Quantità">{r.quantity}</td>
+                          <td data-label="Prezzo">{euro(Number(r.unit_price))}</td>
+                          <td data-label="Totale">
                             <b>{euro(Number(r.line_total))}</b>
                           </td><td><OpenInvoiceButton id={r.source_hash || r.id} highlight={q} onOpen={setInvoiceRef} /></td>
                         </tr>
@@ -350,14 +351,14 @@ export function Invoices() {
                     <tbody>
                         {sortedRemoteItems.map((r: any) => (
                         <tr key={r.id} onClick={() => openDetail(r.source_hash || r.id)} style={{ cursor: "pointer" }}>
-                          <td>
+                          <td data-label="Fattura n.">
                             <b>{r.invoice_number}</b>
                           </td>
-                          <td>{shortDate(r.invoice_date)}</td>
-                          <td>{r.supplier_name}</td>
-                          <td>{euro(Number(r.taxable))}</td>
-                          <td>{euro(Number(r.vat))}</td>
-                          <td>
+                          <td data-label="Data">{shortDate(r.invoice_date)}</td>
+                          <td data-label="Fornitore">{r.supplier_name}</td>
+                          <td data-label="Imponibile">{euro(Number(r.taxable))}</td>
+                          <td data-label="IVA">{euro(Number(r.vat))}</td>
+                          <td data-label="Totale">
                             <b>{euro(Number(r.total))}</b>
                           </td>
                         </tr>

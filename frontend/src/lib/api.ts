@@ -15,7 +15,7 @@ const securedHeaders = (initial?:HeadersInit) => {
 export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
   try {
     const sentSession=currentSession();
-    const response = await httpDataService.raw('core', path, {...options, headers:securedHeaders(options?.headers)});
+    const response = await activeDataService.raw('core', path, {...options, headers:securedHeaders(options?.headers)});
     if(options?.signal?.aborted)throw new DOMException('Richiesta annullata','AbortError');
     if(response.status===401&&currentSession()===sentSession){clearAuth();window.dispatchEvent(new Event('eye-auth-expired'))}
     if(!response.ok) {const body=await response.json().catch(()=>null);throw new Error(typeof body?.detail==='string'?body.detail:'Operazione non riuscita')}
@@ -29,7 +29,7 @@ export const api = async <T>(path:string, options?:RequestInit):Promise<T> => {
 export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
   try {
     const sentSession=currentSession();
-    const response = await httpDataService.raw('eye', path, {...options, headers:securedHeaders(options?.headers)});
+    const response = await activeDataService.raw('eye', path, {...options, headers:securedHeaders(options?.headers)});
     if(options?.signal?.aborted)throw new DOMException('Richiesta annullata','AbortError');
     if(response.status===401&&currentSession()===sentSession){localStorage.removeItem('eye-supremo.session');localStorage.removeItem('eye-supremo.user');window.dispatchEvent(new Event('eye-auth-expired'))}
     if(!response.ok) {const body=await response.json().catch(()=>null);throw new Error(typeof body?.detail==='string'?body.detail:'Operazione non riuscita')}
@@ -41,8 +41,12 @@ export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> =>
 };
 
 export const publicApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
-  const response = await httpDataService.raw('eye', `/auth${path}`, options);
-  if (!response.ok) throw new Error('Servizio di accesso non disponibile. Riprova.');
+  const response = await activeDataService.raw('eye', `/auth${path}`, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    if ([401, 422, 429].includes(response.status) && typeof body?.detail === 'string') throw new Error(body.detail);
+    throw new Error('Servizio di accesso non disponibile. Riprova.');
+  }
   return response.json() as Promise<T>;
 };
 
@@ -52,5 +56,7 @@ export const euro = (value:number|null|undefined) => new Intl.NumberFormat('it-I
 export const shortDate = (value:string) => new Intl.DateTimeFormat('it-IT').format(new Date(value));
 
 import { apiUrl, httpDataService } from './dataService.ts';
+import { supabaseDataService, supabaseOnline } from './supabaseDataService.ts';
+const activeDataService = supabaseOnline ? supabaseDataService : httpDataService;
 export { apiUrl, apiPrefix } from './dataService.ts';
 

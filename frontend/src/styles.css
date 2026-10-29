@@ -231,3 +231,79 @@ body{background:#f7f8fa;color:var(--ink)}
 .room-row-clickable{cursor:pointer}.room-row-clickable:hover,.room-row-open{background:#f3f8fb}.room-average-source:hover{background:#e6f2f7}.room-detail-row>td{background:#f8fafc;padding:12px 16px!important;white-space:normal!important}.room-detail-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:10px}.room-detail-head span{color:var(--muted);font-size:12px;margin-right:auto}.room-detail-list{display:grid;gap:8px;max-height:420px;overflow:auto}.room-detail-list article{background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px 12px}.room-detail-list header{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.room-detail-list header span{color:var(--muted);font-size:11px}.room-detail-list p{margin:6px 0 0;font-size:12px;line-height:1.45;color:#3b485b;white-space:pre-wrap}
 .room-brand-tag{display:inline-flex;align-items:center;margin-left:7px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;vertical-align:middle}.room-brand-wine{background:#fff0d5;color:#925b00}.room-brand-jazz{background:#e9e1ff;color:#5e3a9d}
 .ranking-grid + .room-defects-panel{display:none}
+
+/* ---- Smartphone ---- */
+html{-webkit-text-size-adjust:100%}
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+@media(max-width:760px){
+  .app-shell main{padding:14px 12px calc(28px + env(safe-area-inset-bottom));padding-top:calc(14px + env(safe-area-inset-top))}
+  input,select,textarea{font-size:16px!important}
+  button{min-height:40px}
+  .mobile-menu{min-height:44px;min-width:44px}
+  .sidebar{width:min(84vw,300px)}
+  .page-header h1{font-size:22px}
+  .pagination{flex-wrap:wrap;gap:8px}
+  .pagination button{flex:1}
+  /* Tabelle con etichette -> schede */
+  table:has(td[data-label]){display:block;min-width:0!important;width:100%}
+  table:has(td[data-label]) thead{display:none}
+  table:has(td[data-label]) tbody{display:block}
+  table:has(td[data-label]) tr{display:block;border:1px solid var(--border);border-radius:10px;background:#fff;margin:0 0 10px;padding:10px 12px}
+  table:has(td[data-label]) td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:4px 0;border:0;text-align:right;word-break:break-word}
+  table:has(td[data-label]) td::before{content:attr(data-label);color:var(--muted);font-size:12px;text-align:left;flex:none}
+  table:has(td[data-label]) td:first-child{font-size:15px}
+}
+@media(max-width:760px){
+  /* Colonna di selezione (unisci prodotti) e celle vuote: non servono nelle schede */
+  table:has(td[data-label]) td:not([data-label]):empty{display:none}
+  table:has(td[data-label]) td:first-child:not([data-label]){display:none}
+  table:has(td[data-label]) tr[style*="cursor"]:active{background:#f1f6f6}
+}
+@media(max-width:760px){table:has(td[data-label]) td:not([data-label]){text-align:left;justify-content:flex-start}}
+@media(max-width:760px){table:has(td[data-label]) td[data-label="PIN"]{flex-wrap:wrap}table:has(td[data-label]) td[data-label="PIN"] input{flex:1;min-width:0}.pin-state{flex-basis:100%;text-align:right}.user-admin-panel .form-actions{margin-bottom:14px}}
+
+/* ---- Barra di navigazione inferiore (versione online su smartphone) ---- */
+.bottom-bar{display:none}
+@media(max-width:760px){
+  .app-shell.online .mobile-menu{display:none}
+  .app-shell.online main{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+  .app-shell.online .sidebar{z-index:30;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  .app-shell.online .scrim{z-index:25}
+  .bottom-bar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;background:#fff;border-top:1px solid var(--border);box-shadow:0 -4px 16px #12203310;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+  .bottom-bar button{flex:1;min-width:0;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:0;background:transparent;color:#707a8d;border-radius:12px;font-size:11px;font-weight:600;padding:4px 2px}
+  .bottom-bar button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bottom-bar button.active{color:var(--accent,#ed531f);background:#fff0ea}
+  .page-header{margin-bottom:12px}
+  .page-header h1{margin:0}
+  .panel,.list-panel{border-radius:14px}
+}
+@media(max-width:360px){.bottom-bar button{font-size:10px}}
+@media(max-width:760px){
+  .app-shell.online .page-header>div>p{display:none}
+  .app-shell.online .page-size-control{display:none!important}
+  .app-shell.online .area-switch,.app-shell.online .sidebar-top-tools{display:none}
+  .app-shell.online .pagination.header-pagination{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .app-shell.online .pagination.header-pagination span{grid-column:1/-1;text-align:center}
+  .app-shell.online .list-panel{padding:12px}
+  .app-shell.online .list-header-controls,.app-shell.online .list-header-main{width:100%}
+  .app-shell.online .search-box{position:sticky;top:8px;z-index:5;box-shadow:0 4px 14px #1220331a}
+}
+
+/* ---- Interruttore Fatture/Recensioni in testata e Home a forme tonde (online) ---- */
+.top-switch{display:none}
+.home-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:6px 0 14px}
+.home-tile{border:0;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;aspect-ratio:1/1;padding:14px;min-width:0;box-shadow:0 8px 20px #12203322}
+.home-tile small{font-size:12px;font-weight:600;opacity:.9;letter-spacing:.3px}
+.home-tile strong{font:800 clamp(22px,8vw,34px)/1.1 Manrope,Inter,sans-serif;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.home-tile em{font-style:normal;font-size:11px;opacity:.85}
+.home-tile.blob-a{background:linear-gradient(145deg,#0f8b8d,#0b6e74);border-radius:62% 38% 54% 46%/48% 56% 44% 52%}
+.home-tile.blob-b{background:linear-gradient(145deg,#ed531f,#c93f12);border-radius:50%}
+.home-tile.blob-c{background:linear-gradient(145deg,#122033,#2a4a6b);border-radius:38% 62% 42% 58%/58% 42% 58% 42%}
+.home-tile.blob-d{background:linear-gradient(145deg,#d9a21b,#b87e0c);border-radius:0 50% 0 50%}
+@media(max-width:760px){
+  .app-shell.online main{padding-top:10px}
+  .top-switch{display:flex;position:sticky;top:0;z-index:20;margin:0 -18px 12px;padding:8px 18px;background:#f5f7fa;gap:6px}
+  .top-switch button{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--border);background:#fff;color:#4a5970;border-radius:999px;font-size:14px;font-weight:700}
+  .top-switch button.active{background:var(--teal);border-color:var(--teal);color:#fff}
+}
+@media(min-width:761px){.home-grid{grid-template-columns:repeat(4,minmax(0,220px))}}

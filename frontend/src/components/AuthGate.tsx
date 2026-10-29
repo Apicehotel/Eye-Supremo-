@@ -1,11 +1,15 @@
 import {FormEvent, useEffect, useState} from 'react';
 import {LockKeyhole, ShieldCheck} from 'lucide-react';
+import {supabaseOnline} from '../lib/supabaseDataService';
 import {clearAuth, currentSession, eyeApi, publicApi, saveAuth} from '../lib/api';
 
 type LoginUser = {username: string; display_name: string};
 type AuthStatus = {configured: boolean; central: boolean};
 type IdentityStatus = {offline?: boolean; offline_until?: string | null};
 type LoginResponse = IdentityStatus & {session: string; user: {id: number; username: string; display_name: string; role_name: string}};
+
+type PwdCred = {id: string; password?: string};
+const credApi = () => (navigator as unknown as {credentials?: {get: (o: object) => Promise<PwdCred | null>; store: (c: unknown) => Promise<unknown>}}).credentials;
 
 async function publicJson<T>(path: string): Promise<T> {
   return publicApi<T>(`/${path}`);
@@ -16,7 +20,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
   const [status, setStatus] = useState<AuthStatus>();
   const [users, setUsers] = useState<LoginUser[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {try {return localStorage.getItem('eye-supremo.last-username') || '';} catch {return '';}});
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,6 +44,13 @@ export function AuthGate({children}: {children: React.ReactNode}) {
         // Anche con identità centrale il profilo locale può essere preselezionato:
         // il campo resta modificabile e il PIN non viene mai memorizzato.
         if (options.length) setUsername(current => current || options[0].username);
+        if (!currentSession()) {
+          // Chrome: propone le credenziali salvate dal gestore password (senza finestra se ce n'e' una sola).
+          try {
+            const saved = await credApi()?.get({password: true, mediation: 'optional'});
+            if (active && saved?.password) {setUsername(saved.id); setPin(saved.password);}
+          } catch { /* gestore password non disponibile */ }
+        }
         if (currentSession()) {
           try {
             const me = await eyeApi<IdentityStatus>('/auth/me');
@@ -47,7 +58,7 @@ export function AuthGate({children}: {children: React.ReactNode}) {
           } catch {clearAuth(); if (active) setAuthenticated(false);}
         }
       } catch {
-        if (active) setError('Backend locale non raggiungibile. Verifica che Eye Supremo sia avviato e riprova.');
+        if (active) setError('Servizio non raggiungibile. Verifica la connessione (o che Eye Supremo sia avviato sul PC) e riprova.');
       } finally {if (active) setLoading(false);}
     }
     void refresh();
@@ -67,6 +78,11 @@ export function AuthGate({children}: {children: React.ReactNode}) {
       });
       const login = payload as LoginResponse;
       saveAuth(login);
+      try {
+        const Cred = (window as unknown as {PasswordCredential?: new (d: object) => unknown}).PasswordCredential;
+        if (Cred) await credApi()?.store(new Cred({id: username.trim(), password: pin, name: login.user.display_name}));
+      } catch { /* salvataggio facoltativo */ }
+      try {localStorage.setItem('eye-supremo.last-username', username.trim());} catch { /* facoltativo */ }
       setIdentity(login);
       setAuthenticated(true);
       setPin('');
@@ -86,13 +102,13 @@ export function AuthGate({children}: {children: React.ReactNode}) {
   </>;
   return <div className="auth-screen"><form className="auth-card" onSubmit={submit}>
     <LockKeyhole size={38}/><h1>Accedi a Eye Supremo</h1>
-    <p>{status?.central ? 'Usa il tuo profilo centrale. Il primo accesso su questo PC richiede Internet.' : 'Seleziona il profilo e inserisci il tuo PIN.'}</p>
-    {status?.central ? <label>Nome utente<input autoComplete="username" value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)}/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist></label>
+    <p>{status?.central ? (supabaseOnline ? 'Usa il tuo profilo centrale.' : 'Usa il tuo profilo centrale. Il primo accesso su questo PC richiede Internet.') : 'Seleziona il profilo e inserisci il tuo PIN.'}</p>
+    {status?.central ? <label>Nome utente<input id="eye-username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} maxLength={80} list="eye-known-users" onChange={e => setUsername(e.target.value)}/><datalist id="eye-known-users">{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</datalist>{users.length > 0 && <span className="login-roles">{users.map(user => <button type="button" key={user.username} className={`secondary-btn${username === user.username ? ' active' : ''}`} onClick={() => setUsername(user.username)}>{user.display_name}</button>)}</span>}</label>
       : <label>Profilo utente<select value={username} onChange={e => setUsername(e.target.value)}>{users.map(user => <option key={user.username} value={user.username}>{user.display_name}</option>)}</select></label>}
-    <label>PIN<input autoComplete="current-password" inputMode="numeric" pattern="[0-9]*" minLength={6} maxLength={12} type="password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="Il tuo PIN"/></label>
+    <label>PIN<input id="eye-pin" name="password" autoComplete="current-password" inputMode="numeric" pattern="[0-9]*" minLength={6} maxLength={12} type="password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="Il tuo PIN"/></label>
     {error && <div className="error" role="alert">{error}</div>}
     <button className="primary-btn" disabled={!status || !username.trim() || pin.length < 6 || busy}>{busy ? 'Verifica…' : status?.configured ? 'Accedi' : 'Attiva profilo'}</button>
     {!status && <button type="button" className="secondary-btn" onClick={() => setRetry(value => value + 1)}>Riprova</button>}
-    <small>{status?.central ? 'Offline puoi accedere solo dopo una verifica online su questo PC, entro il periodo autorizzato.' : 'I dati del profilo restano sul PC.'}</small>
+    <small hidden={supabaseOnline}>{status?.central ? 'Offline puoi accedere solo dopo una verifica online su questo PC, entro il periodo autorizzato.' : 'I dati del profilo restano sul PC.'}</small>
   </form></div>;
 }

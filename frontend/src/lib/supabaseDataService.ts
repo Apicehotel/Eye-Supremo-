@@ -1,0 +1,236 @@
+// Versione online (sola lettura): il frontend parla direttamente con le Edge Functions
+// Supabase `eye-identity` e `eye-central-gateway`, senza backend FastAPI.
+// Implementa la stessa interfaccia `DataService` e restituisce oggetti Response, cosi'
+// le pagine esistenti non cambiano. Endpoint non coperti rispondono 404 "non disponibile online".
+import type { ApiArea, DataService } from "./dataService.ts";
+import { HOTELS } from "./reviewLexicon.ts";
+import * as reviewsEngine from "./reviewsEngine.ts";
+
+const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+const baseUrl = String(env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+const publishableKey = String(env.VITE_SUPABASE_PUBLISHABLE_KEY || "");
+
+export const supabaseOnline = env.VITE_EYE_BACKEND === "supabase" && Boolean(baseUrl && publishableKey);
+
+const reply = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const unavailable = () => reply({ detail: "Funzione non disponibile nella versione online" }, 404);
+
+const storedUser = (): { username?: string } | null => {
+  try { return JSON.parse(localStorage.getItem("eye-supremo.user") || "null"); } catch { return null; }
+};
+const token = () => localStorage.getItem("eye-supremo.session") || "";
+
+async function call(fn: "eye-identity" | "eye-central-gateway", body: object, bearer?: string) {
+  const headers: Record<string, string> = { "Content-Type": "application/json", apikey: publishableKey };
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  try {
+    const res = await fetch(`${baseUrl}/functions/v1/${fn}`, { method: "POST", headers, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data: data as any };
+  } catch {
+    return { status: 503, data: { error: "Servizio non raggiungibile" } };
+  }
+}
+
+// Funzioni RPC di Supabase (schema public): stesse usate dal backend locale, accettano il token di sessione.
+async function rpc(name: string, args: object): Promise<Response> {
+  try {
+    const res = await fetch(`${baseUrl}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: publishableKey },
+      body: JSON.stringify({ p_username: storedUser()?.username || "", p_pin: token(), ...args }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return reply(data);
+    const message = String(data?.message || "");
+    if (/credenziali/i.test(message)) return reply({ detail: "Sessione scaduta" }, 401);
+    return reply({ detail: message || "Operazione non riuscita" }, res.status);
+  } catch {
+    return reply({ detail: "Servizio non raggiungibile" }, 503);
+  }
+}
+const withEnabled = async (r: Response) => (r.ok ? reply({ enabled: true, ...(await r.json()) }) : r);
+
+const gateway = (body: object) => call("eye-central-gateway", { username: storedUser()?.username || "", pin: token(), ...body });
+const failure = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status === 200 ? 500 : r.status);
+
+// ---- Recensioni: scaricate una volta per sessione (poche migliaia) e calcolate nel browser ----
+let reviewsCache: Promise<reviewsEngine.Processed> | null = null;
+async function loadReviews(): Promise<reviewsEngine.Processed | Response> {
+  if (!reviewsCache) {
+    reviewsCache = (async () => {
+      const all: reviewsEngine.CentralReview[] = [];
+      for (let offset = 0; offset < 20000; offset += 500) {
+        const r = await rpc("eye_central_review_page", { p_offset: offset, p_limit: 500, p_since: null });
+        if (!r.ok) throw r;
+        const data = await r.json();
+        all.push(...(data.items || []));
+        if (!(data.items || []).length || all.length >= Number(data.total ?? 0)) break;
+      }
+      return reviewsEngine.process(all);
+    })();
+  }
+  try { return await reviewsCache; } catch (e) { reviewsCache = null; return e instanceof Response ? e : reply({ detail: "Recensioni non disponibili" }, 503); }
+}
+
+async function reviewsRequest(route: string, url: URL): Promise<Response> {
+  const loaded = await loadReviews();
+  if (loaded instanceof Response) return loaded;
+  const hotel = url.searchParams.get("hotel_code");
+  const scoped = reviewsEngine.forHotel(loaded.valid, hotel);
+  if (route === "/hotels") return reply(HOTELS.map((h, i) => ({ id: i + 1, code: h.code, name: h.name, active: true })));
+  if (route === "/reviews") {
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+    const items = q ? scoped.filter((r) => `${r.text} ${r.room || ""} ${r.hotel}`.toLowerCase().includes(q)) : scoped;
+    return reply(items);
+  }
+  if (route === "/reviews/stats") {
+    if (!hotel) return reply(loaded.stats);
+    const raw = reviewsEngine.forHotel(loaded.all, hotel);
+    const valid = reviewsEngine.forHotel(loaded.valid, hotel);
+    return reply({ raw: raw.length, expanded: raw.length, normalized: valid.length, valid: valid.length, excluded: raw.filter((r) => !r.valid).length, valid_votes: valid.filter((r) => r.rating !== null).length, without_room: valid.filter((r) => !r.room).length, without_rating: valid.filter((r) => r.rating === null).length, duplicates: raw.filter((r) => r.valid).length - valid.length });
+  }
+  if (route === "/rankings") return reply(reviewsEngine.rankings(scoped, Number(url.searchParams.get("limit")) || 5));
+  if (route === "/rankings/timeline") return reply({ rooms: reviewsEngine.roomTimeline(scoped) });
+  return unavailable();
+}
+
+// ---- Gestione utenti centrali (eye-identity: list_users / create_user / set_pin / set_active) ----
+// La UI lavora con id numerici: online li ricaviamo dall'ordine dell'elenco e li risolviamo in username.
+let userIds: string[] = [];
+const idOf = (username: string) => userIds.indexOf(username) + 1;
+const asUser = (u: any) => ({ id: idOf(u.username), username: u.username, display_name: u.display_name, role_name: u.role, active: u.active, pin_configured: true, central: true });
+
+async function listUsers() {
+  const r = await call("eye-identity", { action: "list_users" }, token());
+  if (r.status === 200) userIds = (r.data.users || []).map((u: any) => u.username);
+  return r;
+}
+
+async function usersRequest(route: string, method: string, options?: RequestInit): Promise<Response> {
+  const body = options?.body ? JSON.parse(String(options.body)) : {};
+  const fail = (r: { status: number; data: any }) => reply({ detail: r.data?.error || "Operazione non riuscita" }, r.status);
+  if (route === "/auth/users" && method === "GET") {
+    const r = await listUsers();
+    return r.status === 200 ? reply((r.data.users || []).map(asUser)) : fail(r);
+  }
+  if (route === "/auth/users" && method === "POST") {
+    const r = await call("eye-identity", { action: "create_user", username: body.username, display_name: body.display_name, pin: body.pin }, token());
+    if (r.status !== 200) return fail(r);
+    await listUsers();
+    return reply(asUser(r.data.user));
+  }
+  const m = route.match(/^\/auth\/users\/(\d+)(\/pin)?$/);
+  if (!m) return unavailable();
+  const id = Number(m[1]);
+  if (!userIds[id - 1]) await listUsers();
+  const username = userIds[id - 1];
+  if (!username) return reply({ detail: "Utente non trovato" }, 404);
+  const self = storedUser()?.username === username;
+  if (m[2] && method === "PUT") {
+    const r = await call("eye-identity", { action: "set_pin", username, pin: body.pin }, token());
+    return r.status === 200 ? reply({ ok: true, user_id: id, reauthenticate: self }) : fail(r);
+  }
+  if (!m[2] && method === "PATCH") {
+    if (self && body.active === false) return reply({ detail: "Non puoi disattivare l'utente attualmente collegato" }, 400);
+    const r = await call("eye-identity", { action: "set_active", username, active: body.active }, token());
+    return r.status === 200 ? reply({ id, active: r.data.user.active }) : fail(r);
+  }
+  return unavailable();
+}
+
+async function eyeRequest(path: string, options?: RequestInit): Promise<Response> {
+  const url = new URL(path, "http://x");
+  const route = url.pathname.replace(/\/+$/, "");
+  const method = (options?.method || "GET").toUpperCase();
+
+  if (route === "/auth/status") return reply({ configured: true, bootstrap_required: false, central: true });
+  if (route === "/auth/login-options") return reply([
+    { username: "supremo", display_name: "Supremo", role_name: "supremo" },
+    { username: "sviluppatore", display_name: "Sviluppatore", role_name: "developer" },
+  ]);
+  if (route === "/auth/login" && method === "POST") {
+    const body = JSON.parse(String(options?.body || "{}"));
+    const r = await call("eye-identity", { action: "login", username: body.username, pin: body.pin });
+    if (r.status !== 200) return reply({ detail: r.data?.error || "Accesso non riuscito" }, r.status);
+    const u = r.data.user;
+    return reply({ session: r.data.token, user: { id: 0, username: u.username, display_name: u.display_name, role_name: u.role } });
+  }
+  if (route === "/auth/me") {
+    const r = await call("eye-identity", { action: "me" }, token());
+    return r.status === 200 ? reply({ offline: false }) : reply({ detail: "Sessione non valida" }, 401);
+  }
+  if (route === "/auth/logout" && method === "POST") {
+    await call("eye-identity", { action: "logout" }, token());
+    return reply({ ok: true });
+  }
+
+  if (route === "/auth/users" || route.startsWith("/auth/users/")) return usersRequest(route, method, options);
+  if (method !== "GET") return unavailable();
+  if (["/hotels", "/reviews", "/reviews/stats", "/rankings", "/rankings/timeline"].includes(route)) return reviewsRequest(route, url);
+
+  const detail = (prefix: string) => (route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : "");
+  const invoiceHash = detail("/central/invoices/") || detail("/invoice-ref/");
+  if (invoiceHash) {
+    const r = await rpc("eye_central_invoice_detail", { p_source_hash: invoiceHash });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.invoice_number ? reply({ ...data, source: "central" }) : reply({ detail: "Fattura non trovata" }, 404);
+  }
+  if (route === "/central/suppliers") {
+    return withEnabled(await rpc("eye_central_supplier_page", { p_query: url.searchParams.get("q") || "", p_limit: Number(url.searchParams.get("limit")) || 2000 }));
+  }
+  const supplierId = detail("/central/suppliers/");
+  if (supplierId) {
+    const r = await rpc("eye_central_supplier_detail", { p_supplier_id: supplierId });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.supplier ? reply(data) : reply({ detail: "Fornitore non trovato" }, 404);
+  }
+  const productName = detail("/central/products/");
+  if (productName) {
+    const r = await rpc("eye_central_product_detail", { p_canonical_name: productName });
+    if (!r.ok) return r;
+    const data = await r.json();
+    return data?.product ? reply(data) : reply({ detail: "Prodotto non trovato" }, 404);
+  }
+
+  if (route === "/central/invoices") {
+    const q = (url.searchParams.get("q") || "").trim();
+    const limit = Number(url.searchParams.get("limit")) || 50;
+    const offset = Number(url.searchParams.get("offset")) || 0;
+    if (q) {
+      const r = await gateway({ action: "search_invoices", query: q, limit });
+      if (r.status !== 200) return failure(r);
+      const items = r.data.items || [];
+      return reply({ enabled: true, items, count: items.length, total: items.length, offset: 0, limit, source: "supabase" });
+    }
+    const r = await gateway({ action: "invoice_page", limit, offset });
+    if (r.status !== 200) return failure(r);
+    return reply({ enabled: true, items: r.data.items || [], count: (r.data.items || []).length, total: r.data.total, offset, limit, source: "supabase" });
+  }
+  return unavailable();
+}
+
+// Area "core": elenchi che il backend locale arricchisce con regole Python; online arriva il catalogo grezzo.
+async function coreRequest(path: string, options?: RequestInit): Promise<Response> {
+  const url = new URL(path, "http://x");
+  const route = url.pathname.replace(/\/+$/, "");
+  if ((options?.method || "GET").toUpperCase() !== "GET") return unavailable();
+  if (route === "/products") {
+    const r = await rpc("eye_central_product_page", { p_query: url.searchParams.get("q") || "", p_limit: Math.min(Number(url.searchParams.get("limit")) || 200, 500) });
+    return r.ok ? reply((await r.json()).items || []) : r;
+  }
+  if (route === "/product-config" || route === "/product-tracking") return reply({});
+  return unavailable();
+}
+
+export const supabaseDataService: DataService = {
+  async request<T>(area: ApiArea, path: string, options?: RequestInit) {
+    const response = await supabaseDataService.raw(area, path, options);
+    if (!response.ok) throw response;
+    return response.json() as Promise<T>;
+  },
+  raw: async (area, path, options) => (area === "eye" ? eyeRequest(path, options) : coreRequest(path, options)),
+};
