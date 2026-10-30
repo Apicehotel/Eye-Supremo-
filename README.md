@@ -15,7 +15,18 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.27`
+**Versione applicativa:** `2.0.42`
+
+**Novità 2.0.28 → 2.0.42** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39 e 2.0.42):
+
+- **Ricerca prodotti deterministica:** nuovo modulo `backend/app/deterministic_product_search.py` con test di regressione. Nel **Report storico** i risultati non pertinenti (es. cercando «carta») sono filtrati da `isUsefulHistoryMatch` in `frontend/src/pages/HistoricalReport.tsx` (2.0.42).
+- **Report storico:** mostra ogni osservazione anche se più fatture hanno la stessa data; nuovi filtri **fornitore** e **periodo** con KPI e confronti fornitori ricalcolati; **export CSV** (`eye-storico-prodotti.csv`, separatore `;`, UTF-8 con BOM).
+- **Archivio file fatture:** nuova pagina con ricerca locale (numero, fornitore, ecc.) e download dell'XML originale (`/api/eye/invoice-files`); se il file non è sul PC compare «XML non disponibile su questo PC».
+- **Recensioni per utente:** permesso `can_view_reviews` (predefinito: sì), gestibile da **Utenti**; chi non lo ha non vede le recensioni né le relative API. Migrazione locale `2026-10-29-01` e migrazione Supabase `20261029095503_add_review_visibility_permission.sql`. Aggiunti anche i filtri camere Jazz & Wine.
+- **Aggiornamenti via Supabase:** l'app controlla e scarica l'installer dall'Edge Function `eye-updates` (bucket privato `eye-updates`, serve la sessione centrale, verifica SHA-256). Il tag `v*` fa partire `release-windows.yml`, che compila, fa lo smoke test e pubblica con `scripts/publish_eye_update.py` (ultime 5 versioni conservate). Non si usano più le GitHub Releases.
+- **Importatore archivi:** `scripts/import_archives_supabase.py` carica fatture (XML/P7M) e recensioni (MSG) nei bucket privati Supabase; riprendibile, protetto da path traversal, con deduplica per contenuto. Richiede variabili d'ambiente lato server (mai nel repo).
+- **Versione online:** Dockerfile unico (API + frontend, vedi [docs/DEPLOY_ONLINE.md](docs/DEPLOY_ONLINE.md)) e frontend Vercel in sola lettura con layout smartphone: dettagli nella sezione «Versione online».
+- **CI:** scansione di sicurezza SkillSpector su PR e push (`.github/workflows/skillspector.yml`).
 
 **Novità 2.0.27:** pagina «Salute dati» con conteggi locali, sincronizzati, errori import, recensioni incomplete, ultimi sync e backup; installer Windows più chiaro e con IA locale opzionale.
 
@@ -70,7 +81,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server.
 **Branch principale:** `main` (modifiche solo via branch + PR)
-**Ultimo aggiornamento:** 13 ottobre 2026
+**Ultimo aggiornamento:** 30 ottobre 2026
 
 ### Completato
 
@@ -83,8 +94,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 - login personale centrale con PIN e autorizzazione offline sul PC;
 - tutti i profili condividono gli stessi permessi operativi; gestione utenti e PIN dall'area Sistema;
 - Eye AI locale con Qwen/Ollama, agenti interni e fallback deterministico;
-- GitHub Actions per test, build Windows e pubblicazione delle GitHub Releases;
-- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima GitHub Release e download diretto dell'installer (fallback locale se serve);
+- GitHub Actions per test, build Windows e pubblicazione dell'installer su Supabase;
+- controllo aggiornamenti da **Sistema → Aggiornamenti**, confronto con l'ultima versione pubblicata su Supabase e download dell'installer con verifica SHA-256;
 - modalità offline: ricerche, dashboard e dettagli usano SQLite/cache locale quando Supabase o Internet non sono disponibili;
 - ricerca dello storico prodotti con suggerimenti, selezione delle varianti e layout responsive a due colonne;
 - gestione corretta degli errori Supabase: se il catalogo centrale non è raggiungibile, la schermata resta utilizzabile senza errore 500;
@@ -94,8 +105,8 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `152 passed`;
-- build frontend Vite: riuscita;
+- backend: `257 passed`;
+- frontend: `npm test` 23 test passati e build Vite riuscita (verifiche del 30 ottobre 2026 sulla `2.0.42`);
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
 - build Windows locale pronta tramite `scripts\\build_windows.ps1`;
@@ -103,12 +114,12 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Da completare
 
-- sicurezza accessi: imporre il cambio PIN al primo accesso (il PIN predefinito non è più mostrato dalla UI);
-- pubblicare una GitHub Release coerente con la versione dell'installer dopo rebuild Windows;
+- pubblicare l'installer della `2.0.42` creando il tag `v2.0.42` (l'ultimo tag esistente è `v2.0.38`; il workflow carica su Supabase);
+- sicurezza accessi: limitare i tentativi di login locale (oggi il blocco «Troppi tentativi» esiste solo nel percorso centrale);
 - verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
 
-GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla le release da GitHub e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
+GitHub conserva codice e versioni, non fatture o recensioni reali. L'app controlla gli aggiornamenti su Supabase con la sessione centrale e scarica l'installer solo dopo richiesta dell'utente; l'installazione resta manuale e confermata.
 
 ## Hotel preconfigurati
 
@@ -125,8 +136,9 @@ disattivazione avvengono nel centrale e richiedono Internet. Il riavvio del PC
 conserva il PIN scelto; nessun verificatore degli altri utenti viene scaricato.
 
 Gli utenti `developer` e `supremo` mantengono gli stessi permessi operativi. Per le
-recensioni ogni profilo vede tutti gli hotel; le fatture restano nell'archivio unico
-Apice. Gli account precedentemente creati solo sul PC vanno registrati nel centrale.
+recensioni ogni profilo vede tutti gli hotel, ma la visibilità delle recensioni si può
+disattivare per singolo utente (permesso `can_view_reviews`, da **Utenti**); le fatture
+restano nell'archivio unico Apice. Gli account precedentemente creati solo sul PC vanno registrati nel centrale.
 
 **Attivazione:** prima di aggiornare i PC applicare la migrazione e distribuire le
 funzioni descritte in [docs/CENTRAL_IDENTITY.md](docs/CENTRAL_IDENTITY.md). La modalità
@@ -355,12 +367,12 @@ npm ci
 npm run build
 ```
 
-La PR esegue automaticamente backend test + frontend build e la pipeline Windows genera l'installer.
+La PR esegue automaticamente backend test + frontend test + frontend build, la scansione SkillSpector e la pipeline Windows genera l'installer (nome file `EyeSupremo-Setup-<versione>.exe`, versione da tenere allineata in `frontend/package.json`, `backend/app/main.py`, `backend/app/update_service.py` e `installer/EyeSupremo.iss`).
 
 ## Sicurezza
 
 - dati reali locali per default;
-- autenticazione locale con PIN e sessione (PIN iniziale da cambiare al primo accesso);
+- autenticazione locale con PIN e sessione (PIN con hash PBKDF2-SHA256, mai salvato in chiaro);
 - ruolo ricavato dalla sessione, non accettato liberamente dal browser dopo la configurazione;
 - hotel delle recensioni limitato ai permessi utente;
 - agenti con strumenti dichiarati e limitati;
