@@ -26,5 +26,6 @@ def test_carta_search_excludes_packaging_context_and_keeps_paper_products():
     assert is_product_search_match("Carta da forno 60 x 40", "carta")
     assert is_product_search_match("Carta vetrata resinata", "carta")
     assert not is_product_search_match("Capocollo in carta stagionato", "carta")
-    assert not is_product_search_match("Bicchiere in carta 240 ml", "carta")
+    # Un bicchiere di carta È un prodotto di carta (regola materiali): cibo avvolto in carta no.
+    assert is_product_search_match("Bicchiere in carta 240 ml", "carta")
     assert not is_product_search_match("Acqua Acqua 1 l", "carta")
