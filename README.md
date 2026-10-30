@@ -15,9 +15,11 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.42`
+**Versione applicativa:** `2.0.43`
 
-**Novità 2.0.28 → 2.0.42** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39 e 2.0.42):
+**Novità 2.0.28 → 2.0.43** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39, 2.0.42 e 2.0.43):
+
+- **2.0.43 – Ricerca per materiali, sinonimi e famiglie:** `carta`/`plastica`… trovano i prodotti fatti di quel materiale (non il cibo avvolto), «bombolone choco» = «choco bombolone», `marmellata` copre marm/confet/confettura, varianti ordinate per gusto e grammatura (vedi sezione dedicata). Include il fix del Report storico che non trovava i prodotti.
 
 - **Ricerca prodotti deterministica:** nuovo modulo `backend/app/deterministic_product_search.py` con test di regressione. Nel **Report storico** i risultati non pertinenti (es. cercando «carta») sono filtrati da `isUsefulHistoryMatch` in `frontend/src/pages/HistoricalReport.tsx` (2.0.42).
 - **Report storico:** mostra ogni osservazione anche se più fatture hanno la stessa data; nuovi filtri **fornitore** e **periodo** con KPI e confronti fornitori ricalcolati; **export CSV** (`eye-storico-prodotti.csv`, separatore `;`, UTF-8 con BOM).
@@ -106,7 +108,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 ### Verificato
 
 - backend: `257 passed`;
-- frontend: `npm test` 23 test passati e build Vite riuscita (verifiche del 30 ottobre 2026 sulla `2.0.42`);
+- frontend: `npm test` 23 test passati e build Vite riuscita (verifiche del 30 ottobre 2026 sulla `2.0.43`);
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
 - build Windows locale pronta tramite `scripts\\build_windows.ps1`;
@@ -114,7 +116,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Da completare
 
-- pubblicare l'installer della `2.0.42` creando il tag `v2.0.42` (l'ultimo tag esistente è `v2.0.38`; il workflow carica su Supabase);
+- pubblicare l'installer della `2.0.43` creando il tag `v2.0.43` (l'ultimo tag esistente è `v2.0.38`; il workflow carica su Supabase);
 - sicurezza accessi: limitare i tentativi di login locale (oggi il blocco «Troppi tentativi» esiste solo nel percorso centrale);
 - verificare su PC pulito: installazione, doppio clic → finestra app (non browser), primo login, import XML e aggiornamento;
 - eventuali aggiornamenti futuri: firma digitale dell'installer e installazione automatica opzionale dopo conferma.
