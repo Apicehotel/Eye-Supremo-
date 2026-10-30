@@ -10,6 +10,15 @@ from decimal import Decimal
 from rapidfuzz import fuzz
 from .normalization import extract_content, normalize_text
 
+# Forme con cui la stessa famiglia compare in fattura (parole intere e abbreviazioni dei fornitori).
+_MARMELLATA = ("marmellata", "marmellate", "marm", "confettura", "confetture", "confet", "conf extra")
+_BOMBOLONI = (
+    "bomboloni", "bombolino", "bombolini", "bombolone", "bomboloncino", "bomboloncini",
+    "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
+    "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
+)
+_CHOCO = ("choco", "chocolate", "cioccolato", "cioccolata", "ciocc", "cioc", "cioco")
+
 PRODUCT_FAMILY_ALIASES = {
     # Never use the bare substring ``lamp`` as the only remote query: it
     # matches unrelated words such as lampone and lampante.
@@ -25,23 +34,26 @@ PRODUCT_FAMILY_ALIASES = {
     "carta igienica": ("carta igienica", "c igienica"),
     "c ig": ("carta igienica", "c ig"),
     # Sinonimi: in fattura la stessa cosa è «marmellata», «confettura» o «MARM.».
-    "marmellata": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
-    "marmellate": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "marmellata": _MARMELLATA,
+    "marmellate": _MARMELLATA,
     "mozzarella": ("mozzarella", "mozzarelle", "mozz"),
     "mozzarelle": ("mozzarella", "mozzarelle", "mozz"),
-    "confettura": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
-    "confetture": ("marmellata", "marmellate", "marm", "confettura", "confetture"),
+    "confettura": _MARMELLATA,
+    "confetture": _MARMELLATA,
+    # Gusto: «choco» in fattura è anche «cioccolato», «ciocc.», «cioc».
+    "choco": _CHOCO,
+    "chocolate": _CHOCO,
+    "cioccolato": _CHOCO,
+    "cioccolata": _CHOCO,
+    "ciocc": _CHOCO,
+    "cioc": _CHOCO,
     # Include mini/composti: in fattura spesso "MINIBOMBOLONI" o "mini bomboloni".
-    "bomboloni": (
-        "bomboloni", "bombolino", "bombolini", "bombolone",
-        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
-        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
-    ),
-    "bombolone": (
-        "bomboloni", "bombolino", "bombolini", "bombolone",
-        "mini bomboloni", "mini bombolone", "mini bombolini", "mini bombolino",
-        "minibomboloni", "minibombolone", "minibombolini", "minibombolino",
-    ),
+    "bomboloni": _BOMBOLONI,
+    "bombolone": _BOMBOLONI,
+    "bomboloncini": _BOMBOLONI,
+    "bomboloncino": _BOMBOLONI,
+    "bombolino": _BOMBOLONI,
+    "bombolini": _BOMBOLONI,
 }
 
 # Stem sicuri per match substring (es. minibomboloni). Mai "bombol": matcherebbe bombola.
@@ -58,10 +70,121 @@ PRODUCT_REQUIRED_SUBSTRINGS = {
     "confetture": ("marmellat", "confettur", "marm "),
     "bomboloni": ("bombolin", "bombolon"),
     "bombolone": ("bombolin", "bombolon"),
+    "bomboloncini": ("bombolin", "bombolon"),
+    "bomboloncino": ("bombolin", "bombolon"),
+    "bombolino": ("bombolin", "bombolon"),
+    "bombolini": ("bombolin", "bombolon"),
+}
+
+# Parole che, dentro una famiglia, indicano un'altra cosa: il prodotto cercato è quello,
+# non il ripieno/accessorio/omonimo (marmellata ≠ crostata alla marmellata, marmo, dosatore).
+FAMILY_EXCLUDED_TOKENS = {
+    _MARMELLATA: {
+        "marmo", "marmi", "confetti", "confettini", "confetto", "crostata", "crostate", "crostatine", "tartelle",
+        "tartellette", "zatterine", "cornetto", "cornetti", "brioche", "torta", "torte", "biscotti", "biscotto",
+        "ciambella", "ciambelle", "krapfen", "plumcake", "merendina", "merendine", "dosatore", "dosatori", "dispenser",
+    },
+    _BOMBOLONI: {"bombola", "bombole", "bomba", "sifone", "charge", "cream", "co2", "propano", "elio", "gas", "bomboniera", "bomboniere"},
 }
 
 # Stem generici troppo corti/ambigui: non usarli in ILIKE substring.
 UNSAFE_GENERIC_STEMS = {"bombol", "lamp", "acqu", "cart"}
+
+# Abbreviazioni dei fornitori: valgono solo come parola intera (marm ≠ marmo, confet ≠ confetti).
+_ABBREVIATIONS = {"marm", "confet", "mozz", "ciocc", "cioc", "cioco"}
+# Termini di famiglia che sono frasi e non coppie di parole libere («conf extra» ≠ «olio extra … conf»).
+_STRICT_PHRASES = {"conf extra"}
+
+
+def _family_excluded(description_tokens: set[str], query_text: str) -> bool:
+    """True se la descrizione contiene una parola che, per quella famiglia, indica un'altra cosa."""
+    query_tokens = set(query_text.split())
+    for family, excluded in FAMILY_EXCLUDED_TOKENS.items():
+        if not any(token in family for token in query_tokens):
+            continue
+        # Cercando proprio «crostata marmellata» le crostate non vanno escluse (nemmeno al plurale).
+        active = {word for word in excluded if not any(word[:6] == token[:6] for token in query_tokens)}
+        if description_tokens & active:
+            return True
+    return False
+
+
+# --- Materiali: «carta», «plastica»… = prodotti fatti di quel materiale, non cibo avvolto ----------------
+MATERIALS = {
+    "carta": {"carta", "cartaceo", "cartacea", "cartacei"},
+    "cartone": {"cartone", "cartoni"},
+    "plastica": {"plastica", "plastiche", "plastic", "plastificato", "plastificata", "pvc", "polietilene", "polipropilene"},
+    "vetro": {"vetro", "vetri"},
+    "alluminio": {"alluminio", "alluminium", "allum"},
+    "legno": {"legno", "legna"},
+}
+# Oggetti (stoviglie, sacchetti, nastri…): se sono il nome principale, il materiale è quello dell'oggetto.
+OBJECT_HEADS = {
+    "bicchiere", "bicchieri", "bicch", "calice", "calici", "piatto", "piatti", "piattino", "piattini", "posate", "posata",
+    "forchetta", "forchette", "cucchiaio", "cucchiai", "cucchiaino", "cucchiaini", "coltello", "coltelli", "vassoio",
+    "vassoi", "ciotola", "ciotole", "tazza", "tazze", "brocca", "caraffa", "contenitore", "contenitori", "vaschetta",
+    "vaschette", "scatola", "scatole", "sacchetto", "sacchetti", "sacco", "sacchi", "shopper", "busta", "buste", "borsa",
+    "borse", "rotolo", "rotoli", "nastro", "tovagliolo", "tovaglioli", "tovaglia", "tovaglie", "tovaglietta",
+    "tovagliette", "teglia", "teglie", "cannuccia", "cannucce", "coperchio", "coperchi", "pirottini", "stoviglie",
+    "cappello", "foglio", "fogli", "risma", "scopino", "paraspigolo", "pinze", "scatolame",
+}
+# Marche e generi alimentari che il riconoscimento prodotti non conosce ancora.
+FOOD_HINTS = {
+    "nutella", "rhum", "rum", "vodka", "gin", "whisky", "whiskey", "tonica", "gatorade", "schweppes", "cola",
+    "aranciata", "chinotto", "birra", "vino", "prosecco", "spumante", "liquore", "amaro", "caramelle", "caramella",
+    "cioccolatini", "cioccolatino", "gelato", "biscotti", "snack", "merendine", "pasticcini", "praline", "succo",
+    "succhi", "latte", "panna", "olio", "aceto", "yogurt", "formaggio", "salume", "salami", "pasta", "riso",
+}
+FEE_TOKENS = {"conai", "contrib", "contributo", "ambient"}
+_SKIP_HEAD = {"x", "pz", "cf", "ct", "conf", "n", "nr", "set", "kit", "confezione"}
+
+
+def _head_token(tokens: list[str]) -> str:
+    for token in tokens:
+        if token.isdigit() or token in _SKIP_HEAD:
+            continue
+        return token
+    return ""
+
+
+def _has_food_signal(text: str, ignore: set[str]) -> bool:
+    """Il prodotto è un alimento/bevanda (il materiale è solo l'involucro)?
+
+    Ciò che segue «per» è lo scopo («carta per muffin»), non il prodotto.
+    """
+    words = [word for word in text.split() if word not in ignore]
+    if "per" in words:
+        words = words[: words.index("per")]
+    if set(words) & FOOD_HINTS:
+        return True
+    try:
+        from .product_recognition import _clean_tokens, _find_category
+
+        cleaned, _ = _clean_tokens(" ".join(words))
+        return bool(_find_category(cleaned))
+    except Exception:  # noqa: BLE001 - il riconoscimento non deve mai rompere la ricerca
+        return False
+
+
+def is_material_match(description: str, material: str) -> bool:
+    """Prodotti FATTI di quel materiale: «carta igienica», «shopper carta», «bicchieri pet»…
+
+    Non vale per cibo o bevande solo avvolti/confezionati in quel materiale
+    («capocollo in carta», «caramelle in plastica», «latte in PET») né per i contributi CONAI.
+    """
+    forms = MATERIALS.get(material)
+    if not forms:
+        return False
+    tokens = normalize_text(description).split()
+    token_set = set(tokens)
+    head = _head_token(tokens)
+    has_material = bool(token_set & forms) or (material == "plastica" and "pet" in token_set and head in OBJECT_HEADS)
+    if not has_material or token_set & FEE_TOKENS:
+        return False
+    if head in OBJECT_HEADS:
+        return True
+    return not _has_food_signal(" ".join(tokens), forms | {"pet"})
+
 
 # These are invoice line items, not products. Keep them available to the
 # supplier/expense views, but out of the product catalogue and its search.
@@ -174,6 +297,11 @@ def search_terms(query: str) -> tuple[str, ...]:
     # (limoncelli←limoncello, pavimenti←pavimento) senza aprire substring pericolose.
     variants = [normalized]
     for token in normalized.split():
+        # Sinonimi/abbreviazioni per ogni parola («choco» → cioccolato, ciocc…): servono a recuperare le righe candidate.
+        if len(normalized.split()) > 1:
+            for alias in PRODUCT_FAMILY_ALIASES.get(token, ()):
+                if alias not in variants:
+                    variants.append(alias)
         if len(token) >= 6 and token[-1] in "aeiou":
             stem = token[:-1]
             if stem not in UNSAFE_GENERIC_STEMS and stem not in variants:
@@ -365,23 +493,8 @@ def is_family_match(description: str, query: str) -> bool:
         if tokens & {"tullia", "lilia", "leviss", "benedetto", "levissima", "sanbenedetto"}:
             return True
         return ("acqua" in tokens or "acque" in tokens) and bool(tokens & beverage)
-    if normalized == "carta":
-        # "carta" da sola deve indicare il materiale/prodotto cercato, non
-        # qualsiasi descrizione che lo citi come involucro o contesto
-        # (es. "capocollo in carta", "bicchiere in carta").
-        excluded = {
-            "capocollo", "salame", "prosciutto", "formaggio", "carne", "coppa",
-            "mortadella", "pancetta", "salsiccia", "bresaola", "pirottini",
-            "bicchiere", "bicchieri", "borsa", "borse", "busta", "buste",
-            "sacchetto", "sacchetti", "shopper", "sacco", "sacchi", "coppetta",
-            "tovaglietta", "tovagliette", "confezione", "imballo", "imballaggio",
-            "involucro", "contenitore", "contenitori",
-        }
-        if tokens & excluded:
-            return False
-        # La parola deve essere presente come token: non basta una collisione
-        # dentro un nome o dentro il fornitore.
-        return "carta" in tokens or "cartaceo" in tokens or "cartacea" in tokens
+    if normalized in MATERIALS:
+        return is_material_match(description, normalized)
     return True
 
 
@@ -402,14 +515,28 @@ def is_product_search_match(description: str, query: str) -> bool:
             return "igienica" in tokens and ("carta" in tokens or "c" in tokens)
         if query_text in {"acqua", "acque", "lampadine", "lamp", "lampada", "a4", "carta a4"}:
             return is_family_match(description, query_text)
-    if query_text == "carta":
-        return is_family_match(description, query_text)
+    material = normalize_text(extract_product_query(query)).strip()
+    if material in MATERIALS:
+        return is_material_match(description, material)
+    if _family_excluded(tokens, query_text):
+        return False
     terms = match_terms(query_text)
 
+    padded_text = f" {text} "
+
+    def matches_variant(variant: str) -> bool:
+        if " " in variant:
+            return f" {variant} " in padded_text
+        # Le abbreviazioni dei fornitori valgono solo come parola intera: «marm» non deve trovare «marmo»,
+        # «confet» non «confetti», «cioc» non «ciociaro».
+        if variant in _ABBREVIATIONS:
+            return variant in tokens
+        return matches_one(variant)
+
     def matches(token: str) -> bool:
-        # Più parole: ognuna vale anche con i suoi sinonimi (marmellata ≈ marm ≈ confettura).
+        # Più parole: ognuna vale anche con i suoi sinonimi (marmellata ≈ marm ≈ confettura, choco ≈ cioccolato).
         variants = PRODUCT_FAMILY_ALIASES.get(token)
-        if variants and len(variants) > 1 and any(matches_one(v) for v in variants):
+        if variants and len(variants) > 1 and any(matches_variant(v) for v in variants):
             return True
         return matches_one(token)
 
@@ -435,7 +562,12 @@ def is_product_search_match(description: str, query: str) -> bool:
             for candidate in tokens
         )
 
-    return any(all(matches(token) for token in normalize_text(term).split()) for term in terms)
+    def term_matches(term: str) -> bool:
+        if term in _STRICT_PHRASES:
+            return f" {term} " in padded_text
+        return all(matches(token) for token in normalize_text(term).split())
+
+    return any(term_matches(term) for term in terms)
 
 
 def product_content_group(item: dict) -> tuple[str, str] | None:
