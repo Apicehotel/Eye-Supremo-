@@ -427,3 +427,7 @@ Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la f
 
 Anche senza ricerca (elenco catalogo, suggerimenti) le voci che sono lo stesso prodotto scritto in modo diverso diventano **una sola riga** con tutti i produttori: «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate», «crostate marmellate». Si confrontano le parole utili senza articoli/preposizioni e senza desinenza (plurale/femminile), con «marm» = marmellata. Formati e misure restano nell'impronta (acqua 75x12 ≠ acqua 100x12) e si fondono solo voci della stessa famiglia riconosciuta. I nomi originali restano in `canonical_names` per storico e confronto fornitori.
 
+
+### Report storico: ricerca per marca e nome canonico
+
+La ricerca del report storico trova una riga anche quando la parola cercata è nella **marca** o nel **nome canonico** del prodotto collegato, non solo nella descrizione scritta dal fornitore (es. «pago» trova «SUCCO ACE 200ML» se il prodotto è «Succo Pago Ace», marca Pago). Il controllo anti-collisione (`_row_matches_search` in `backend/app/report_service.py`) accetta la riga se la descrizione originale, quella normalizzata oppure marca + nome canonico corrispondono alla ricerca; le righe senza alcun legame con il prodotto cercato restano escluse. Test: `backend/tests/test_report_brand_and_canonical_match.py`.

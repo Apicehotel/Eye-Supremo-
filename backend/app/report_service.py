@@ -43,6 +43,24 @@ def _config_for_row(configs: dict, row: InvoiceRow, product: Product | None) -> 
     return None
 
 
+def _row_matches_search(row: InvoiceRow, product: Product | None, product_query: str) -> bool:
+    """La riga è il prodotto cercato se lo dice la descrizione in fattura oppure il prodotto collegato.
+
+    La query SQL cerca anche in nome canonico e marca: le descrizioni dei fornitori sono
+    spesso abbreviate o senza marca («SUCCO ACE 200ML» per Pago), quindi il controllo
+    anti-collisione non può guardare solo la descrizione originale.
+    """
+    description = row.descrizione_originale or row.descrizione_normalizzata or ""
+    if is_product_search_match(description, product_query):
+        return True
+    if row.descrizione_normalizzata and is_product_search_match(row.descrizione_normalizzata, product_query):
+        return True
+    if product is None:
+        return False
+    linked = " ".join(part for part in (product.nome_canonico, product.marca) if part)
+    return bool(linked) and is_product_search_match(linked, product_query)
+
+
 def _cache_complete(db: Session) -> bool | None:
     """True/False se la cache fatture è stata verificata completa/incompleta, None se non verificata."""
     row = db.get(AppSetting, "central_sync_complete")
@@ -144,7 +162,7 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
     local_points = 0
     for row, invoice, supplier, product, _policy in records:
         description = row.descrizione_originale or row.descrizione_normalizzata or ""
-        if not is_product_search_match(description, product_query):
+        if not _row_matches_search(row, product, product_query):
             continue
         unit = (row.unita_normalizzata or row.unita_originale or (product.unita_base if product else None) or "pz").lower()
         raw_price = row.prezzo_normalizzato if row.prezzo_normalizzato not in (None, Decimal("0")) else row.prezzo_unitario
