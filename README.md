@@ -439,3 +439,14 @@ Mentre si scrive, o con 3+ parole, il testo non basta a capire il prodotto: la f
 
 Anche senza ricerca (elenco catalogo, suggerimenti) le voci che sono lo stesso prodotto scritto in modo diverso diventano **una sola riga** con tutti i produttori: «crostata marmellata», «crostate alla marmellata», «crostate alle marmellate», «crostate marmellate». Si confrontano le parole utili senza articoli/preposizioni e senza desinenza (plurale/femminile), con «marm» = marmellata. Formati e misure restano nell'impronta (acqua 75x12 ≠ acqua 100x12) e si fondono solo voci della stessa famiglia riconosciuta. I nomi originali restano in `canonical_names` per storico e confronto fornitori.
 
+
+### Materiali, sinonimi e famiglie (carta, plastica, marmellata…)
+
+- **Materiali** (`carta`, `cartone`, `plastica`, `vetro`, `alluminio`, `legno`): la ricerca restituisce i prodotti *fatti* di quel materiale (carta igienica, bicchieri di carta, shopper, posate in plastica). Cibo e bevande solo *avvolti* o confezionati nel materiale («capocollo in carta», «caramelle in plastica») e i contributi CONAI restano esclusi. Un bicchiere di carta è quindi un prodotto di carta.
+- **Parole in qualsiasi ordine e sinonimi**: «bombolone choco» e «choco bombolone» trovano gli stessi prodotti; `choco`, `cioccolato`, `ciocc`… e `bombolone`, `bomboloni`, `bombolino`… sono equivalenti. Le abbreviazioni dei fornitori (`marm`, `confet`, `ciocc`) valgono solo come parola intera (non `marm` ≠ marmo).
+- **Famiglie**: «marmellata» trova anche `marm.`, `confettura`, `confet`, `conf extra`, ma non crostate, marmo o confetti.
+- **Gusto e grammatura**: le varianti di una famiglia sono etichettate con gusto (arancia, fragola, frutti di bosco…) e contenuto della singola unità (`25gx100` = 25 g) e ordinate per gusto e poi grammatura (`backend/app/product_variants.py`). Le descrizioni originali non vengono mai modificate.
+
+### Report storico: ricerca per marca e nome canonico
+
+La ricerca del report storico trova una riga anche quando la parola cercata è nella **marca** o nel **nome canonico** del prodotto collegato, non solo nella descrizione scritta dal fornitore (es. «pago» trova «SUCCO ACE 200ML» se il prodotto è «Succo Pago Ace», marca Pago). Il controllo anti-collisione (`_row_matches_search` in `backend/app/report_service.py`) accetta la riga se la descrizione originale, quella normalizzata oppure marca + nome canonico corrispondono alla ricerca; le righe senza alcun legame con il prodotto cercato restano escluse. Test: `backend/tests/test_report_brand_and_canonical_match.py`.

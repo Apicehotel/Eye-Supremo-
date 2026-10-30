@@ -364,7 +364,13 @@ def _collapse_core(items: list[dict], query: str) -> list[dict]:
 
 
 _FILLER_WORDS = {"a", "al", "all", "alla", "alle", "allo", "agli", "ai", "con", "da", "dei", "del", "della", "delle", "di", "e", "il", "in", "la", "le", "lo", "per", "su", "un", "una"}
-_SYNONYM_STEMS = {"marm": "marmellat", "marmellata": "marmellat", "marmellate": "marmellat"}
+_SYNONYM_STEMS = {
+    "marm": "marmellat", "marmellata": "marmellat", "marmellate": "marmellat",
+    "confettura": "marmellat", "confetture": "marmellat", "confet": "marmellat",
+    "choco": "cioccolat", "chocolate": "cioccolat", "cioccolato": "cioccolat", "cioccolata": "cioccolat",
+    "ciocc": "cioccolat", "cioc": "cioccolat", "cioco": "cioccolat",
+    "bombolone": "bombolon", "bomboloni": "bombolon", "bombolino": "bombolon", "bombolini": "bombolon",
+}
 
 
 def name_signature(name: str) -> frozenset[str]:

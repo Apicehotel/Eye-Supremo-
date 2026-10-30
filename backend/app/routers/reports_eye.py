@@ -12,10 +12,16 @@ import json
 from ..models import AppSetting
 from ..normalization import normalize_text
 from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
+from ..product_variants import annotate_variants, sort_variants, variant_info
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
 from ..report_service import historical_product_report
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo reports"])
+
+def _with_variants(items):
+    """Aggiunge gusto/grammatura e ordina le varianti di una famiglia (marmellate per gusto e peso)."""
+    return sort_variants(annotate_variants(items))
+
 
 
 @router.get("/reports/history-product")
@@ -75,7 +81,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # the product catalogue: equivalent descriptions with the same content
     # must appear as one product, while the source names remain available for
     # the detail/history lookup.
-    page = {"items": annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q))}
+    page = {"items": _with_variants(annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q)))}
     product = next((x for x in page["items"] if x.get("nome_canonico")), None)
     if not product:
         # Il catalogo centrale può essere vuoto/non aggiornato mentre le righe
@@ -104,7 +110,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             return {
                 **result,
                 "matches": [
-                    {"canonical_name": values[0]["description"], "canonical_names": [values[0]["description"]], "purchases": len(values), "avg_price": round(sum(x["price"] for x in values) / len(values), 4)}
+                    {"canonical_name": values[0]["description"], "canonical_names": [values[0]["description"]], "purchases": len(values), "avg_price": round(sum(x["price"] for x in values) / len(values), 4), **variant_info(values[0]["description"])}
                     for values in sorted(variants.values(), key=lambda values: values[0]["description"].lower())
                 ],
             }
@@ -132,6 +138,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
         best_supplier = min(blocks, key=lambda block: block["average_price"])
         return {"query": q, "summary": {"product": product_name, "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda point: point["date"])["price"], "initial_date": min(point["date"] for point in all_points), "average_price": round(sum(point["price"] for point in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda point: point["date"])["price"], "latest_date": max(all_points, key=lambda point: point["date"])["date"], "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({point["date"] for point in all_points}), "units": sorted({point["unit"] for point in all_points}), "comparison_note": "Storico costruito direttamente sulle righe fattura centrali."}
     matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price"), "recognition": x.get("recognition")} for x in page.get("items", []) if x.get("nome_canonico")]
+    matches = sort_variants(annotate_variants(matches, name_key="canonical_name"), name_key="canonical_name")
     # A one-word family search (for example "acqua") is intentionally not
     # collapsed into the first catalogue row: let the user choose the exact
     # product variant so older purchases cannot hide newer ones.
