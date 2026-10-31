@@ -362,6 +362,11 @@ Lo script compila React, crea la cartella `dist/EyeSupremo/` (con `EyeSupremo.ex
 
 `start.bat` resta solo per lo sviluppo (Vite + browser).
 
+## Lavoro con più agenti (Claude, Cursor, GPT)
+
+Le regole condivise sono in `AGENTS.md` (richiamato da `CLAUDE.md` e da `.cursor/rules/`): un ramo per agente, PR piccole, nessun segreto,
+test prima di ogni PR, procedura di rilascio. Lo stato del lavoro e i passaggi di consegna si annotano in `docs/HANDOFF.md`.
+
 ## Test e CI
 
 ```powershell
