@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .models import AppSetting, Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
 from .normalization import extract_content, normalize_text, normalize_unit
+from .product_variants import variant_info
 from .product_taxonomy import extract_product_query, is_product_search_match, product_stem, row_matches_product_query, search_terms
 
 
@@ -296,3 +297,38 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata.",
         "sources": {"local": local_points, "cache": cache_points, "suppliers": len(supplier_blocks), "cache_complete": _cache_complete(db)},
     }
+
+
+def local_variant_matches(report: dict) -> list[dict]:
+    """Varianti (gusto + grammatura) presenti nel report locale, o [] se è un solo prodotto.
+
+    Serve a far scegliere la variante («marmellata fragola 350 g») invece di mescolare nello
+    stesso storico formati e gusti diversi, i cui prezzi non sono confrontabili.
+    """
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for block in report.get("suppliers") or []:
+        for point in block.get("points") or []:
+            description = str(point.get("description") or "").strip()
+            if not description:
+                continue
+            info = variant_info(description)
+            groups[(info["flavor"], info["content_label"])].append({**point, "_info": info})
+    if len(groups) < 2:
+        return []
+    matches = []
+    for points in groups.values():
+        names: dict[str, int] = defaultdict(int)
+        for point in points:
+            names[point["description"]] += 1
+        ordered = sorted(names, key=lambda name: (-names[name], name.lower()))
+        info = points[0]["_info"]
+        matches.append({
+            "canonical_name": ordered[0],
+            "canonical_names": ordered,
+            "brand": None,
+            "purchases": len(points),
+            "avg_price": round(sum(p["price"] for p in points) / len(points), 4),
+            "recognition": None,
+            **info,
+        })
+    return matches
