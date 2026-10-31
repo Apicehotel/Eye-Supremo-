@@ -1,0 +1,6 @@
+---
+description: Regole di lavoro condivise per Eye Supremo
+alwaysApply: true
+---
+Segui `AGENTS.md` (regole condivise, rami, verifiche, rilascio) e leggi `docs/HANDOFF.md` prima di iniziare:
+annota lì l'area che tocchi e aggiornalo a fine lavoro. Nessun segreto nel repository. Tieni aggiornato il README.
