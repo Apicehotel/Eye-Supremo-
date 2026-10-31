@@ -1,9 +1,15 @@
+import asyncio
+import logging
+
 import httpx
 from rapidfuzz import fuzz
 
 from .config import settings
 from .central_identity import current_identity
 from datetime import UTC, datetime
+
+
+log = logging.getLogger(__name__)
 
 
 def _credentials() -> tuple[str, str]:
@@ -62,7 +68,7 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
         items: list[dict] = []
         seen: set[str] = set()
         async with httpx.AsyncClient(timeout=20) as client:
-            for needle in needles[:8]:
+            async def fetch(needle: str) -> list[dict]:
                 payload = {
                     "action": "search_invoices",
                     "username": _credentials()[0],
@@ -73,16 +79,25 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
                 response = await client.post(url, json=payload, headers=headers)
                 _check(response)
                 data = response.json()
-                batch = data.get("items", []) if isinstance(data, dict) else []
-                for item in batch:
-                    key = str(item.get("id") or item.get("source_hash") or "")
-                    dedupe = key or f"{item.get('invoice_number')}|{item.get('original_description')}|{item.get('supplier_name')}"
-                    if dedupe in seen:
-                        continue
-                    seen.add(dedupe)
-                    items.append(item)
-                if len(items) >= cap:
-                    break
+                return data.get("items", []) if isinstance(data, dict) else []
+
+            # Interrogazioni in parallelo (prima erano una dopo l'altra): stessa copertura, molto più veloce.
+            batches = await asyncio.gather(*(fetch(needle) for needle in needles[:12]), return_exceptions=True)
+        failures = [b for b in batches if isinstance(b, Exception)]
+        if failures and len(failures) == len(batches):
+            raise failures[0]
+        if failures:
+            log.warning("Ricerca fatture centrale: %s interrogazioni su %s fallite (%s)", len(failures), len(batches), failures[0])
+        for batch in batches:
+            if isinstance(batch, Exception):
+                continue
+            for item in batch:
+                key = str(item.get("id") or item.get("source_hash") or "")
+                dedupe = key or f"{item.get('invoice_number')}|{item.get('original_description')}|{item.get('supplier_name')}"
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                items.append(item)
         items = items[:cap]
         if not items and product and len(product) >= 3:
             # Retry sul prefisso prodotto (bo…), non sulla frase NL (Ch…).

@@ -1,4 +1,4 @@
-import hashlib, json, secrets
+import asyncio, hashlib, json, logging, secrets
 from datetime import date
 import sqlite3
 from pathlib import Path
@@ -17,6 +17,7 @@ from ..product_recognition import annotate as annotate_recognition, collapse_to_
 from ..product_variants import annotate_variants, sort_variants
 from ..product_taxonomy import is_catalog_product, is_product_search_match, merge_product_catalog, search_terms
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 def _with_variants(items):
@@ -71,6 +72,23 @@ def add_supplier(payload: SupplierIn, db: Session = Depends(get_db)):
     item = Supplier(**payload.model_dump()); db.add(item); audit(db, "supplier.created", f"Fornitore {item.ragione_sociale} creato"); db.commit(); db.refresh(item); return item
 
 
+def _typo_match(query: str, name: str) -> bool:
+    """Tolleranza agli errori di battitura («marmelata», «bombolne»): ogni parola cercata deve somigliare a una del nome."""
+    from rapidfuzz import fuzz
+
+    from ..normalization import normalize_text
+
+    words = [w for w in normalize_text(name).split() if len(w) >= 3]
+    tokens = [w for w in normalize_text(query).split() if len(w) >= 4]
+    if not tokens or not words:
+        return False
+    return all(any(fuzz.ratio(token, word) >= 80 or (len(word) > len(token) and fuzz.ratio(token, word[: len(token) + 1]) >= 85) for word in words) for token in tokens)
+
+
+def _shape(items: list, q: str):
+    return _with_variants(annotate_recognition(collapse_to_product(merge_product_catalog(items, collapse_family="acqua" if q.strip().lower() == "acqua" else None), q)))
+
+
 @router.get("/products")
 async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), db: Session = Depends(get_db)):
     # The central catalogue is the source of truth when Supabase is enabled.
@@ -80,20 +98,42 @@ async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), d
         if len(q.split()) > 1:
             terms.append(q.split()[0])
         terms = tuple(dict.fromkeys(terms))
-        pages = [await central_product_page(term, limit) for term in terms]
+        # Tutte le interrogazioni insieme (prima una alla volta: con i sinonimi sono decine).
+        pages = list(await asyncio.gather(*(central_product_page(term, limit) for term in terms)))
+        for page in pages:
+            if page.get("message"):
+                log.warning("Catalogo centrale (/products q=%r): %s", q, page["message"])
         central = pages[0] if pages else {"enabled": False, "items": []}
-        if central.get("enabled") and (any(page.get("items") for page in pages) or q.strip()):
+        # Se il centrale è irraggiungibile (tutte le interrogazioni in errore) non è una risposta «nessun prodotto»:
+        # si passa all'archivio locale invece di mostrare una lista vuota.
+        central_answered = any(not page.get("message") for page in pages)
+        if central.get("enabled") and central_answered and (any(page.get("items") for page in pages) or q.strip()):
             merged = {}
             for page in pages:
                 for item in page.get("items", []):
                     if item.get("nome_canonico") and is_catalog_product(item["nome_canonico"]) and is_product_search_match(item["nome_canonico"], q):
                         merged[item["nome_canonico"]] = item
-            return _with_variants(annotate_recognition(collapse_to_product(merge_product_catalog(list(merged.values()), collapse_family="acqua" if q.strip().lower() == "acqua" else None), q)))
-    except Exception:
-        pass
+            if not merged and len(q.strip()) >= 4:
+                # Nessun risultato: forse un errore di battitura. Cerca per prefisso e confronta in modo approssimato.
+                for item in (await central_product_page(q.strip()[:3], 2000)).get("items", []):
+                    name = item.get("nome_canonico")
+                    if name and is_catalog_product(name) and _typo_match(q, name):
+                        merged[name] = item
+            return _shape(list(merged.values()), q)
+    except Exception:  # noqa: BLE001 - si ripiega sull'archivio locale, ma lasciando traccia
+        log.warning("Ricerca prodotti centrale fallita (q=%r), uso l'archivio locale", q, exc_info=True)
     stmt = select(Product)
-    if q: stmt = stmt.where(Product.nome_canonico.ilike(f"%{q}%"))
-    items = db.scalars(stmt.order_by(Product.nome_canonico).offset(skip).limit(limit)).all()
+    if q.strip():
+        # Stessa semantica della ricerca centrale: sinonimi, parole in qualsiasi ordine, famiglie.
+        clauses = [Product.nome_canonico.ilike(f"%{term}%") for term in dict.fromkeys((*search_terms(q), q.strip())) if term]
+        stmt = stmt.where(or_(*clauses))
+    candidates = db.scalars(stmt.order_by(Product.nome_canonico).limit(2000)).all()
+    if q.strip():
+        matched = [p for p in candidates if is_product_search_match(p.nome_canonico, q)]
+        if not matched and len(q.strip()) >= 4:
+            matched = [p for p in db.scalars(select(Product).order_by(Product.nome_canonico).limit(20000)).all() if _typo_match(q, p.nome_canonico)]
+        candidates = matched
+    items = candidates[skip: skip + limit]
     result = []
     for p in items:
         if not is_catalog_product(p.nome_canonico):
@@ -101,12 +141,13 @@ async def products(q: str = "", skip: int = 0, limit: int = Query(50, le=200), d
         stats = db.execute(select(func.min(InvoiceRow.prezzo_normalizzato), func.max(InvoiceRow.prezzo_normalizzato), func.avg(InvoiceRow.prezzo_normalizzato), func.count(InvoiceRow.id)).where(InvoiceRow.product_id == p.id)).one()
         result.append({**ProductOut.model_validate(p).model_dump(), "min_price": float(stats[0]) if stats[0] else None, "max_price": float(stats[1]) if stats[1] else None, "avg_price": float(stats[2]) if stats[2] else None, "purchases": stats[3]})
     if result:
-        return _with_variants(annotate_recognition(collapse_to_product(merge_product_catalog(result, collapse_family="acqua" if q.strip().lower() == "acqua" else None), q)))
+        return _shape(result, q)
     try:
         central = await central_product_page(q, limit)
         items = [item for item in central.get("items", []) if is_catalog_product(item.get("nome_canonico", ""))]
-        return _with_variants(annotate_recognition(collapse_to_product(merge_product_catalog(items, collapse_family="acqua" if q.strip().lower() == "acqua" else None), q)))
-    except Exception:
+        return _shape(items, q)
+    except Exception:  # noqa: BLE001
+        log.warning("Ricerca prodotti: nessuna fonte disponibile (q=%r)", q, exc_info=True)
         return result
 
 

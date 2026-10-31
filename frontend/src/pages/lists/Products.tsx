@@ -49,14 +49,17 @@ export function Products() {
   }, []);
   useEffect(() => {
     setPage(0);
-    const request = productsRequest.start();
-    setItems(undefined);
-    api<any[]>(`/products?q=${encodeURIComponent(q)}&limit=200`, {signal:request.signal}).then((result) => {
-      if (request.current()) setItems(result);
-    }).catch(() => {
-      if (request.current()) setItems([]);
-    });
-    return () => productsRequest.cancel();
+    // Attesa breve mentre si digita: una richiesta per parola, non una per lettera.
+    const timer = window.setTimeout(() => {
+      const request = productsRequest.start();
+      setItems(undefined);
+      api<any[]>(`/products?q=${encodeURIComponent(q)}&limit=200`, {signal:request.signal}).then((result) => {
+        if (request.current()) setItems(result);
+      }).catch(() => {
+        if (request.current()) setItems([]);
+      });
+    }, q.trim() ? 250 : 0);
+    return () => { window.clearTimeout(timer); productsRequest.cancel(); };
   }, [q, reloadTick, productsRequest]);
   const totalItems = items?.length || 0;
   const toggleSort = (key: SortKey) => setSort((current) => current.key === key ? {key, direction: current.direction === "asc" ? "desc" : "asc"} : {key, direction: "asc"});
