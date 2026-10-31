@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from decimal import Decimal
 from sqlalchemy import and_, or_, select
@@ -10,6 +11,9 @@ from .models import AppSetting, Invoice, InvoiceRow, InvoiceRowPolicy, Product, 
 from .normalization import extract_content, normalize_text, normalize_unit
 from .product_variants import variant_info
 from .product_taxonomy import extract_product_query, is_product_search_match, product_stem, row_matches_product_query, search_terms
+
+
+log = logging.getLogger(__name__)
 
 
 def _money(value) -> float:
@@ -69,14 +73,19 @@ def _cache_complete(db: Session) -> bool | None:
     return True if value == "yes" else False if value == "no" else None
 
 
-def _cache_observations(db: Session, product_query: str) -> list[dict]:
-    """Righe prodotto della cache PC (fatture centrali scaricate) per lo storico, senza tetto."""
+def _cache_observations(db: Session, product_query: str) -> tuple[list[dict], str | None]:
+    """Righe prodotto della cache PC (fatture centrali scaricate) per lo storico, senza tetto.
+
+    Restituisce anche l'eventuale errore: la cache non deve rompere il report, ma l'utente deve
+    sapere che i fornitori dalla cache mancano per un guasto e non perché non esistono.
+    """
     try:
         from .central_cache import cached_row_search
 
         items = cached_row_search(db, product_query, limit=None).get("items", [])
-    except Exception:  # noqa: BLE001 - la cache non deve mai rompere il report
-        return []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Cache fatture non leggibile per «%s»: il report usa solo le righe locali", product_query, exc_info=True)
+        return [], f"{type(exc).__name__}: {exc}"
     out: list[dict] = []
     for item in items:
         if item.get("analysis_status") not in (None, "product"):
@@ -101,7 +110,7 @@ def _cache_observations(db: Session, product_query: str) -> list[dict]:
             "unit": str(item.get("normalized_unit") or item.get("original_unit") or "pz").lower(),
             "description": description,
         })
-    return out
+    return out, None
 
 
 def historical_product_report(db: Session, query: str, limit: int | None = None) -> dict:
@@ -149,6 +158,7 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
     try:
         product_configs = json.loads(config_row.value) if config_row and config_row.value else {}
     except (TypeError, ValueError):
+        log.warning("Configurazioni prodotto (product_configs) non leggibili: normalizzazione manuale ignorata", exc_info=True)
         product_configs = {}
     if not isinstance(product_configs, dict):
         product_configs = {}
@@ -203,7 +213,7 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
     # Fatture scaricate nella cache del PC (archivio centrale): senza questo il report
     # vedeva solo le fatture importate in locale e mostrava un solo fornitore.
     cache_points = 0
-    cache_rows = _cache_observations(db, product_query)
+    cache_rows, cache_error = _cache_observations(db, product_query)
     for item in cache_rows:
         skey = normalize_text(item["supplier"])
         if item["hash"] in local_hashes or (skey, normalize_text(item["invoice"]), item["date"]) in local_invoice_keys:
@@ -295,7 +305,7 @@ def historical_product_report(db: Session, query: str, limit: int | None = None)
         "dates": dates,
         "units": sorted(unit_counts),
         "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata.",
-        "sources": {"local": local_points, "cache": cache_points, "suppliers": len(supplier_blocks), "cache_complete": _cache_complete(db)},
+        "sources": {"local": local_points, "cache": cache_points, "suppliers": len(supplier_blocks), "cache_complete": _cache_complete(db), "cache_error": cache_error},
     }
 
 
@@ -332,3 +342,73 @@ def local_variant_matches(report: dict) -> list[dict]:
             **info,
         })
     return matches
+
+
+# --- Costruzione del report da righe già raccolte (usata dai percorsi «centrale») -----------------------
+
+def _point(entry: dict, previous: float | None) -> dict:
+    price = float(entry["price"])
+    delta = None if previous is None else round(price - previous, 4)
+    return {
+        "date": str(entry.get("date") or "")[:10],
+        "price": round(price, 4),
+        "quantity": entry.get("quantity"),
+        "delta": delta,
+        "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2),
+        "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"),
+        "unit": entry["unit"],
+        "invoice": entry.get("invoice") or "",
+        "invoice_id": entry.get("invoice_id"),
+        "description": entry.get("description"),
+    }
+
+
+def report_from_entries(query: str, entries: list[dict], *, product: str, manufacturers: list[str] | None = None, manufacturer: str | None = None, note: str) -> dict | None:
+    """Report prezzi da righe già filtrate: ``entries`` = dict con supplier, unit, date, price, quantity, invoice, invoice_id, description.
+
+    È l'unico punto che costruisce punti, blocchi fornitore e riepilogo per i percorsi che partono
+    dall'archivio centrale (famiglie A4/acqua, righe fattura, dettaglio prodotto). Restituisce None se non ci sono righe valide.
+    """
+    ordered = sorted((e for e in entries if e.get("price") is not None and float(e["price"]) > 0), key=lambda e: (str(e.get("date") or ""), str(e.get("supplier") or "")))
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for entry in ordered:
+        points = grouped.setdefault((str(entry.get("supplier") or "Fornitore"), entry["unit"]), [])
+        points.append(_point(entry, points[-1]["price"] if points else None))
+    if not grouped:
+        return None
+    blocks = []
+    for (supplier, unit), points in grouped.items():
+        prices = [p["price"] for p in points]
+        best = min(points, key=lambda p: p["price"])
+        blocks.append({
+            "supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": manufacturer,
+            "initial_price": prices[0], "initial_date": points[0]["date"],
+            "average_price": round(sum(prices) / len(prices), 4),
+            "best_price": best["price"], "best_date": best["date"],
+            "latest_price": prices[-1], "latest_date": points[-1]["date"],
+            "observations": len(points), "points": points,
+        })
+    all_points = [p for b in blocks for p in b["points"]]
+    best = min(all_points, key=lambda p: p["price"])
+    first = min(all_points, key=lambda p: p["date"])
+    last = max(all_points, key=lambda p: p["date"])
+    best_supplier = min(blocks, key=lambda b: b["average_price"])
+    return {
+        "query": query,
+        "summary": {
+            "product": product,
+            "manufacturers": manufacturers if manufacturers is not None else ([manufacturer] if manufacturer else []),
+            "unit": blocks[0]["unit"],
+            "initial_price": first["price"], "initial_date": first["date"],
+            "average_price": round(sum(p["price"] for p in all_points) / len(all_points), 4),
+            "best_price": best["price"], "best_date": best["date"],
+            "latest_price": last["price"], "latest_date": last["date"],
+            "best_supplier": best_supplier["supplier"],
+            "best_supplier_average": best_supplier["average_price"],
+            "best_supplier_observations": best_supplier["observations"],
+        },
+        "suppliers": blocks,
+        "dates": sorted({p["date"] for p in all_points}),
+        "units": sorted({p["unit"] for p in all_points}),
+        "comparison_note": note,
+    }

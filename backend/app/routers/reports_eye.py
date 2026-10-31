@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -14,8 +15,9 @@ from ..normalization import normalize_text
 from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
 from ..product_variants import annotate_variants, sort_variants, variant_info
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
-from ..report_service import historical_product_report, local_variant_matches
+from ..report_service import historical_product_report, local_variant_matches, report_from_entries
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo reports"])
 
 def _with_variants(items):
@@ -46,7 +48,7 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
                 identity = (item.get("id"), item.get("original_description"), item.get("quantity"), item.get("unit_price"))
                 merged_matches[identity] = item
         matches = {"items": list(merged_matches.values())}
-        grouped = {}
+        entries = []
         for row in matches.get("items", []):
             if not is_family_match(row.get("original_description") or row.get("normalized_description") or "", q):
                 continue
@@ -55,20 +57,11 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             price = row.get("unit_price")
             if price is None or float(price) <= 0:
                 continue
-            unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
-            key = (str(row.get("supplier_name") or "Fornitore"), unit)
-            points = grouped.setdefault(key, [])
-            previous = points[-1]["price"] if points else None
-            delta = None if previous is None else round(float(price) - previous, 4)
-            points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": row.get("original_description") or q})
-        blocks = []
-        for (supplier, unit), points in grouped.items():
-            prices = [p["price"] for p in points]; best = min(points, key=lambda p: p["price"])
-            blocks.append({"supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": None, "initial_price": prices[0], "initial_date": points[0]["date"], "average_price": round(sum(prices) / len(prices), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": prices[-1], "latest_date": points[-1]["date"], "observations": len(points), "points": points})
-        if blocks:
-            all_points = [p for b in blocks for p in b["points"]]; best = min(all_points, key=lambda p: p["price"]); cheapest = min(blocks, key=lambda b: b["average_price"])
-            note = "Confronto famiglia Acqua: sono incluse le righe acqua compatibili di tutti i fornitori." if q.strip().lower() == "acqua" else "Confronto famiglia A4: sono incluse le righe prodotto A4 di tutti i fornitori."
-            return {"query": q, "summary": {"product": q.strip().upper(), "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda p: p["date"])["price"], "initial_date": min(p["date"] for p in all_points), "average_price": round(sum(p["price"] for p in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda p: p["date"])["price"], "latest_date": max(p["date"] for p in all_points), "best_supplier": cheapest["supplier"], "best_supplier_average": cheapest["average_price"], "best_supplier_observations": cheapest["observations"]}, "suppliers": blocks, "dates": sorted({p["date"] for p in all_points}), "units": sorted({p["unit"] for p in all_points}), "comparison_note": note}
+            entries.append({"supplier": str(row.get("supplier_name") or "Fornitore"), "unit": str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower(), "date": row.get("invoice_date"), "price": float(price), "quantity": row.get("quantity"), "invoice": row.get("invoice_number"), "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": row.get("original_description") or q})
+        note = "Confronto famiglia Acqua: sono incluse le righe acqua compatibili di tutti i fornitori." if q.strip().lower() == "acqua" else "Confronto famiglia A4: sono incluse le righe prodotto A4 di tutti i fornitori."
+        family_report = report_from_entries(q, entries, product=q.strip().upper(), manufacturers=[], note=note)
+        if family_report:
+            return family_report
     # Local-first installations may have no Invoice rows while the shared
     # catalogue is already populated. Adapt the central product detail to the
     # same report contract used by the Excel-inspired UI.
@@ -119,28 +112,19 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
                 ],
             }
         product_name = next(iter(variants.values()))[0]["description"]
-        grouped = defaultdict(list)
         pieces, configured_unit = _normalization_config(db, [product_name])
-        for row in sorted(rows, key=lambda x: (str(x.get("invoice_date") or ""), str(x.get("supplier_name") or ""))):
+        entries = []
+        for row in rows:
             unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
             price = row["price"]
             if pieces and row.get("unit_price"):
                 price = float(row["unit_price"]) / pieces
                 unit = configured_unit
-            supplier = str(row.get("supplier_name") or "Fornitore")
-            points = grouped[(supplier, unit)]
-            previous = points[-1]["price"] if points else None
-            delta = None if previous is None else round(price - previous, 4)
-            points.append({"date": str(row.get("invoice_date") or "")[:10], "price": round(price, 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("id"), "description": product_name})
-        blocks = []
-        for (supplier, unit), points in grouped.items():
-            prices = [point["price"] for point in points]
-            best = min(points, key=lambda point: point["price"])
-            blocks.append({"supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": None, "initial_price": prices[0], "initial_date": points[0]["date"], "average_price": round(sum(prices) / len(prices), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": prices[-1], "latest_date": points[-1]["date"], "observations": len(points), "points": points})
-        all_points = [point for block in blocks for point in block["points"]]
-        best = min(all_points, key=lambda point: point["price"])
-        best_supplier = min(blocks, key=lambda block: block["average_price"])
-        return {"query": q, "summary": {"product": product_name, "manufacturers": [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda point: point["date"])["price"], "initial_date": min(point["date"] for point in all_points), "average_price": round(sum(point["price"] for point in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda point: point["date"])["price"], "latest_date": max(all_points, key=lambda point: point["date"])["date"], "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({point["date"] for point in all_points}), "units": sorted({point["unit"] for point in all_points}), "comparison_note": "Storico costruito direttamente sulle righe fattura centrali."}
+            entries.append({"supplier": str(row.get("supplier_name") or "Fornitore"), "unit": unit, "date": row.get("invoice_date"), "price": price, "quantity": row.get("quantity"), "invoice": row.get("invoice_number"), "invoice_id": row.get("source_hash") or row.get("id"), "description": product_name})
+        built = report_from_entries(q, entries, product=product_name, manufacturers=[], note="Storico costruito direttamente sulle righe fattura centrali.")
+        if built:
+            return built
+        return result
     matches = [{"canonical_name": x.get("nome_canonico"), "canonical_names": x.get("canonical_names") or [x.get("nome_canonico")], "brand": x.get("marca"), "purchases": x.get("purchases"), "avg_price": x.get("avg_price"), "recognition": x.get("recognition")} for x in page.get("items", []) if x.get("nome_canonico")]
     matches = sort_variants(annotate_variants(matches, name_key="canonical_name"), name_key="canonical_name")
     # A one-word family search (for example "acqua") is intentionally not
@@ -161,9 +145,9 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             history.append(row)
     if not history:
         return result
-    grouped = {}
     pieces = _pieces_per_pack(db, [product["nome_canonico"], *detail_names])
-    for row in sorted(history, key=lambda x: (str(x.get("invoice_date") or ""), str(x.get("supplier_name") or ""))):
+    entries = []
+    for row in history:
         unit = str(row.get("normalized_unit") or row.get("original_unit") or "unità").lower()
         price = row.get("normalized_price") or row.get("unit_price")
         if pieces and row.get("unit_price"):
@@ -171,37 +155,35 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
             # la quantità resta quella riportata in fattura.
             price = float(row["unit_price"]) / pieces
             unit = "pz"
-        if price is None or float(price) <= 0:
-            continue
-        key = (str(row.get("supplier_name") or "Fornitore"), unit)
-        points = grouped.setdefault(key, [])
-        previous = points[-1]["price"] if points else None
-        delta = None if previous is None else round(float(price) - previous, 4)
-        points.append({"date": str(row.get("invoice_date"))[:10], "price": round(float(price), 4), "quantity": row.get("quantity"), "delta": delta, "delta_pct": None if previous in (None, 0) else round(delta / previous * 100, 2), "trend": "initial" if previous is None else ("up" if delta > 0 else "down" if delta < 0 else "same"), "unit": unit, "invoice": row.get("invoice_number") or "", "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": product["nome_canonico"]})
-    blocks = []
-    for (supplier, unit), points in grouped.items():
-        prices = [x["price"] for x in points]
-        best = min(points, key=lambda x: x["price"])
-        blocks.append({"supplier_id": supplier, "supplier": supplier, "unit": unit, "manufacturer": product.get("marca"), "initial_price": prices[0], "initial_date": points[0]["date"], "average_price": round(sum(prices) / len(prices), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": prices[-1], "latest_date": points[-1]["date"], "observations": len(points), "points": points})
-    if not blocks:
-        return result
-    all_points = [p for b in blocks for p in b["points"]]
-    best = min(all_points, key=lambda x: x["price"])
-    best_supplier = min(blocks, key=lambda x: x["average_price"])
-    return {"query": q, "summary": {"product": product["nome_canonico"], "manufacturers": [product["marca"]] if product.get("marca") else [], "unit": blocks[0]["unit"], "initial_price": min(all_points, key=lambda x: x["date"])["price"], "initial_date": min(x["date"] for x in all_points), "average_price": round(sum(x["price"] for x in all_points) / len(all_points), 4), "best_price": best["price"], "best_date": best["date"], "latest_price": max(all_points, key=lambda x: x["date"])["price"], "latest_date": max(x["date"] for x in all_points), "best_supplier": best_supplier["supplier"], "best_supplier_average": best_supplier["average_price"], "best_supplier_observations": best_supplier["observations"]}, "suppliers": blocks, "dates": sorted({x["date"] for x in all_points}), "units": sorted({x["unit"] for x in all_points}), "comparison_note": "I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata."}
+        entries.append({"supplier": str(row.get("supplier_name") or "Fornitore"), "unit": unit, "date": row.get("invoice_date"), "price": price, "quantity": row.get("quantity"), "invoice": row.get("invoice_number"), "invoice_id": row.get("source_hash") or row.get("invoice_id"), "description": product["nome_canonico"]})
+    built = report_from_entries(q, entries, product=product["nome_canonico"], manufacturer=product.get("marca"), note="I confronti tra fornitori usano solo prezzi con la stessa unità normalizzata.")
+    return built or result
 
 
-def _pieces_per_pack(db: Session, names: list[str]) -> float | None:
+
+def _product_configs(db: Session) -> dict:
     row = db.get(AppSetting, "product_configs")
     try:
         configs = json.loads(row.value) if row and row.value else {}
-    except Exception:  # noqa: BLE001
-        return None
+    except (TypeError, ValueError):
+        log.warning("Configurazioni prodotto (product_configs) non leggibili: ignorate", exc_info=True)
+        return {}
+    return configs if isinstance(configs, dict) else {}
+
+
+def _normalization_config(db: Session, names: list[str]) -> tuple[float | None, str]:
+    """Pezzi per confezione e unità di normalizzazione configurati a mano per uno dei nomi dati."""
+    configs = _product_configs(db)
     for name in names:
-        value = (configs.get(name) or {}).get("pieces_per_pack") if isinstance(configs, dict) else None
+        config = configs.get(name)
+        value = config.get("pieces_per_pack") if isinstance(config, dict) else None
         if value and float(value) > 0:
-            return float(value)
-    return None
+            return float(value), str(config.get("normalization_unit") or "pz")
+    return None, "pz"
+
+
+def _pieces_per_pack(db: Session, names: list[str]) -> float | None:
+    return _normalization_config(db, names)[0]
 
 
 def _load_groups(db: Session) -> list[list[str]]:

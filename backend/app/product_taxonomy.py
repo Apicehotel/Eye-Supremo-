@@ -7,6 +7,8 @@ hotel catalog. Raw invoice descriptions are never overwritten.
 from collections import defaultdict
 import re
 from decimal import Decimal
+from itertools import zip_longest
+
 from rapidfuzz import fuzz
 from .normalization import extract_content, normalize_text
 
@@ -296,18 +298,23 @@ def search_terms(query: str) -> tuple[str, ...]:
     # Prodotti fuori tassonomia: tieni il needle + forma senza ultima vocale
     # (limoncelli←limoncello, pavimenti←pavimento) senza aprire substring pericolose.
     variants = [normalized]
-    for token in normalized.split():
-        # Sinonimi/abbreviazioni per ogni parola («choco» → cioccolato, ciocc…): servono a recuperare le righe candidate.
-        if len(normalized.split()) > 1:
-            for alias in PRODUCT_FAMILY_ALIASES.get(token, ()):
-                if alias not in variants:
-                    variants.append(alias)
+    tokens = normalized.split()
+    # Prima ogni parola (e il suo stem), poi i sinonimi: chi limita il numero di termini
+    # interrogati (la ricerca fatture ne usa pochi) non deve perdere proprio i sinonimi.
+    for token in tokens:
         if len(token) >= 6 and token[-1] in "aeiou":
             stem = token[:-1]
             if stem not in UNSAFE_GENERIC_STEMS and stem not in variants:
                 variants.append(stem)
         if token not in variants:
             variants.append(token)
+    if len(tokens) > 1:
+        # A turno un sinonimo per parola (bomboloni, cioccolato, bombolino, chocolate…):
+        # così anche i primi N termini coprono tutte le parole della ricerca.
+        for round_ in zip_longest(*(PRODUCT_FAMILY_ALIASES.get(token, ()) for token in tokens)):
+            for alias in round_:
+                if alias and alias not in variants:
+                    variants.append(alias)
     return tuple(dict.fromkeys(variants))
 
 
