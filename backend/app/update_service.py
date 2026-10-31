@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 from .config import settings
 
 SUPABASE_UPDATE_FUNCTION = "eye-updates"
-CURRENT_VERSION = "2.0.43"
+CURRENT_VERSION = "2.0.44"
 CHECK_TIMEOUT_S = 12
 DOWNLOAD_TIMEOUT_S = 600
 
