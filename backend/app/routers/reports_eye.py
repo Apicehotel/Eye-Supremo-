@@ -14,7 +14,7 @@ from ..normalization import normalize_text
 from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
 from ..product_variants import annotate_variants, sort_variants, variant_info
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
-from ..report_service import historical_product_report
+from ..report_service import historical_product_report, local_variant_matches
 
 router = APIRouter(prefix="/api/eye", tags=["Eye Supremo reports"])
 
@@ -32,6 +32,10 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     # match could reintroduce ``lampada`` when the user asked for ``lampadine``.
     normalized_query = q.strip().lower()
     if result.get("summary") and normalized_query not in {"lampadine", "a4", "carta a4", "acqua"}:
+        # Gusti o formati diversi non vanno mescolati in un solo storico: prima si sceglie la variante.
+        variants = local_variant_matches(result)
+        if variants:
+            return {**result, "summary": None, "suppliers": [], "dates": [], "matches": sort_variants(variants, name_key="canonical_name")}
         return result
     if q.strip().lower() in {"a4", "carta a4"}:
         search_queries = [q]

@@ -11,13 +11,8 @@ type SupplierBlock={supplier_id:number|string;supplier:string;unit:string;manufa
 type Report={query:string;sources?:{local:number;cache:number;suppliers:number;cache_complete:boolean|null};summary:any;suppliers:SupplierBlock[];dates:string[];units:string[];comparison_note:string;matches?:Array<{flavor?:string|null;content_label?:string|null;content_value?:number|null;canonical_name:string;canonical_names?:string[];brand?:string|null;purchases?:number;avg_price?:number|null;recognition?:{category?:string|null;subcategory?:string|null;brand?:string|null}}>};
 
 type Suggestion={nome_canonico:string;canonical_names?:string[];purchases?:number;avg_price?:number|null;marca?:string|null;unita_base?:string|null};
-function isUsefulHistoryMatch(name:string, query:string){
- const text=name.toLocaleLowerCase('it-IT').normalize('NFD').replace(/[\u0300-\u036f]/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
- const needle=query.toLocaleLowerCase('it-IT').trim();
- if(needle!=='carta')return true;
- const excluded=/(^| )(capocollo|salame|prosciutto|formaggio|carne|coppa|mortadella|pancetta|salsiccia|bresaola|pirottini|bicchiere|bicchieri|borsa|borse|busta|buste|sacchetto|sacchetti|shopper|sacco|sacchi|coppetta|tovaglietta|tovagliette|confezione|imballo|imballaggio|involucro|contenitore|contenitori)( |$)/;
- return !excluded.test(text) && /(^| )(carta|cartaceo|cartacea)( |$)/.test(text);
-}
+// Il filtro semantico (carta, plastica, famiglie…) è fatto dal backend: qui si mostra ciò che arriva.
+function isUsefulHistoryMatch(_name:string, _query:string){return true}
 function HistorySearch({value,onChange,onSearch,disabled,closeSignal,placeholder}:{value:string;onChange:(value:string)=>void;onSearch:(value?:string)=>void;disabled?:boolean;closeSignal?:number;placeholder:string}){
  const [items,setItems]=useState<Suggestion[]>([]),[open,setOpen]=useState(false),[completionEnabled,setCompletionEnabled]=useState(true);
  useEffect(()=>{if(disabled){setOpen(false);setCompletionEnabled(false)}},[disabled]);

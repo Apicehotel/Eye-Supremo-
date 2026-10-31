@@ -15,12 +15,13 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.44`
+**Versione applicativa:** `2.0.45`
 
-**Novità 2.0.28 → 2.0.44** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39, 2.0.42, 2.0.43 e 2.0.44):
+**Novità 2.0.28 → 2.0.45** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39, 2.0.42, 2.0.43, 2.0.44 e 2.0.45):
 
 - **2.0.43 – Ricerca per materiali, sinonimi e famiglie:** `carta`/`plastica`… trovano i prodotti fatti di quel materiale (non il cibo avvolto), «bombolone choco» = «choco bombolone», `marmellata` copre marm/confet/confettura, varianti ordinate per gusto e grammatura (vedi sezione dedicata). Include il fix del Report storico che non trovava i prodotti.
 - **2.0.44 – Report storico, tasto Indietro:** dopo aver scelto una variante dall'elenco prodotti, «Indietro» torna all'elenco (anche a più livelli) invece di svuotare la ricerca; senza elenco precedente azzera la ricerca come prima.
+- **2.0.45 – Report storico, scelta della variante:** anche con fatture importate in locale, una ricerca che riguarda gusti o formati diversi (es. «marmellata», «marmellata fragola») mostra prima l'elenco delle varianti (gusto + grammatura) invece di mescolarle in un solo storico; il filtro «carta» lato schermata è stato tolto perché ora decide il backend (un bicchiere di carta è un prodotto di carta).
 
 - **Ricerca prodotti deterministica:** nuovo modulo `backend/app/deterministic_product_search.py` con test di regressione. Nel **Report storico** i risultati non pertinenti (es. cercando «carta») sono filtrati da `isUsefulHistoryMatch` in `frontend/src/pages/HistoricalReport.tsx` (2.0.42).
 - **Report storico:** mostra ogni osservazione anche se più fatture hanno la stessa data; nuovi filtri **fornitore** e **periodo** con KPI e confronti fornitori ricalcolati; **export CSV** (`eye-storico-prodotti.csv`, separatore `;`, UTF-8 con BOM).
