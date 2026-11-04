@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {AlertTriangle, ArrowLeftRight, Building2, FileText, Gauge, Package, Star, Trophy, Users} from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
-import {eyeApi} from '../lib/api';
+import {api, eyeApi} from '../lib/api';
 import {normalizedReviewRating} from '../lib/reviewRating';
 import type {Page} from './Shell';
 
@@ -21,7 +21,7 @@ export function OnlineHome({area, go, openReviews}: {area: 'invoices' | 'reviews
       eyeApi<Listing>('/central/invoices?limit=1').then(r => patch({invoices: r.total ?? r.count ?? null})).catch(() => {});
       eyeApi<Listing>('/central/invoices?limit=5&offset=0').then(r => patch({latest: (r.items || []).slice(0, 5)})).catch(() => {});
       eyeApi<Listing>('/central/suppliers').then(r => patch({suppliers: r.count ?? r.total ?? r.items?.length ?? null})).catch(() => {});
-      eyeApi<any>('/products?limit=500').then(r => patch({products: Array.isArray(r) ? r.length : (r.total ?? r.items?.length ?? null)})).catch(() => {});
+      api<any>('/products?limit=500').then(r => patch({products: Array.isArray(r) ? r.length : (r.total ?? r.items?.length ?? null)})).catch(() => {});
     } else {
       eyeApi<Rev[]>('/reviews').then(r => {
         const votes = r.map(x => normalizedReviewRating(x)).filter((x): x is number => x !== null);
