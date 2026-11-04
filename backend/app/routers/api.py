@@ -1,5 +1,6 @@
 import hashlib, json, secrets
 from datetime import date
+from functools import lru_cache
 import sqlite3
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -17,6 +18,68 @@ from ..product_recognition import annotate as annotate_recognition, collapse_to_
 from ..product_taxonomy import is_catalog_product, is_product_search_match, merge_product_catalog, search_terms
 
 router = APIRouter(prefix="/api")
+
+MARR_SNAPSHOT = Path(__file__).resolve().parent.parent / "data" / "marr_snapshot.json"
+
+
+@lru_cache(maxsize=1)
+def _marr_snapshot() -> dict:
+    if not MARR_SNAPSHOT.is_file():
+        return {}
+    try:
+        return json.loads(MARR_SNAPSHOT.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return {}
+
+
+def _marr_filter(rows: list[dict], query: str) -> list[dict]:
+    tokens = [token for token in str(query or "").casefold().split() if token]
+    if not tokens:
+        return rows
+    return [row for row in rows if all(token in " ".join(str(value or "") for value in row.values()).casefold() for token in tokens)]
+
+
+@router.get("/marr/summary")
+def marr_summary():
+    snapshot = _marr_snapshot()
+    return {"available": bool(snapshot), "source": snapshot.get("source", {}), "summary": snapshot.get("summary", {})}
+
+
+@router.get("/marr/suppliers")
+def marr_suppliers():
+    snapshot = _marr_snapshot()
+    source = snapshot.get("source", {})
+    return {"items": [{"id": "marr", "name": "MARR", "filename": source.get("filename")}]} if snapshot else {"items": []}
+
+
+@router.get("/marr/articles")
+def marr_articles(q: str = "", skip: int = 0, limit: int = Query(100, le=500)):
+    rows = _marr_filter(list(_marr_snapshot().get("articles", [])), q)
+    return {"items": rows[skip:skip + limit], "total": len(rows)}
+
+
+@router.get("/marr/movements")
+def marr_movements(q: str = "", skip: int = 0, limit: int = Query(100, le=500)):
+    rows = _marr_filter(list(_marr_snapshot().get("movements", [])), q)
+    rows.sort(key=lambda row: (str(row.get("order_date") or row.get("invoice_date") or ""), str(row.get("order_number") or "")), reverse=True)
+    return {"items": rows[skip:skip + limit], "total": len(rows)}
+
+
+@router.get("/marr/prices")
+def marr_prices(q: str = "", article_code: str = "", skip: int = 0, limit: int = Query(100, le=500)):
+    rows = list(_marr_snapshot().get("prices", []))
+    if article_code:
+        rows = [row for row in rows if str(row.get("article_code") or "") == article_code]
+    rows = _marr_filter(rows, q)
+    rows.sort(key=lambda row: (str(row.get("invoice_date") or ""), str(row.get("invoice_number") or "")), reverse=True)
+    return {"items": rows[skip:skip + limit], "total": len(rows)}
+
+
+@router.get("/marr/invoices")
+def marr_invoices(q: str = "", skip: int = 0, limit: int = Query(100, le=500)):
+    rows = _marr_filter(list(_marr_snapshot().get("invoices", [])), q)
+    rows.sort(key=lambda row: str(row.get("invoice_date") or ""), reverse=True)
+    return {"items": rows[skip:skip + limit], "total": len(rows)}
 
 
 @router.get("/health")

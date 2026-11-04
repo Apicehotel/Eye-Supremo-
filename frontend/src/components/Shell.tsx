@@ -36,6 +36,7 @@ export type Page =
   | "home"
   | "dashboard"
   | "invoices"
+  | "marr-data"
   | "invoice-files"
   | "products"
   | "suppliers"
@@ -56,6 +57,7 @@ const nav: [Page, string, any][] = [
   ["home", "Home", Home],
   ["dashboard", "Dashboard", LayoutDashboard],
   ["invoices", "Fatture", FileText],
+  ["marr-data", "Dati fornitore", ReceiptText],
   ["invoice-files", "Archivio file", FolderOpen],
   ["products", "Prodotti", Package],
   ["suppliers", "Fornitori", Users],
