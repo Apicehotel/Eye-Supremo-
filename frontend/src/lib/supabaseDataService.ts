@@ -144,6 +144,70 @@ async function usersRequest(route: string, method: string, options?: RequestInit
   return unavailable();
 }
 
+async function centralHistoryReport(query: string): Promise<Response> {
+  const pageResponse = await rpc("eye_central_product_page", { p_query: query, p_limit: 500 });
+  if (!pageResponse.ok) return pageResponse;
+  const page = await pageResponse.json();
+  const items = Array.isArray(page?.items) ? page.items : [];
+  const exact = items.find((item: any) => String(item?.nome_canonico || "").toLocaleLowerCase("it-IT") === query.toLocaleLowerCase("it-IT"));
+  if (!exact) {
+    return reply({
+      query,
+      matches: items.filter((item: any) => item?.nome_canonico).map((item: any) => ({
+        canonical_name: item.nome_canonico,
+        canonical_names: [item.nome_canonico],
+        brand: item.marca || null,
+        purchases: item.purchases ?? 0,
+        avg_price: item.avg_price ?? null,
+        recognition: { brand: item.marca || null },
+      })),
+    });
+  }
+
+  const detailResponse = await rpc("eye_central_product_detail", { p_canonical_name: exact.nome_canonico });
+  if (!detailResponse.ok) return detailResponse;
+  const detail = await detailResponse.json();
+  const history = (Array.isArray(detail?.history) ? detail.history : [])
+    .map((row: any) => ({
+      ...row,
+      date: String(row.invoice_date || "").slice(0, 10),
+      price: Number(row.normalized_price ?? row.unit_price),
+      unit: String(row.normalized_unit || row.original_unit || "unità").toLowerCase(),
+    }))
+    .filter((row: any) => row.date && Number.isFinite(row.price) && row.price > 0)
+    .sort((a: any, b: any) => `${a.date} ${a.supplier_name || ""}`.localeCompare(`${b.date} ${b.supplier_name || ""}`));
+  if (!history.length) return reply({ query, matches: [{ canonical_name: exact.nome_canonico, canonical_names: [exact.nome_canonico], purchases: 0, avg_price: null }] });
+
+  const grouped = new Map<string, any[]>();
+  for (const row of history) {
+    const key = `${row.supplier_name || "Fornitore"}|||${row.unit}`;
+    const points = grouped.get(key) || [];
+    const previous = points.at(-1)?.price ?? null;
+    const delta = previous === null ? null : Number((row.price - previous).toFixed(4));
+    const deltaPct = previous === null || previous === 0 ? null : Number((((row.price - previous) / previous) * 100).toFixed(2));
+    points.push({ date: row.date, price: Number(row.price.toFixed(4)), quantity: row.quantity ?? null, delta, delta_pct: deltaPct, trend: delta === null ? "initial" : delta > 0 ? "up" : delta < 0 ? "down" : "same", unit: row.unit, invoice: row.invoice_number || "", invoice_id: row.source_hash || null, description: row.original_description || exact.nome_canonico });
+    grouped.set(key, points);
+  }
+  const suppliers = [...grouped.entries()].map(([key, points]) => {
+    const [supplier, unit] = key.split("|||");
+    const prices = points.map(point => point.price);
+    const best = points.reduce((a, b) => b.price < a.price ? b : a);
+    return { supplier_id: supplier, supplier, unit, manufacturer: exact.marca || null, initial_price: prices[0], initial_date: points[0].date, average_price: prices.reduce((a, b) => a + b, 0) / prices.length, best_price: best.price, best_date: best.date, latest_price: prices.at(-1), latest_date: points.at(-1).date, observations: points.length, points };
+  });
+  const allPoints = suppliers.flatMap(s => s.points);
+  const prices = allPoints.map(point => point.price);
+  const best = allPoints.reduce((a, b) => b.price < a.price ? b : a);
+  const bestSupplier = suppliers.reduce((a, b) => b.average_price < a.average_price ? b : a);
+  return reply({
+    query,
+    summary: { product: exact.nome_canonico, manufacturers: exact.marca ? [exact.marca] : [], unit: suppliers[0].unit, initial_price: Math.min(...prices), initial_date: allPoints.map(p => p.date).sort()[0], average_price: prices.reduce((a, b) => a + b, 0) / prices.length, best_price: best.price, best_date: best.date, latest_price: allPoints[allPoints.length - 1].price, latest_date: allPoints.map(p => p.date).sort().at(-1), best_supplier: bestSupplier.supplier, best_supplier_average: bestSupplier.average_price, best_supplier_observations: bestSupplier.observations },
+    suppliers,
+    dates: [...new Set(allPoints.map(point => point.date))].sort(),
+    units: [...new Set(allPoints.map(point => point.unit))].sort(),
+    comparison_note: "I confronti tra fornitori usano i prezzi presenti nell’archivio centrale.",
+  });
+}
+
 async function eyeRequest(path: string, options?: RequestInit): Promise<Response> {
   const url = new URL(path, "http://x");
   const route = url.pathname.replace(/\/+$/, "");
@@ -173,6 +237,7 @@ async function eyeRequest(path: string, options?: RequestInit): Promise<Response
   if (route === "/auth/users" || route.startsWith("/auth/users/")) return usersRequest(route, method, options);
   if (method !== "GET") return unavailable();
   if (["/hotels", "/reviews", "/reviews/stats", "/rankings", "/rankings/timeline"].includes(route)) return reviewsRequest(route, url);
+  if (route === "/reports/history-product") return centralHistoryReport(url.searchParams.get("q") || "");
 
   const detail = (prefix: string) => (route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : "");
   const invoiceHash = detail("/central/invoices/") || detail("/invoice-ref/");
