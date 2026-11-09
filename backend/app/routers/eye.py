@@ -924,6 +924,22 @@ async def import_supplier_orders(supplier: str = Query(..., min_length=1), file:
     return {"ok": True, "supplier": supplier, "movements": len(data["movements"]), "price_rows": len(data["prices"]), "invoices": len(data["invoices"])}
 
 
+@router.get("/central/supplier-orders/export")
+def export_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Excel con le stesse schede del foglio ordini caricato per il fornitore."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from fastapi.responses import Response
+    from ..supplier_orders import sheet_for_supplier
+    from ..supplier_order_sheet import build_sheet_views, build_workbook
+    sheet = sheet_for_supplier(db, supplier)
+    if not sheet:
+        raise HTTPException(404, "Nessun foglio ordini caricato per questo fornitore")
+    content = build_workbook(build_sheet_views(sheet["data"], year), supplier)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", supplier).strip("_") or "fornitore"
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="Ordini_{safe}.xlsx"'})
+
+
 @router.get("/central/supplier-orders/article")
 def central_supplier_order_article(supplier: str = Query(..., min_length=1), code: str = Query(..., min_length=1), role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}:

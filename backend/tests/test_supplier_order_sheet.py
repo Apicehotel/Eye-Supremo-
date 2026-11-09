@@ -83,3 +83,27 @@ def test_import_and_read_endpoints(client):
     art = c.get("/api/eye/central/supplier-orders/article?supplier=Fornitore%20Prova&code=A1", headers=h).json()
     assert art["net_quantity"] == 3
     assert c.post("/api/eye/central/supplier-orders/import?supplier=X", files={"file": ("o.xlsx", b"nope")}, headers=h).status_code == 400
+
+
+def test_export_workbook_has_the_same_sheets_and_numbers():
+    import openpyxl
+    from app.supplier_order_sheet import build_workbook
+    data = parse_order_workbook(make_workbook())
+    content = build_workbook(build_sheet_views(data, 2026), "Fornitore Prova")
+    wb = openpyxl.load_workbook(io.BytesIO(content))
+    assert wb.sheetnames == ["Dettaglio articoli", "Riepilogo per articolo", "consegne giornaliere", "Verifiche", "Prezzi da fatture", "Fatture ricevute", "Controlli XML"]
+    assert wb["Dettaglio articoli"].max_row == 5            # intestazione + 4 movimenti
+    assert wb["Verifiche"]["B2"].value == 2 and wb["Verifiche"]["D2"].value == 4
+    ws = wb["consegne giornaliere"]
+    assert ws["A4"].value.startswith("ARTICOLO") and ws.max_column == 366   # nome + 365 giorni
+    water = next(r for r in ws.iter_rows(min_row=5) if str(r[0].value).startswith("ACQUA"))
+    assert sum(c.value or 0 for c in water[1:]) == 3
+    assert wb["Fatture ricevute"]["J2"].value == "OK"
+
+
+def test_export_endpoint(client):
+    h = {"X-Eye-Role": "developer"}
+    client.post("/api/eye/central/supplier-orders/import?supplier=Fornitore%20Prova", files={"file": ("o.xlsx", make_workbook())}, headers=h)
+    r = client.get("/api/eye/central/supplier-orders/export?supplier=Fornitore%20Prova", headers=h)
+    assert r.status_code == 200 and r.content[:2] == b"PK" and "Ordini_Fornitore_Prova.xlsx" in r.headers["content-disposition"]
+    assert client.get("/api/eye/central/supplier-orders/export?supplier=Nessuno", headers=h).status_code == 404
