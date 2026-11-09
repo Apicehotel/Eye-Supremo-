@@ -228,7 +228,11 @@ def normalize_row_price(price: Decimal, quantity: Decimal, unit: str | None, des
         return raw
     # Il prezzo è già per kg/l: la descrizione non cambia nulla.
     if factor and base in {"kg", "l"}:
-        return PriceNormalization(base, _round(price / factor), "unit", factor)
+        per_base = price / factor
+        # «ML»/«G» con prezzo da pezzo (es. 455.240 €/l): unità frazionaria usata male, non è un prezzo al litro.
+        if factor < 1 and per_base > _IMPLAUSIBLY_HIGH:
+            return raw
+        return PriceNormalization(base, _round(per_base), "unit", factor)
     # Unità di misura estranea (ore, mc, kWh, metri…): nessun contenuto da cercare.
     if base is not None and base not in PIECE_UNITS and base not in PACK_UNITS:
         return raw

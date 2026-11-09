@@ -91,6 +91,12 @@ def test_price_stays_raw_when_nothing_reliable_can_be_read(description, unit, am
     assert result.price == Decimal(amount)
 
 
+def test_fractional_unit_with_piece_price_stays_raw():
+    # unità «ML» con prezzo da pezzo: 455 €/ml non è un prezzo al litro credibile
+    result = normalize_row_price(Decimal("455.24"), Decimal("1"), "ML", "PRODOTTO GENERICO")
+    assert result.basis == "raw"
+
+
 def test_unrelated_units_and_non_positive_prices_are_left_alone():
     hours = normalize_row_price(Decimal("40"), Decimal("3"), "ORA", "Installazione 2 kg di materiale")
     assert hours.basis == "raw" and hours.unit == "ora"
