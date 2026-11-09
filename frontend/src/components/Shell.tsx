@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   FileText,
   FolderOpen,
+  ClipboardList,
   Package,
   Users,
   Upload,
@@ -39,6 +40,7 @@ export type Page =
   | "invoice-files"
   | "products"
   | "suppliers"
+  | "orders"
   | "import"
   | "ai"
   | "reports"
@@ -59,6 +61,7 @@ const nav: [Page, string, any][] = [
   ["invoice-files", "Archivio file", FolderOpen],
   ["products", "Prodotti", Package],
   ["suppliers", "Fornitori", Users],
+  ["orders", "Ordini", ClipboardList],
   ["import", "Importa", Upload],
   ["history-report", "Report storico", TrendingUp],
   ["ai", "Ask Fatture", Sparkles],

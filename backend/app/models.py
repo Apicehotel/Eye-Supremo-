@@ -288,3 +288,13 @@ class CentralReviewCache(Base):
     text: Mapped[str] = mapped_column(Text)
     payload_json: Mapped[str] = mapped_column(Text)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+
+class SupplierOrderSheet(Base):
+    """Foglio ordini caricato per un fornitore (Dettaglio articoli, Prezzi da fatture, Fatture ricevute)."""
+    __tablename__ = "supplier_order_sheets"
+    supplier_key: Mapped[str] = mapped_column(String(180), primary_key=True)
+    supplier_name: Mapped[str] = mapped_column(String(180))
+    filename: Mapped[str | None] = mapped_column(String(300))
+    payload_json: Mapped[str] = mapped_column(Text)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

@@ -191,6 +191,14 @@ Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. 
 
 I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
 
+### Ordini per fornitore
+
+Dal menu **Ordini** si sceglie il fornitore (elenco con ricerca) e si carica il suo foglio ordini; le stesse schede sono anche in **Fornitori → scheda fornitore → «Ordini»** (non disponibili nella versione online, servono il backend locale). Le schede, come il foglio ordini: **Consegne giornaliere** (articolo × giorno, scelta di anno e mese, riga «↳ Prezzo unitario» sotto ogni articolo, giallo = data fattura perché manca la data ordine, rosso = reso; clic sull'articolo apre la sua scheda con tutti i movimenti), **Dettaglio articoli**, **Riepilogo per articolo** (per codice: quantità netta, resi, righe, primo/ultimo ordine), **Verifiche** (articoli distinti, movimenti, date ordine mancanti, note di credito, elenco dei movimenti da controllare), **Prezzi da fatture**, **Fatture ricevute** (registro con quadratura `imponibile da righe + IVA − totale`, OK se ≤ 0,02 €) e **Controlli XML** (fatture presenti nel dettaglio senza XML ricevuto, prezzi mancanti, scostamenti di quantità). Ogni scheda ha «Scarica CSV» (`;`, apribile in Excel).
+
+I dati vengono dal **foglio ordini del fornitore**, caricato con «Carica foglio ordini (.xlsx)» nella stessa scheda: l'app legge i fogli `Dettaglio articoli`, `Prezzi da fatture` e `Fatture ricevute` e **ricalcola** tutte le altre viste (nel file sono formule), senza inventare nulla; il foglio è salvato in locale (tabella `supplier_order_sheets`, uno per fornitore, ricaricandolo si sostituisce). Senza foglio la scheda mostra una versione ridotta calcolata dalle fatture in cache PC (data fattura, articoli per descrizione, niente numero ordine/DDT/codici/Controlli XML).
+
+Backend: `backend/app/supplier_order_sheet.py` (lettura e viste, richiede `openpyxl`), `backend/app/supplier_orders.py` (versione da fatture e archivio dei fogli); API `GET /api/eye/central/supplier-orders?supplier=&year=`, `POST /api/eye/central/supplier-orders/import?supplier=` (multipart `file`, max 25 MB), `GET /api/eye/central/supplier-orders/article?supplier=&code=`. Frontend: `frontend/src/pages/lists/SupplierOrders.tsx`. Test con file e dati inventati (il foglio reale contiene fatture vere e non va nel repository): `backend/tests/test_supplier_order_sheet.py`, `test_supplier_orders.py`. Non ancora: export `.xlsx` identico al foglio (formule, fogli per articolo, celle gialle da compilare) e lettura di ordine/DDT/codice direttamente dall'XML delle fatture.
+
 ### Prezzi normalizzati (€/kg, €/l, €/pz)
 
 Il confronto tra fornitori vale solo se i prezzi hanno la stessa unità. `backend/app/normalization.py` (`normalize_row_price`) calcola il prezzo confrontabile di ogni riga; le descrizioni originali non vengono mai modificate.
