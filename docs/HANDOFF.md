@@ -7,6 +7,7 @@ Non scrivere segreti o dati personali.
 _(nessuno)_ — formato: `[agente] ramo — area/file toccati — da quando`_
 
 ## Fatto di recente
+- [Claude] `fix/pezzi-abbreviati` (release 2.0.48): «P.36» letto come 36 pezzi (Python + SQL), 40 righe centrali aggiornate. `PRZ.` escluso di proposito (porzioni).
 - [Claude] `fix/normalizzazione-prezzi` (PR #137, release 2.0.47): normalizzatore prezzi unico (€/kg, €/l, €/pz) con confine di parola, notazione col punto, moltiplicatori di confezione e unità CT/CF/SC/N./K./LIT; migrazione locale `2026-11-09-01`; prezzo centrale completato in lettura. Stima sul centrale (167.283 righe): confrontabili ~65% delle righe prodotto, prima ~26%.
 - [Claude] release 2.0.46 (PR #135): ricerca prodotti più robusta (parallelo, refusi, fallback locale), costruttore unico del report storico, errori visibili.
 - [Claude] 2.0.45 (PR #134): Report storico con scelta della variante anche con dati locali. 2.0.44 (PR #133): «Indietro» torna all'elenco varianti.
