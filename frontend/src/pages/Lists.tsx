@@ -336,3 +336,4 @@ export function SimplePage({
 export {Invoices} from "./lists/Invoices";
 export {Products} from "./lists/Products";
 export {Suppliers} from "./lists/Suppliers";
+export {OrdersPage} from "./lists/OrdersPage";
