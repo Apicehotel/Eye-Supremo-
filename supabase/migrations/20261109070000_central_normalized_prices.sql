@@ -280,3 +280,11 @@ for each row execute function eye_supremo.eye_central_rows_normalize_trg();
 
 -- 9 nov 2026 (sera): «P.36» = 36 pezzi (solo con punto e numero; «PRZ.14» resta escluso). Applicato come migrazione
 -- `normalize_price_p_dot_pieces`; 40 righe nuove normalizzate, nessuna già normalizzata è cambiata.
+
+-- 9 nov 2026 (notte): tetto da 500 €/kg|l per le unità frazionarie riapplicato alla funzione attiva
+-- (migrazione `normalize_price_fractional_unit_cap`; prima mancava e il trigger rinormalizzava le righe svuotate).
+-- Catalogo (migrazione `product_catalog_exclude_extra_rows`): `eye_refresh_product_catalog()` esclude ora
+-- carburante, accise, trasporto/spedizione, sconti/omaggi/abbuoni, bollo, cauzioni/imballi, storni/accrediti e le righe
+-- con totale <= 0 (note di credito). Definizione precedente salvata in
+-- eye_supremo.eye_refresh_product_catalog_def_backup_20261109. Risultato: catalogo 26.409 -> 25.847 voci,
+-- 0 voci extra, 0 prezzi negativi. Le righe e le descrizioni non sono state modificate.
