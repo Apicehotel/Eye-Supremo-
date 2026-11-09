@@ -1,8 +1,8 @@
-; Release 2.0.49: export Excel del foglio ordini del fornitore.
+; Release 2.0.50: prezzi normalizzati nel catalogo online e foglio ordini condiviso via Supabase.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
-AppVersion=2.0.49
+AppVersion=2.0.50
 AppPublisher=Apicehotel
 AppComments=Applicazione desktop nativa Windows (WebView2), non un sito nel browser
 AppPublisherURL=https://github.com/Apicehotel/Eye-Supremo-
@@ -12,7 +12,7 @@ AppMutex=EyeSupremoApplication
 DefaultDirName={autopf}\Eye Supremo
 DefaultGroupName=Eye Supremo
 OutputDir=..\release
-OutputBaseFilename=EyeSupremo-Setup-2.0.49
+OutputBaseFilename=EyeSupremo-Setup-2.0.50
 SetupIconFile=assets\eye-supremo.ico
 Compression=lzma2
 SolidCompression=yes
@@ -27,7 +27,7 @@ UninstallDisplayName=Eye Supremo
 VersionInfoCompany=Apicehotel
 VersionInfoDescription=Eye Supremo - gestione locale hotel
 VersionInfoProductName=Eye Supremo
-VersionInfoVersion=2.0.49.0
+VersionInfoVersion=2.0.50.0
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

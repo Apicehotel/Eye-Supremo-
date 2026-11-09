@@ -7,6 +7,7 @@ Non scrivere segreti o dati personali.
 _(nessuno)_ — formato: `[agente] ramo — area/file toccati — da quando`_
 
 ## Fatto di recente
+- [Claude] `feat/prezzi-online-e-foglio-condiviso` (release 2.0.50): `price_unit` nel catalogo Supabase e nella tabella Prodotti; foglio ordini condiviso via Supabase (tabella + 2 RPC, sync nel backend). Migrazioni applicate su produzione su richiesta esplicita; backup in `eye_product_page_def_backup_20261109`. Aperto: l'online (Vercel) non ha ancora la pagina Ordini.
 - [Claude] `feat/export-ordini-xlsx` (PR #142, release 2.0.49): «Scarica Excel» per il foglio ordini del fornitore. `docs/supabase-catalogo-extra`: catalogo Supabase senza voci extra (26.409 → 25.847), tetto 500 €/kg|l riapplicato alla funzione SQL attiva.
 - [Claude] `fix/pezzi-abbreviati` (PR #138, release 2.0.48): «P.36» letto come 36 pezzi (Python + SQL), 40 righe centrali aggiornate. `PRZ.` escluso di proposito (porzioni).
 - [Claude] `feat/costi-extra-fornitore` (PR #141): sezione «Costi extra» nella scheda fornitore (carburante, accise, trasporto, sconti, bollo, CONAI, resi, servizi, riferimenti, negativi, righe a 0 €). Aperto: marcare queste righe sul centrale (analysis_status/exclusion_reason) per toglierle dal catalogo; rivedere a mano «servizi/canoni».

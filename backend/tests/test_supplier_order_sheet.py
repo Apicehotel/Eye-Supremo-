@@ -107,3 +107,33 @@ def test_export_endpoint(client):
     r = client.get("/api/eye/central/supplier-orders/export?supplier=Fornitore%20Prova", headers=h)
     assert r.status_code == 200 and r.content[:2] == b"PK" and "Ordini_Fornitore_Prova.xlsx" in r.headers["content-disposition"]
     assert client.get("/api/eye/central/supplier-orders/export?supplier=Nessuno", headers=h).status_code == 404
+
+
+def test_import_shares_sheet_and_other_pc_pulls_it(client, monkeypatch):
+    """Il foglio caricato viene condiviso; un PC senza foglio locale lo scarica dal centrale."""
+    from app import central_service
+    shared: dict = {}
+
+    async def fake_save(key, name, filename, payload):
+        shared[key] = {"supplier_name": name, "filename": filename, "imported_at": "2099-01-01T00:00:00+00:00", "data": payload}
+        return True
+
+    async def fake_get(key):
+        return shared.get(key)
+
+    monkeypatch.setattr(central_service, "central_sheet_save", fake_save)
+    monkeypatch.setattr(central_service, "central_sheet_get", fake_get)
+    h = {"X-Eye-Role": "developer"}
+    xlsx = ("ordini.xlsx", make_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    res = client.post("/api/eye/central/supplier-orders/import?supplier=Fornitore%20Test", files={"file": xlsx}, headers=h)
+    assert res.status_code == 200, res.text
+    assert res.json()["shared"] is True and len(shared) == 1
+    # Un altro PC: foglio locale assente, quello condiviso è più recente → viene usato.
+    from app.database import SessionLocal
+    from app.models import SupplierOrderSheet
+    with SessionLocal() as db:
+        db.query(SupplierOrderSheet).delete()
+        db.commit()
+    got = client.get("/api/eye/central/supplier-orders?supplier=Fornitore%20Test", headers=h)
+    assert got.status_code == 200, got.text
+    assert got.json()["filename"] == "ordini.xlsx"
