@@ -11,7 +11,7 @@ from ..central_service import central_invoice_search, central_product_detail, ce
 import json
 
 from ..models import AppSetting
-from ..normalization import normalize_text
+from ..normalization import fill_normalized_price, normalize_text
 from ..product_recognition import annotate as annotate_recognition, collapse_to_product, set_user_groups
 from ..product_variants import annotate_variants, sort_variants, variant_info
 from ..product_taxonomy import is_catalog_product, is_family_match, is_product_search_match, merge_product_catalog, search_terms
@@ -136,12 +136,15 @@ async def history_product(q: str = Query(min_length=1, max_length=180), db: Sess
     details = await asyncio.gather(*(central_product_detail(name) for name in detail_names))
     history = []
     seen_history = set()
-    for detail in details:
+    for detail_name, detail in zip(detail_names, details):
         for row in detail.get("history", []):
             identity = (row.get("invoice_id"), row.get("invoice_number"), row.get("invoice_date"), row.get("supplier_name"), row.get("unit_price"), row.get("normalized_price"))
             if identity in seen_history:
                 continue
             seen_history.add(identity)
+            # Lo storico centrale non porta la descrizione né il prezzo normalizzato: il nome canonico di
+            # questa riga contiene il formato (es. «CL.20 X 24»), quindi €/kg, €/l o €/pz si calcolano qui.
+            fill_normalized_price(row, description=detail_name)
             history.append(row)
     if not history:
         return result

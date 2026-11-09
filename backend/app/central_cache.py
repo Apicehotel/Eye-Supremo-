@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .central_service import central_invoice_page
 from .database import SessionLocal
 from .models import AppSetting, CentralInvoiceCache
+from .normalization import fill_normalized_price
 from .product_taxonomy import (
     QUESTION_FILLERS,
     diversify_by_supplier,
@@ -176,7 +177,7 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
             score = _row_matches(hay, words)
             if score is None:
                 continue
-            ranked.append((float(score), {
+            item = {
                 "id": f"{record.source_hash}:{idx}",
                 "source_hash": record.source_hash,
                 "source_filename": payload.get("source_filename"),
@@ -193,7 +194,9 @@ def cached_row_search(db: Session, query: str, limit: int | None = 50, offset: i
                 "normalized_unit": row.get("normalized_unit"),
                 "original_unit": row.get("original_unit"),
                 "local_cache": True,
-            }))
+            }
+            # Il centrale non conserva il prezzo normalizzato: si calcola qui, in lettura.
+            ranked.append((float(score), fill_normalized_price(item)))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     items = [item for _, item in ranked]
