@@ -86,7 +86,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 **Novità 2.0.7:** stato cache offline a colpo d’occhio (chip + scheda Dashboard, verifica completezza e ripresa automatica), errori Supabase con il motivo del server.
 **Branch principale:** `main` (modifiche solo via branch + PR)
-**Ultimo aggiornamento:** 30 ottobre 2026
+**Ultimo aggiornamento:** 9 novembre 2026
 
 ### Completato
 
@@ -110,7 +110,7 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ### Verificato
 
-- backend: `257 passed`;
+- backend: `336 passed` (9 novembre 2026, include i test dei prezzi normalizzati);
 - frontend: `npm test` 23 test passati e build Vite riuscita (verifiche del 30 ottobre 2026 sulla `2.0.44`);
 - ricerca reale verificata con prodotti `pago` e `limoncello`;
 - RPC Supabase del catalogo centrale verificata con risposta dati;
@@ -189,6 +189,20 @@ In alto mostra subito:
 Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. Ogni nuovo prezzo è confrontato con il precedente con indicazione `↑`, `↓` o `=` e variazione in euro/%.
 
 I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
+
+### Prezzi normalizzati (€/kg, €/l, €/pz)
+
+Il confronto tra fornitori vale solo se i prezzi hanno la stessa unità. `backend/app/normalization.py` (`normalize_row_price`) calcola il prezzo confrontabile di ogni riga; le descrizioni originali non vengono mai modificate.
+
+- **Unità della riga già kg/l** (`KG`, `K.`, `LT`, `LIT`…): il prezzo è già per kg/l, la descrizione non conta.
+- **Prezzo a pezzo o a confezione** (`PZ`, `N.`, `CT`, `CARTONI`, `CF`, `SC`, `BT`… o nessuna unità): si divide per il contenuto letto nella descrizione, moltiplicato per i pezzi della confezione. Formati letti: `500G`, `1,5 KG`, `KG.1.2`, `LT.4`, `ML.310`, `G1000 X12`, `CL.20 X 24`, `24X50CL`, `GR.45 PZ.80`, `PZ 48 GR 12`, `16 PZ 200 G`, `125gX20`.
+- **Solo numero di pezzi** (`50PZ`, `PZ.100`) su una confezione: €/pz. Su una riga già «a pezzo» il prezzo resta invariato.
+- **Unità di misura come parole intere**: `MORETTI 66CL` non contiene «etti», `dal 06.06.2025` non contiene litri; `PANCARRE 285G 16 FETTE` ha 285 g, non 16 g; un numero davanti all'unità è un codice articolo se l'unità è seguita dal suo numero (`603 LT 1`, `6317 GR.50`).
+- **Pezzo singolo o confezione?** Con `32GX32` venduto a quantità 32 il prezzo è del singolo; negli altri casi con pezzi nella descrizione il prezzo è della confezione (`ambiguous = True` nel risultato). Se come confezione verrebbe sotto 0,25 €/kg o €/l ma come singolo è credibile, vale il singolo.
+- **Nessun numero inventato**: nessun contenuto affidabile, unità estranea (ore, mc, kWh, metri), prezzo ≤ 0, cartone con un peso minuscolo e nessun numero di pezzi (es. `GR.25`) o risultato sopra 500 €/kg: il prezzo resta quello grezzo (`basis = raw`).
+- **Limite noto**: la normalizzazione non conosce la categoria. Per articoli non alimentari con una capacità nel nome (es. «calici CL.36») calcola comunque €/l; il confronto resta coerente tra righe dello stesso prodotto. `75x12` o `33 x24` senza unità (acqua, bibite) non sono letti.
+
+Dove si applica: all'import (`services.create_invoice`); migrazione locale `2026-11-09-01` che ricalcola `unita_normalizzata`/`prezzo_normalizzato` di tutte le righe già salvate (con backup SQLite automatico); in lettura per i dati centrali, perché **Supabase non conserva il prezzo normalizzato** (`normalized_price`/`normalized_unit` sono vuoti sulle righe importate): `fill_normalized_price` lo completa in cache locale (`central_cache.py`), ricerca fatture centrale (`central_service.py`) e storico prodotto (`routers/reports_eye.py`, usando il nome canonico della riga). Nessuna scrittura su Supabase. Non ancora coperti: medie/minimi/massimi del catalogo centrale (`eye_refresh_product_catalog` fa la media sul prezzo grezzo) e la versione online (Vercel), che calcola nel browser. Test: `backend/tests/test_price_normalization.py` (descrizioni inventate, non fatture reali).
 
 ### Stampa
 
@@ -396,6 +410,7 @@ La PR esegue automaticamente backend test + frontend test + frontend build, la s
 
 ## Limitazioni note
 
+- i prezzi normalizzati dei dati centrali si calcolano in lettura e sono stime quando `ambiguous` è vero (pezzo singolo o confezione non distinguibile dalla descrizione); vedi «Prezzi normalizzati»;
 - il parser `.msg` usa euristiche sui digest reali e va affinato progressivamente sui formati di posta che incontriamo;
 - le recensioni importate con le versioni fino alla 2.0.16 possono essere salvate come intera email in un unico record, con camera e voto sbagliati (es. un giorno della data letto come voto): le medie per camera ne risentono finché quei record non vengono reimportati o corretti;
 - il primo popolamento della cache può richiedere alcuni minuti; le aperture successive leggono SQLite;

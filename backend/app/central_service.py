@@ -6,6 +6,7 @@ from rapidfuzz import fuzz
 
 from .config import settings
 from .central_identity import current_identity
+from .normalization import fill_normalized_price
 from datetime import UTC, datetime
 
 
@@ -124,6 +125,8 @@ async def central_invoice_search(query: str = "", limit: int = 50) -> dict:
                     if score >= 70:
                         ranked.append((score, item))
                 items = [item for _, item in sorted(ranked, key=lambda pair: pair[0], reverse=True)[:cap]]
+        # Il centrale non conserva il prezzo normalizzato: si calcola in lettura (nessuna scrittura su Supabase).
+        items = [fill_normalized_price(dict(item)) for item in items]
         return {"enabled": True, "items": items, "count": len(items), "query": product or query}
     except Exception as exc:
         return {"enabled": True, "items": [], "message": str(exc)}

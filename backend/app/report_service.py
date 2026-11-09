@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from .models import AppSetting, Invoice, InvoiceRow, InvoiceRowPolicy, Product, Supplier
-from .normalization import extract_content, normalize_text, normalize_unit
+from .normalization import normalize_row_price, normalize_text
 from .product_variants import variant_info
 from .product_taxonomy import extract_product_query, is_product_search_match, product_stem, row_matches_product_query, search_terms
 
@@ -23,10 +23,11 @@ def _money(value) -> float:
 def _comparable_quantity(row: InvoiceRow, unit: str) -> float:
     """Show the quantity behind the normalized price, not the package label."""
     quantity = _money(row.quantita)
-    content_qty, content_unit, content_in_base = extract_content(row.descrizione_originale or "")
-    original_unit = normalize_unit(row.unita_originale)[0] if row.unita_originale else None
-    if content_in_base and content_unit == unit and original_unit in {None, "confezione", "scatola", "rotolo"}:
-        return _money(Decimal(str(quantity)) * content_in_base)
+    result = normalize_row_price(
+        Decimal(str(row.prezzo_unitario or 0)), Decimal(str(row.quantita or 0)), row.unita_originale, row.descrizione_originale
+    )
+    if result.basis in {"content", "count"} and result.unit == unit:
+        return _money(Decimal(str(quantity)) * result.base_per_unit)
     return quantity
 
 
