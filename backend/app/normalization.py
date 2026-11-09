@@ -65,9 +65,10 @@ _UNIT_THEN_NUM = re.compile(
     re.IGNORECASE,
 )
 _COUNT_WORD_AFTER = re.compile(rf"^\s*(?:{_COUNT_WORDS})(?![A-Za-z])", re.IGNORECASE)
-# Numero di pezzi: «PZ.80», «PZ 48», «PZ. 36», «50PZ», «6PZ240g».
+# Numero di pezzi: «PZ.80», «PZ 48», «PZ. 36», «P.36» (solo con punto e numero), «50PZ», «6PZ240g».
+# «PRZ.14» non è un conteggio (porzioni di una torta da 1400 g).
 _COUNT_PZ_BEFORE = re.compile(
-    rf"(?<![A-Za-z])(?:pz|pezzi|pcs)\.?\s*(?P<n>\d+)(?![0-9])(?![.,]\d)(?!\s*(?:{_MASS_VOLUME})(?![A-Za-z])(?!\.?\s*\d))",
+    rf"(?<![A-Za-z])(?:pz|pezzi|pcs|p(?=\.\s*\d))\.?\s*(?P<n>\d+)(?![0-9])(?![.,]\d)(?!\s*(?:{_MASS_VOLUME})(?![A-Za-z])(?!\.?\s*\d))",
     re.IGNORECASE,
 )
 _COUNT_PZ_AFTER = re.compile(r"(?<![0-9])(?P<n>\d+)\s*(?:pz|pezzi|pcs)(?![A-Za-z])", re.IGNORECASE)

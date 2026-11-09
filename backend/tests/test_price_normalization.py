@@ -42,6 +42,8 @@ def price(description, unit, quantity, amount):
         ("CONFETTURA ASSORTITA GR.25 PZ.100", "CARTONI", "1", "39.20", "kg", 15.68),
         ("DOLCETTO MIGNON GR.42 PZ.80", "CARTONI", "1", "39.20", "kg", 11.6667),
         ("MACARON ASSORTITI PZ 48 GR 12", "CT", "2", "26.104", "kg", 45.3194),
+        ("DONUT GLASSATO CIOCCOLATO P.36", "CT", "1", "17.00", "pz", 0.4722),
+        ("BRIOCHE ALBICOCCA P. 60", "CT", "2", "30.00", "pz", 0.5),
         ("SFILATINO 16 PZ 200 G", "CT", "1", "12.90", "kg", 4.0313),
         ("SIGILLANTE BIANCO Ml.310", "Numero", "1", "5.70", "l", 18.3871),
         ("VERNICE LT.4", "N.", "1", "33.39", "l", 8.3475),
@@ -89,6 +91,14 @@ def test_price_stays_raw_when_nothing_reliable_can_be_read(description, unit, am
     result = normalize_row_price(Decimal(amount), Decimal("1"), unit, description)
     assert result.basis == "raw"
     assert result.price == Decimal(amount)
+
+
+def test_p_dot_is_a_piece_count_only_with_dot_and_number():
+    assert parse_pack("DONUT P.36").count == 36
+    assert parse_pack("PANINO 40GX105P.GE").count == 105
+    assert parse_pack("CODICE P 200").count is None
+    # «PRZ.14» sono porzioni, non pezzi: il prezzo resta al kg della torta
+    assert price("CROSTATA DI MELE GR.1400 PRZ.14", "CARTONI", "2", "24.859") == ("kg", pytest.approx(17.7564, rel=0.002))
 
 
 def test_fractional_unit_with_piece_price_stays_raw():

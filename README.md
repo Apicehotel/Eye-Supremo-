@@ -15,13 +15,14 @@ La sezione **Feedback** consente di descrivere un problema, allegare uno screens
 
 ## Stato del progetto
 
-**Versione applicativa:** `2.0.47`
+**Versione applicativa:** `2.0.48`
 
-**Novità 2.0.28 → 2.0.47** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39, 2.0.42, 2.0.43, 2.0.44, 2.0.45, 2.0.46 e 2.0.47):
+**Novità 2.0.28 → 2.0.48** (le versioni 2.0.28–2.0.36 sono state allineate in un'unica release; poi 2.0.37, 2.0.38, 2.0.39, 2.0.42, 2.0.43, 2.0.44, 2.0.45, 2.0.46, 2.0.47 e 2.0.48):
 
 - **2.0.43 – Ricerca per materiali, sinonimi e famiglie:** `carta`/`plastica`… trovano i prodotti fatti di quel materiale (non il cibo avvolto), «bombolone choco» = «choco bombolone», `marmellata` copre marm/confet/confettura, varianti ordinate per gusto e grammatura (vedi sezione dedicata). Include il fix del Report storico che non trovava i prodotti.
 - **2.0.44 – Report storico, tasto Indietro:** dopo aver scelto una variante dall'elenco prodotti, «Indietro» torna all'elenco (anche a più livelli) invece di svuotare la ricerca; senza elenco precedente azzera la ricerca come prima.
 - **2.0.45 – Report storico, scelta della variante:** anche con fatture importate in locale, una ricerca che riguarda gusti o formati diversi (es. «marmellata», «marmellata fragola») mostra prima l'elenco delle varianti (gusto + grammatura) invece di mescolarle in un solo storico; il filtro «carta» lato schermata è stato tolto perché ora decide il backend (un bicchiere di carta è un prodotto di carta).
+- **2.0.48 – Ordini, costi extra e «P.36»:** nuova pagina **Ordini** (foglio ordini del fornitore, vedi «Ordini per fornitore») e sezione **Costi extra** nella scheda fornitore (vedi «Costi extra per fornitore»); inoltre «P.36» = 36 pezzi: il normalizzatore legge anche `P.` seguito da un numero (solo con punto) come numero di pezzi, in Python e nella funzione SQL; `PRZ.14` (porzioni) resta escluso.
 - **2.0.47 – Prezzi normalizzati:** un solo normalizzatore (€/kg, €/l, €/pz) per import, report e dati centrali; migrazione locale `2026-11-09-01` che ricalcola le righe già salvate; backfill Supabase eseguito (vedi «Prezzi normalizzati»).
 - **2.0.46 – Ricerca più robusta e report unificato:** `/products` interroga il centrale in parallelo (e con i sinonimi anche nella ricerca fatture, dove i primi 12 termini coprono ogni parola), tollera gli errori di battitura («marmelata»), e se il centrale non risponde ripiega sull'archivio locale con la stessa semantica (parole in qualsiasi ordine, sinonimi, famiglie); la lista Prodotti attende 250 ms mentre si digita. Nel Report storico i tre percorsi «centrale» usano un solo costruttore (`report_from_entries`); corretto un 500 dovuto a `_normalization_config` mancante; errori della cache fatture e delle configurazioni ora vanno nei log e, per la cache, in un avviso nel report (`sources.cache_error`).
 

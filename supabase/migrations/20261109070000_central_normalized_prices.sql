@@ -81,7 +81,7 @@ declare
   c_count_words constant text := 'pz|pezzi|pcs|fette|filtri|buste|bustine|capsule|cialde|rotoli|fogli|porzioni|bottiglie|lattine|pacchi|barrette';
   re_num_unit constant text := '(?<![0-9])(\d+(?:[.,]\d+)?|0\s\d{1,3})\s*(' || c_mv || ')(?:(?![a-z0-9])(?!\.\d)|(?=[x×]\d))';
   re_unit_num constant text := '(?<![a-z])(' || c_mv || ')\.?\s*(0\s\d{1,3}(?!\d)|\d+(?:[.,]\d+)?)(?:(?![0-9a-z])|(?=[x×]\d))';
-  re_pz_before constant text := '(?<![a-z])(?:pz|pezzi|pcs)\.?\s*(\d+)(?![0-9])(?![.,]\d)(?!\s*(?:' || c_mv || ')(?![a-z])(?!\.?\s*\d))';
+  re_pz_before constant text := '(?<![a-z])(?:pz|pezzi|pcs|p(?=\.\s*\d))\.?\s*(\d+)(?![0-9])(?![.,]\d)(?!\s*(?:' || c_mv || ')(?![a-z])(?!\.?\s*\d))';
   re_pz_after constant text := '(?<![0-9])(\d+)\s*(?:pz|pezzi|pcs)(?![a-z])';
   re_unit_before_number constant text := '(?<![a-z])(?:' || c_mv || ')\.?\s*$';
   re_count_word_after constant text := '^\s*(?:' || c_count_words || ')(?![a-z])';
@@ -277,3 +277,6 @@ create trigger eye_central_rows_normalize
 before insert or update of unit_price, quantity, original_unit, original_description, normalized_price
 on eye_supremo.eye_central_invoice_rows
 for each row execute function eye_supremo.eye_central_rows_normalize_trg();
+
+-- 9 nov 2026 (sera): «P.36» = 36 pezzi (solo con punto e numero; «PRZ.14» resta escluso). Applicato come migrazione
+-- `normalize_price_p_dot_pieces`; 40 righe nuove normalizzate, nessuna già normalizzata è cambiata.
