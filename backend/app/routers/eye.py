@@ -896,6 +896,15 @@ def central_supplier_orders(supplier: str = Query(..., min_length=1), year: int 
     return {"supplier": supplier, "source": "invoices", **supplier_orders(db, supplier, year)}
 
 
+@router.get("/central/supplier-extras")
+def central_supplier_extras(supplier: str = Query(..., min_length=1), role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Costi extra del fornitore (carburante, accise, trasporto, sconti, bollo, CONAI, resi, servizi…) dalla cache PC."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from ..supplier_extras import supplier_extras
+    return {"supplier": supplier, **supplier_extras(db, supplier)}
+
+
 @router.post("/central/supplier-orders/import")
 async def import_supplier_orders(supplier: str = Query(..., min_length=1), file: UploadFile = File(...), role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}:
