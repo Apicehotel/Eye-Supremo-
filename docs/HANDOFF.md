@@ -13,7 +13,7 @@ _(nessuno)_ — formato: `[agente] ramo — area/file toccati — da quando`_
 - [Claude] 2.0.43 (PR #131): ricerca per materiali, sinonimi e famiglie con gusto/grammatura.
 
 ## Aperto / da fare
-- Prezzi normalizzati: backfill Supabase fatto il 9 nov 2026 (82.068/167.283 righe, catalogo rigenerato, backup `eye_central_invoice_rows_backup_20261109`). Da fare: ricalcolo per le righe importate in futuro (rilanciare l'UPDATE documentato nella migrazione) e versione online (Vercel) che non normalizza ancora. Rilascio installer (bump versione) in attesa dell'utente.
+- Prezzi normalizzati: backfill Supabase fatto il 9 nov 2026 (82.068/167.283 righe, catalogo rigenerato, backup `eye_central_invoice_rows_backup_20261109`). Trigger `eye_central_rows_normalize` attivo (righe nuove normalizzate in automatico). Da fare: versione online (Vercel) che non normalizza ancora. Rilascio installer (bump versione) in attesa dell'utente.
 - Prezzi normalizzati: `75x12` / `33 x24` senza unità (acqua, bibite) non letti; righe non alimentari con capacità nel nome ricevono €/l.
 - Bump versione e rilascio dell'installer (la migrazione locale arriva ai PC solo con una release).
 - Misurare la ricerca prodotti su un campione di nomi reali del catalogo (~26k).

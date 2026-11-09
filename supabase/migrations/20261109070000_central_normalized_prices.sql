@@ -250,3 +250,30 @@ revoke all on function eye_supremo.eye_normalize_price(numeric, numeric, text, t
 
 -- Stato applicato in produzione (9 nov 2026): ricalcolate 82.068 righe su 167.283; poi azzerate le ~120 righe
 -- con unità frazionaria e prezzo > 500 €/kg|l (regola sopra); infine `select public.eye_refresh_product_catalog();`.
+
+-- Trigger (applicato come migrazione `central_rows_normalize_trigger`): le righe nuove o modificate con
+-- normalized_price NULL e analysis_status = 'product' vengono normalizzate in automatico.
+create or replace function eye_supremo.eye_central_rows_normalize_trg()
+returns trigger
+language plpgsql
+set search_path = pg_catalog
+as $$
+declare n record;
+begin
+  if new.normalized_price is null and new.analysis_status = 'product' then
+    select * into n from eye_supremo.eye_normalize_price(new.unit_price, new.quantity, new.original_unit, new.original_description);
+    if n.o_price is not null then
+      new.normalized_unit := n.o_unit;
+      new.normalized_price := n.o_price;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function eye_supremo.eye_central_rows_normalize_trg() from public, anon, authenticated;
+
+drop trigger if exists eye_central_rows_normalize on eye_supremo.eye_central_invoice_rows;
+create trigger eye_central_rows_normalize
+before insert or update of unit_price, quantity, original_unit, original_description, normalized_price
+on eye_supremo.eye_central_invoice_rows
+for each row execute function eye_supremo.eye_central_rows_normalize_trg();
