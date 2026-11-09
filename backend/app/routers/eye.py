@@ -2,7 +2,7 @@ import json
 import re
 import hashlib
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
@@ -883,14 +883,35 @@ async def central_supplier_detail_route(supplier_id: str, role: str = Depends(cu
     return detail
 
 
+def _utc(value) -> datetime:
+    """ISO con fuso (Supabase) o senza (orario locale del PC) → datetime UTC confrontabile."""
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return (moment.astimezone() if moment.tzinfo is None else moment).astimezone(timezone.utc)
+
+
+async def _shared_sheet(db: Session, supplier: str) -> dict | None:
+    """Foglio ordini del fornitore: locale, ma se su Supabase ce n'è uno più recente (caricato da un altro PC) usa quello e lo salva in locale."""
+    from .. import central_service
+    from ..supplier_orders import sheet_for_supplier, save_sheet, _key
+    local = sheet_for_supplier(db, supplier)
+    remote = await central_service.central_sheet_get(_key(supplier))
+    if remote and (not local or _utc(remote.get("imported_at")) > _utc(local["imported_at"])):
+        save_sheet(db, supplier, remote.get("filename"), remote["data"])
+        return sheet_for_supplier(db, supplier)
+    return local
+
+
 @router.get("/central/supplier-orders")
-def central_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
+async def central_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
     """Ordini del fornitore: dal foglio caricato se c'è, altrimenti dalle fatture in cache del PC."""
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    from ..supplier_orders import supplier_orders, sheet_for_supplier
+    from ..supplier_orders import supplier_orders
     from ..supplier_order_sheet import build_sheet_views
-    sheet = sheet_for_supplier(db, supplier)
+    sheet = await _shared_sheet(db, supplier)
     if sheet:
         return {"supplier": supplier, "filename": sheet["filename"], "imported_at": sheet["imported_at"], **build_sheet_views(sheet["data"], year)}
     return {"supplier": supplier, "source": "invoices", **supplier_orders(db, supplier, year)}
@@ -921,18 +942,20 @@ async def import_supplier_orders(supplier: str = Query(..., min_length=1), file:
     except Exception:
         raise HTTPException(400, "File non leggibile: serve un .xlsx nel formato «Ordini fornitore».")
     save_sheet(db, supplier, file.filename, data)
-    return {"ok": True, "supplier": supplier, "movements": len(data["movements"]), "price_rows": len(data["prices"]), "invoices": len(data["invoices"])}
+    from .. import central_service
+    from ..supplier_orders import _key
+    shared = await central_service.central_sheet_save(_key(supplier), supplier, file.filename, data)
+    return {"ok": True, "shared": shared, "supplier": supplier, "movements": len(data["movements"]), "price_rows": len(data["prices"]), "invoices": len(data["invoices"])}
 
 
 @router.get("/central/supplier-orders/export")
-def export_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
+async def export_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
     """Excel con le stesse schede del foglio ordini caricato per il fornitore."""
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
     from fastapi.responses import Response
-    from ..supplier_orders import sheet_for_supplier
     from ..supplier_order_sheet import build_sheet_views, build_workbook
-    sheet = sheet_for_supplier(db, supplier)
+    sheet = await _shared_sheet(db, supplier)
     if not sheet:
         raise HTTPException(404, "Nessun foglio ordini caricato per questo fornitore")
     content = build_workbook(build_sheet_views(sheet["data"], year), supplier)
@@ -941,12 +964,11 @@ def export_supplier_orders(supplier: str = Query(..., min_length=1), year: int |
 
 
 @router.get("/central/supplier-orders/article")
-def central_supplier_order_article(supplier: str = Query(..., min_length=1), code: str = Query(..., min_length=1), role: str = Depends(current_role), db: Session = Depends(get_db)):
+async def central_supplier_order_article(supplier: str = Query(..., min_length=1), code: str = Query(..., min_length=1), role: str = Depends(current_role), db: Session = Depends(get_db)):
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    from ..supplier_orders import sheet_for_supplier
     from ..supplier_order_sheet import article_page
-    sheet = sheet_for_supplier(db, supplier)
+    sheet = await _shared_sheet(db, supplier)
     if not sheet:
         raise HTTPException(404, "Nessun foglio ordini caricato per questo fornitore")
     return article_page(sheet["data"], code)

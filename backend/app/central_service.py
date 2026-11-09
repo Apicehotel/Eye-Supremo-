@@ -280,3 +280,37 @@ async def central_supplier_detail(supplier_id: str) -> dict:
         data = response.json()
     return data if isinstance(data, dict) else {"supplier": None, "invoices": [], "categories": []}
 
+
+
+async def central_sheet_save(supplier_key: str, supplier_name: str, filename: str | None, payload: dict) -> bool:
+    """Condivide il foglio ordini del fornitore su Supabase. False se il centrale non è configurato o non risponde."""
+    if not configured():
+        return False
+    url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_supplier_sheet_save"
+    body = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_supplier_key": supplier_key,
+            "p_supplier_name": supplier_name, "p_filename": filename, "p_payload": payload}
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(url, json=body, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
+            _check(response)
+        return True
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("Condivisione foglio ordini non riuscita: %s", exc)
+        return False
+
+
+async def central_sheet_get(supplier_key: str) -> dict | None:
+    """Foglio ordini condiviso (supplier_name, filename, imported_at, data) o None."""
+    if not configured():
+        return None
+    url = settings.supabase_url.rstrip("/") + "/rest/v1/rpc/eye_supplier_sheet_get"
+    body = {"p_username": _credentials()[0], "p_pin": _credentials()[1], "p_supplier_key": supplier_key}
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(url, json=body, headers={"apikey": settings.supabase_publishable_key or "", "Content-Type": "application/json"})
+            _check(response)
+            data = response.json()
+        return data if isinstance(data, dict) and data.get("data") else None
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("Lettura foglio ordini condiviso non riuscita: %s", exc)
+        return None
