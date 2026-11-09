@@ -885,11 +885,46 @@ async def central_supplier_detail_route(supplier_id: str, role: str = Depends(cu
 
 @router.get("/central/supplier-orders")
 def central_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
-    """Ordini del fornitore (dettaglio, riepilogo, consegne, prezzi, registro fatture, verifiche) dalla cache locale."""
+    """Ordini del fornitore: dal foglio caricato se c'è, altrimenti dalle fatture in cache del PC."""
     if role not in {"developer", "supremo"}:
         raise HTTPException(403, "Permesso insufficiente")
-    from ..supplier_orders import supplier_orders
-    return {"supplier": supplier, **supplier_orders(db, supplier, year)}
+    from ..supplier_orders import supplier_orders, sheet_for_supplier
+    from ..supplier_order_sheet import build_sheet_views
+    sheet = sheet_for_supplier(db, supplier)
+    if sheet:
+        return {"supplier": supplier, "filename": sheet["filename"], "imported_at": sheet["imported_at"], **build_sheet_views(sheet["data"], year)}
+    return {"supplier": supplier, "source": "invoices", **supplier_orders(db, supplier, year)}
+
+
+@router.post("/central/supplier-orders/import")
+async def import_supplier_orders(supplier: str = Query(..., min_length=1), file: UploadFile = File(...), role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from ..supplier_orders import save_sheet
+    from ..supplier_order_sheet import parse_order_workbook
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(413, "File troppo grande (max 25 MB)")
+    try:
+        data = parse_order_workbook(content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        raise HTTPException(400, "File non leggibile: serve un .xlsx nel formato «Ordini fornitore».")
+    save_sheet(db, supplier, file.filename, data)
+    return {"ok": True, "supplier": supplier, "movements": len(data["movements"]), "price_rows": len(data["prices"]), "invoices": len(data["invoices"])}
+
+
+@router.get("/central/supplier-orders/article")
+def central_supplier_order_article(supplier: str = Query(..., min_length=1), code: str = Query(..., min_length=1), role: str = Depends(current_role), db: Session = Depends(get_db)):
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from ..supplier_orders import sheet_for_supplier
+    from ..supplier_order_sheet import article_page
+    sheet = sheet_for_supplier(db, supplier)
+    if not sheet:
+        raise HTTPException(404, "Nessun foglio ordini caricato per questo fornitore")
+    return article_page(sheet["data"], code)
 
 
 @router.get("/central/sync/status")

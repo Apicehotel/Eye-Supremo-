@@ -14,7 +14,9 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import CentralInvoiceCache
+from datetime import datetime
+
+from .models import CentralInvoiceCache, SupplierOrderSheet
 from .normalization import fill_normalized_price, normalize_text
 
 # Tolleranza per la quadratura (centesimi di arrotondamento tra righe e riepilogo IVA).
@@ -194,3 +196,24 @@ def build_supplier_orders(invoices: list[dict], year: int | None = None) -> dict
 
 def supplier_orders(db: Session, supplier_name: str, year: int | None = None) -> dict:
     return build_supplier_orders(load_cached_invoices(db, supplier_name), year)
+
+
+def _key(supplier_name: str) -> str:
+    return normalize_text(supplier_name).strip()[:180]
+
+
+def sheet_for_supplier(db: Session, supplier_name: str) -> dict | None:
+    record = db.get(SupplierOrderSheet, _key(supplier_name))
+    if not record:
+        return None
+    return {"data": json.loads(record.payload_json), "filename": record.filename, "imported_at": record.imported_at.isoformat()}
+
+
+def save_sheet(db: Session, supplier_name: str, filename: str | None, data: dict) -> None:
+    record = db.get(SupplierOrderSheet, _key(supplier_name))
+    payload = json.dumps(data, ensure_ascii=False)
+    if record:
+        record.supplier_name, record.filename, record.payload_json, record.imported_at = supplier_name, filename, payload, datetime.now()
+    else:
+        db.add(SupplierOrderSheet(supplier_key=_key(supplier_name), supplier_name=supplier_name, filename=filename, payload_json=payload))
+    db.commit()
