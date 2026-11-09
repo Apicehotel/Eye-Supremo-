@@ -7,7 +7,7 @@ Non scrivere segreti o dati personali.
 _(nessuno)_ — formato: `[agente] ramo — area/file toccati — da quando`_
 
 ## Fatto di recente
-- [Claude] `feat/export-ordini-xlsx` (release 2.0.49): «Scarica Excel» per il foglio ordini del fornitore. Aperto: modificare `eye_refresh_product_catalog` su Supabase per escludere carburante/accise/trasporto/sconti/bollo/CONAI e righe con totale negativo dal catalogo (557 voci extra, 444 con prezzi negativi; la funzione già esclude righe a 0, servizi e riferimenti DDT; migrazione non applicata: serve il permesso).
+- [Claude] `feat/export-ordini-xlsx` (PR #142, release 2.0.49): «Scarica Excel» per il foglio ordini del fornitore. `docs/supabase-catalogo-extra`: catalogo Supabase senza voci extra (26.409 → 25.847), tetto 500 €/kg|l riapplicato alla funzione SQL attiva.
 - [Claude] `fix/pezzi-abbreviati` (PR #138, release 2.0.48): «P.36» letto come 36 pezzi (Python + SQL), 40 righe centrali aggiornate. `PRZ.` escluso di proposito (porzioni).
 - [Claude] `feat/costi-extra-fornitore` (PR #141): sezione «Costi extra» nella scheda fornitore (carburante, accise, trasporto, sconti, bollo, CONAI, resi, servizi, riferimenti, negativi, righe a 0 €). Aperto: marcare queste righe sul centrale (analysis_status/exclusion_reason) per toglierle dal catalogo; rivedere a mano «servizi/canoni».
 - [Claude] `feat/ordini-fornitore` (PR #139, in 2.0.48): tab «Ordini» nella scheda fornitore come il foglio MARR (consegne giornaliere, dettaglio, riepilogo, verifiche, prezzi, fatture, controlli XML), dati dal foglio .xlsx caricato (`supplier_order_sheets`) o, senza foglio, dalle fatture in cache. Aperto: export .xlsx con formule e fogli articolo; leggere ordine/DDT/codice dall'XML; il foglio caricato resta solo sul PC (non su Supabase).
