@@ -40,6 +40,17 @@ export const eyeApi = async <T>(path:string, options?:RequestInit):Promise<T> =>
   }
 };
 
+export const eyeBlob = async (path:string, options?:RequestInit):Promise<Blob> => {
+  try {
+    const response = await activeDataService.raw('eye', path, {...options, headers:securedHeaders(options?.headers)});
+    if(!response.ok) {const body=await response.json().catch(()=>null);throw new Error(typeof body?.detail==='string'?body.detail:'Operazione non riuscita')}
+    return response.blob();
+  } catch(error) {
+    if(error instanceof TypeError) throw new Error('Backend locale non raggiungibile. Avvia Eye Supremo e riprova.');
+    throw error;
+  }
+};
+
 export const publicApi = async <T>(path:string, options?:RequestInit):Promise<T> => {
   const response = await activeDataService.raw('eye', `/auth${path}`, options);
   if (!response.ok) {

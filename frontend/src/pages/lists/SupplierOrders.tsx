@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { eyeApi, euro, shortDate } from "../../lib/api";
+import { eyeApi, eyeBlob, euro, shortDate } from "../../lib/api";
 import { Empty, Loading } from "../../components/UI";
 import { csvOf } from "../../lib/csv";
 
@@ -46,6 +46,13 @@ export function SupplierOrders({ supplier }: { supplier: string }) {
     } catch (e: any) { setMessage(String(e?.message || e)); }
     finally { if (input.current) input.current.value = ""; }
   }
+  async function exportExcel() {
+    try {
+      const blob = await eyeBlob(`/central/supplier-orders/export?supplier=${encodeURIComponent(supplier)}${data?.deliveries?.year ? `&year=${data.deliveries.year}` : ""}`);
+      const url = URL.createObjectURL(blob); const a = document.createElement("a");
+      a.href = url; a.download = `Ordini_${supplier.replace(/[^A-Za-z0-9._-]+/g, "_")}.xlsx`; a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) { setMessage(String(e?.message || e)); }
+  }
   async function openArticle(code: string) {
     try { setArticle(await eyeApi<any>(`/central/supplier-orders/article?supplier=${encodeURIComponent(supplier)}&code=${encodeURIComponent(code)}`)); } catch (e: any) { setMessage(String(e?.message || e)); }
   }
@@ -61,6 +68,7 @@ export function SupplierOrders({ supplier }: { supplier: string }) {
   const uploader = <div className="button-row">
     <input ref={input} type="file" accept=".xlsx" hidden onChange={(e) => upload(e.target.files)} />
     <button className="secondary-btn" onClick={() => input.current?.click()}>Carica foglio ordini (.xlsx)</button>
+    {data?.source === "sheet" && <button className="secondary-btn" onClick={exportExcel}>Scarica Excel</button>}
     {message && <span role="status">{message}</span>}
   </div>;
 

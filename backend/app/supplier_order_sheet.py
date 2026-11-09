@@ -228,3 +228,102 @@ def article_page(data: dict, code: str) -> dict:
 
 def dumps(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False)
+
+
+def build_workbook(views: dict, supplier: str) -> bytes:
+    """Excel con le stesse schede del foglio ordini (valori già calcolati; giallo = data fattura, rosso = reso)."""
+    from datetime import timedelta
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    yellow = PatternFill("solid", fgColor="FFF2A8")
+    red = PatternFill("solid", fgColor="F8C9C9")
+    bold = Font(bold=True)
+    wb = openpyxl.Workbook()
+
+    def sheet(title: str, header: list[str], rows: list[list], first=False):
+        ws = wb.active if first else wb.create_sheet()
+        ws.title = title
+        ws.append(header)
+        for cell in ws[1]:
+            cell.font = bold
+        for r in rows:
+            ws.append(r)
+        ws.freeze_panes = "A2"
+        for i, h in enumerate(header, 1):
+            ws.column_dimensions[get_column_letter(i)].width = max(12, min(48, len(str(h)) + 4))
+        return ws
+
+    mv = views["movements"]
+    sheet("Dettaglio articoli",
+          ["Articolo (Descrizione)", "Quantità", "UM", "Data ordine", "Cod. articolo", "N. ordine", "N. fattura", "Data fattura", "Tipo documento", "Note"],
+          [[m["article"], m["quantity"], m["unit"], m.get("order_date"), m.get("code"), m.get("order_number"), m["invoice_number"], m.get("invoice_date") or m.get("date"), m["document_type"], m.get("note")] for m in mv], first=True)
+    sheet("Riepilogo per articolo",
+          ["Articolo (Descrizione)", "Cod. articolo", "UM", "Quantità totale (netta)", "di cui resi (note di credito)", "N. righe", "Primo ordine", "Ultimo ordine"],
+          [[r["article"], r.get("code"), r["unit"], r["net_quantity"], r["credited_quantity"], r["rows"], r["first_date"], r["last_date"]] for r in views["summary"]])
+
+    # Consegne giornaliere: una colonna per giorno dell'anno, sotto ogni articolo la riga del prezzo.
+    deliveries = views["deliveries"]
+    year = deliveries.get("year")
+    ws = wb.create_sheet("consegne giornaliere")
+    ws.append([f"CONSEGNE GIORNALIERE {supplier} | ANNO {year}"])
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append(["Data di riferimento: data ordine; se mancante, data fattura (giallo). Resi: quantità negative (rosso)."])
+    ws.append([])
+    if year:
+        days = [date(year, 1, 1) + timedelta(days=i) for i in range((date(year + 1, 1, 1) - date(year, 1, 1)).days)]
+        ws.append(["ARTICOLO / PRODOTTO (sotto: prezzo)"] + [d for d in days])
+        for c in ws[4]:
+            c.font = bold
+        for cell in ws[4][1:]:
+            cell.number_format = "dd/mm"
+        iso = [d.isoformat() for d in days]
+        for r in deliveries["rows"]:
+            ws.append([r["article"]] + [r["days"].get(d) for d in iso])
+            row_no = ws.max_row
+            for idx, d in enumerate(iso, 2):
+                v = r["days"].get(d)
+                if v is None:
+                    continue
+                if v < 0:
+                    ws.cell(row_no, idx).fill = red
+                elif d in (r.get("invoice_date_days") or []):
+                    ws.cell(row_no, idx).fill = yellow
+            ws.append([f"   ↳ Prezzo unitario (€/ {r['unit']})"] + [r.get("prices", {}).get(d) for d in iso])
+        ws.freeze_panes = "B5"
+        ws.column_dimensions["A"].width = 42
+
+    c = views["checks"]
+    ws = sheet("Verifiche", ["Riga origine", "Codice", "Articolo", "Quantità", "UM", "Data utilizzata", "Tipo documento", "Motivo verifica"],
+               [[r["origin_row"], r["code"], r["article"], r["quantity"], r["unit"], r["date_used"], r["document_type"], r["reason"]] for r in c.get("verify_rows", [])])
+    ws.insert_rows(1, 4)
+    ws["A1"] = f"VERIFICHE DATI | ORDINI {supplier}"; ws["A1"].font = Font(bold=True, size=13)
+    ws["A2"] = "Articoli distinti"; ws["B2"] = c["distinct_articles"]; ws["C2"] = "Movimenti"; ws["D2"] = c["movements"]
+    ws["E2"] = "Date ordine mancanti"; ws["F2"] = c["undated_movements"]; ws["G2"] = "Note di credito"; ws["H2"] = c["credit_notes"]
+    ws["A3"] = "Criterio: data ordine; in sua assenza, data fattura. I resi (note di credito) sono quantità negative."
+    ws.freeze_panes = "A6"
+
+    sheet("Prezzi da fatture",
+          ["Data fattura", "Numero fattura", "Data DDT", "Tipo doc.", "Codice articolo", "Descrizione", "Quantità (+/-)", "UM", "Prezzo unit. €", "Totale riga (+/-) €", "IVA %", "File XML", "Riga fattura"],
+          [[p["invoice_date"], p["invoice_number"], p["ddt_date"], p["doc_type"], p["code"], p["description"], p["quantity"], p["unit"], p["unit_price"], p["line_total"], p["vat_rate"], p["xml_file"], p["invoice_line"]] for p in views["prices"]])
+    ws = sheet("Fatture ricevute",
+               ["Data fattura", "Numero fattura", "Data DDT", "Tipo", "Righe prodotto", "Imponibile da righe €", "IVA riepilogo €", "Totale fattura €", "XML origine", "Esito quadratura", "Differenza €"],
+               [[i["invoice_date"], i["invoice_number"], i["ddt_date"], i["doc_type"], i["product_rows"], i["rows_amount"], i["vat"], i["total"], i["xml_file"], i["outcome"], i["difference"]] for i in views["invoices"]])
+    for row in ws.iter_rows(min_row=2):
+        if row[9].value == "VERIFICARE":
+            for cell in row:
+                cell.fill = yellow
+    ws = sheet("Controlli XML", ["N. fattura mancante", "Data fattura", "Movimenti", "Note", "XML ricevuto?"],
+               [[r["invoice_number"], r["invoice_date"], r["movements"], r["note"], "NO"] for r in views.get("xml_checks", [])])
+    ws.insert_rows(1, 8)
+    ws["A1"] = f"STATO COMPLETAMENTO | PREZZI {supplier}"; ws["A1"].font = Font(bold=True, size=13)
+    for i, (label, key) in enumerate([("Fatture XML ricevute", "invoices"), ("Righe articoli con prezzo", "price_rows"), ("Movimenti nel dettaglio", "movements"),
+                                      ("Prezzi ancora mancanti", "missing_prices"), ("Numeri fattura ancora da ricevere", "missing_xml_invoices"),
+                                      ("Scostamenti quantità / fattura", "quantity_mismatches")], start=2):
+        ws.cell(i, 1, label); ws.cell(i, 2, c[key])
+    ws.freeze_panes = "A10"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
