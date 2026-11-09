@@ -12,6 +12,7 @@ import {
 import { Page } from "../../components/Shell";
 import {useLatestRequest} from "../../hooks/useLatestRequest";
 import { HistoricalReportPage } from "../HistoricalReport";
+import { SupplierOrders } from "./SupplierOrders";
 
 import {SortHeader, compareValues, sortIndicator, type SortDirection, type SortKey} from "./TableSort";
 export function Suppliers() {
@@ -134,6 +135,7 @@ export function Suppliers() {
                           </div>
                           <p><b>Indirizzo:</b> {detail.supplier?.indirizzo || "Non disponibile nei dati centrali"} · <b>Email:</b> {detail.supplier?.email || "Non disponibile"} · <b>Telefono:</b> {detail.supplier?.telefono || "Non disponibile"}</p>
                           <p><b>Sconti:</b> non presenti come campo strutturato nelle fatture importate. Le righe e i totali originali restano consultabili qui sotto.</p>
+                          <details className="supplier-orders-details"><summary><b>Ordini</b> · articoli, consegne, prezzi, fatture, verifiche</summary>{detail.supplier?.ragione_sociale && <SupplierOrders supplier={detail.supplier.ragione_sociale} />}</details>
                           {detail.invoices?.length ? <div className="table-wrap"><table><thead><tr><th>Data</th><th>Fattura</th><th>Destinazione</th><th>Imponibile</th><th>Totale</th></tr></thead><tbody>{detail.invoices.map((i: any) => <tr key={i.id} onClick={() => openInvoiceDetail(i.source_hash)} style={{ cursor: "pointer" }} title="Apri dettaglio fattura"><td>{shortDate(i.invoice_date)}</td><td><b>{i.invoice_number}</b></td><td>{i.destination_hotel || "—"}</td><td>{euro(Number(i.taxable || 0))}</td><td>{euro(Number(i.total || 0))}</td></tr>)}</tbody></table></div> : <p>Nessuna fattura collegata.</p>}
                           {invoiceDetail && <article className="panel detail-panel detail-preview-panel">
                             {invoiceDetail.error ? <Empty title="Dettaglio fattura non disponibile" text={invoiceDetail.error} /> : <>

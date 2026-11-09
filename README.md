@@ -191,6 +191,10 @@ Per ogni fornitore vengono calcolati prezzo iniziale, medio, migliore e ultimo. 
 
 I confronti non mescolano unità incompatibili: Eye Supremo confronta i fornitori usando la stessa unità normalizzata (`€/kg`, `€/L`, `€/pz`, ecc.).
 
+### Ordini per fornitore
+
+In **Fornitori → scheda fornitore → «Ordini»** si trovano le stesse viste di un foglio ordini, per ogni fornitore: **Riepilogo articoli** (quantità netta, resi da note di credito, righe, primo/ultimo), **Dettaglio** (una riga per movimento, con prezzo e prezzo normalizzato), **Consegne giornaliere** (articolo × giorno, per anno), **Prezzi da fatture** (ultimo/minimo/massimo, storico al passaggio del mouse), **Fatture ricevute** (registro con quadratura righe↔imponibile) e **Verifiche** (contatori). Ogni vista ha «Scarica CSV» (separatore `;`, apribile in Excel). Backend: `GET /api/eye/central/supplier-orders?supplier=<ragione sociale>&year=<anno>` (`backend/app/supplier_orders.py`), calcolato dalla **cache PC** delle fatture centrali: se la cache è vuota la scheda lo dice. Limiti: data di riferimento = data fattura; **numero ordine, data ordine, DDT, codice articolo e controlli XML non sono nei dati importati** (l'importatore non li legge), quindi non compaiono; gli articoli si raggruppano per descrizione. Frontend: `frontend/src/pages/lists/SupplierOrders.tsx`. Test: `backend/tests/test_supplier_orders.py` (dati inventati: il file ordini reale non è nel repository).
+
 ### Prezzi normalizzati (€/kg, €/l, €/pz)
 
 Il confronto tra fornitori vale solo se i prezzi hanno la stessa unità. `backend/app/normalization.py` (`normalize_row_price`) calcola il prezzo confrontabile di ogni riga; le descrizioni originali non vengono mai modificate.

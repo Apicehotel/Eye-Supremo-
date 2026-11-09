@@ -883,6 +883,15 @@ async def central_supplier_detail_route(supplier_id: str, role: str = Depends(cu
     return detail
 
 
+@router.get("/central/supplier-orders")
+def central_supplier_orders(supplier: str = Query(..., min_length=1), year: int | None = None, role: str = Depends(current_role), db: Session = Depends(get_db)):
+    """Ordini del fornitore (dettaglio, riepilogo, consegne, prezzi, registro fatture, verifiche) dalla cache locale."""
+    if role not in {"developer", "supremo"}:
+        raise HTTPException(403, "Permesso insufficiente")
+    from ..supplier_orders import supplier_orders
+    return {"supplier": supplier, **supplier_orders(db, supplier, year)}
+
+
 @router.get("/central/sync/status")
 def central_sync_status(role: str = Depends(current_role)):
     if role not in {"developer", "supremo"}: raise HTTPException(403, "Permesso insufficiente")
