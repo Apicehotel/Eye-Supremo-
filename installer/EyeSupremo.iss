@@ -1,4 +1,4 @@
-; Release 2.0.48: «P.36» letto come 36 pezzi nei prezzi normalizzati.
+; Release 2.0.48: pagina Ordini, costi extra nella scheda fornitore, «P.36» letto come 36 pezzi.
 [Setup]
 AppId={{8C37D550-5C55-4D3F-9BF0-79B452FA9E73}
 AppName=Eye Supremo
