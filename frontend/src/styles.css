@@ -214,7 +214,10 @@ body{background:#f7f8fa;color:var(--ink)}
 .invoice-ref-backdrop{position:fixed;inset:0;z-index:29;background:rgba(8,29,52,.28)}
 .invoice-ref-panel{z-index:31}
 .open-invoice-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px!important;font-size:13px!important;white-space:nowrap}
-.invoice-ref-hit td{background:#fff4e5}
+.invoice-ref-hit td{background:#ffe3a3;font-weight:700}
+.invoice-ref-hit td:first-child{box-shadow:inset 4px 0 0 #e08a00}
+.invoice-ref-search{display:flex;gap:12px;align-items:center;margin:8px 0}
+.invoice-ref-search input{flex:1;min-width:0}
 
 .recognized-tag{display:block;color:var(--muted,#667085);font-size:11px;margin-top:2px}
 
