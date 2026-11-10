@@ -7,6 +7,7 @@ Non scrivere segreti o dati personali.
 _(nessuno)_ — formato: `[agente] ramo — area/file toccati — da quando`_
 
 ## Fatto di recente
+- [Claude] `fix/ordini-lenti` (release 2.0.53): Ordini non restano più in caricamento (query mirate per fornitore, tempo massimo sul centrale, avviso se mancano righe).
 - [Claude] `feat/ordini-automatici` (release 2.0.52): Ordini senza caricamenti (fatture locali + cache + righe dal centrale, nome fornitore senza forma societaria) e selettore fornitore con ricerca.
 - [Claude] `feat/fattura-evidenzia-righe` (release 2.0.51): nel pannello fattura aperto dallo storico la riga cercata è evidenziata (descrizione reale del punto) e c'è la ricerca tra le righe.
 - [Claude] `feat/prezzi-online-e-foglio-condiviso` (release 2.0.50): `price_unit` nel catalogo Supabase e nella tabella Prodotti; foglio ordini condiviso via Supabase (tabella + 2 RPC, sync nel backend). Migrazioni applicate su produzione su richiesta esplicita; backup in `eye_product_page_def_backup_20261109`. Aperto: l'online (Vercel) non ha ancora la pagina Ordini.

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from datetime import datetime
 
-from .models import CentralInvoiceCache, Invoice, SupplierOrderSheet
+from .models import CentralInvoiceCache, Invoice, Supplier, SupplierOrderSheet
 from .normalization import fill_normalized_price, normalize_text
 
 # Tolleranza per la quadratura (centesimi di arrotondamento tra righe e riepilogo IVA).
@@ -48,6 +48,7 @@ def _article_key(description: str) -> str:
     return normalize_text(description).strip() or description.strip().lower()
 
 
+_CENTRAL_BUDGET_SECONDS = 40
 _LEGAL = {"spa", "srl", "snc", "sas", "srls", "sapa", "scarl", "unipersonale", "s", "p", "a", "r", "l", "c", "n"}
 
 
@@ -71,10 +72,11 @@ def load_local_invoices(db: Session, supplier_name: str) -> list[dict]:
     """Fatture importate in locale dal fornitore."""
     wanted = supplier_match_key(supplier_name)
     out: list[dict] = []
-    query = select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).order_by(Invoice.data)
+    ids = [sid for sid, name in db.execute(select(Supplier.id, Supplier.ragione_sociale)).all() if supplier_match_key(name or "") == wanted]
+    if not ids:
+        return out
+    query = select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).where(Invoice.supplier_id.in_(ids)).order_by(Invoice.data)
     for inv in db.scalars(query).all():
-        if not inv.supplier or supplier_match_key(inv.supplier.ragione_sociale) != wanted:
-            continue
         out.append({
             "source_hash": inv.hash_file, "invoice_number": inv.numero,
             "invoice_date": inv.data.isoformat() if inv.data else None,
@@ -88,9 +90,12 @@ def load_cached_invoices(db: Session, supplier_name: str) -> list[dict]:
     """Fatture (con righe, se scaricate) del fornitore dalla cache locale del centrale."""
     wanted = supplier_match_key(supplier_name)
     invoices: list[dict] = []
-    for record in db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date)).all():
-        if supplier_match_key(record.supplier_name or "") != wanted:
-            continue
+    names = db.execute(select(CentralInvoiceCache.supplier_name).distinct()).scalars().all()
+    matching = [n for n in names if supplier_match_key(n or "") == wanted]
+    if not matching:
+        return invoices
+    query = select(CentralInvoiceCache).where(CentralInvoiceCache.supplier_name.in_(matching)).order_by(CentralInvoiceCache.invoice_date)
+    for record in db.scalars(query).all():
         try:
             payload = json.loads(record.payload_json or "{}")
         except (TypeError, ValueError):
@@ -131,7 +136,7 @@ async def collect_invoices(db: Session, supplier_name: str) -> list[dict]:
         async def fill(inv: dict) -> None:
             async with gate:
                 try:
-                    detail = await central_service.central_invoice_detail(inv["source_hash"])
+                    detail = await asyncio.wait_for(central_service.central_invoice_detail(inv["source_hash"]), timeout=15)
                 except Exception:  # noqa: BLE001 - la fattura resta senza righe, il resto funziona
                     return
             rows = (detail or {}).get("rows") or []
@@ -150,7 +155,11 @@ async def collect_invoices(db: Session, supplier_name: str) -> list[dict]:
                 payload.update({k: v for k, v in detail.items() if k in ("rows", "taxable", "vat")})
                 record.payload_json = json.dumps(payload, default=str)
 
-        await asyncio.gather(*(fill(inv) for inv in missing))
+        # Tempo massimo: le righe non scaricate ora si completano alla prossima apertura (restano in cache).
+        tasks = [asyncio.ensure_future(fill(inv)) for inv in missing]
+        _, pending = await asyncio.wait(tasks, timeout=_CENTRAL_BUDGET_SECONDS)
+        for task in pending:
+            task.cancel()
         db.commit()
     return sorted(merged.values(), key=lambda i: (i.get("invoice_date") or "", i.get("invoice_number") or ""))
 
@@ -265,6 +274,7 @@ def build_supplier_orders(invoices: list[dict], year: int | None = None) -> dict
         "invoices": len(register),
         "credit_notes": sum(1 for r in register if r["type"] == "Nota di credito"),
         "undated_movements": undated,
+        "invoices_without_rows": sum(1 for i in invoices if not (i.get("rows") or [])),
         "invoices_balanced": sum(1 for r in register if r["outcome"] == "Quadra"),
         "invoices_with_difference": sum(1 for r in register if r["outcome"] == "Differenza"),
         "invoices_without_data": sum(1 for r in register if r["outcome"] == "Dati insufficienti"),
