@@ -82,6 +82,7 @@ export function SupplierOrders({ supplier }: { supplier: string }) {
     <div className="supplier-orders">
       <div className="panel-title"><h3>Ordini · {supplier}</h3></div>
       {uploader}
+      {!sheet && c.invoices_without_rows > 0 && <p className="muted" role="status">{c.invoices_without_rows} fatture non hanno ancora le righe scaricate dal centrale: riapri la pagina tra poco per completare i dati.</p>}
       <p className="muted">{sheet ? `Foglio: ${data.filename || "caricato"} · data di riferimento: data ordine; se mancante, data fattura.` : "Calcolato dalle fatture in cache (data fattura). Per numero ordine, DDT e codici carica il foglio ordini."}</p>
       <div className="button-row" role="tablist">
         {TABS.filter(([k]) => sheet || !["xml"].includes(k)).map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "primary-btn" : "secondary-btn"} onClick={() => { setTab(key); setArticle(undefined); }}>{label}</button>)}

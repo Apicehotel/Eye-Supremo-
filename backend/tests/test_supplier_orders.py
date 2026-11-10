@@ -122,3 +122,29 @@ def test_orders_use_local_invoices_and_download_missing_rows(monkeypatch):
         assert calls == ["hc1"]
     finally:
         db.query(CentralInvoiceCache).delete(); db.query(InvoiceRow).delete(); db.query(Invoice).delete(); db.query(Supplier).delete(); db.commit(); db.close()
+
+
+def test_central_download_has_a_time_budget(monkeypatch):
+    """Se il centrale non risponde la pagina non resta in attesa: i dati disponibili arrivano comunque."""
+    from app import central_service, supplier_orders as so
+    from app.database import SessionLocal
+    monkeypatch.setattr(so, "_CENTRAL_BUDGET_SECONDS", 0.2)
+
+    async def slow_detail(source_hash):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(central_service, "central_invoice_detail", slow_detail)
+    monkeypatch.setattr(central_service, "configured", lambda: True)
+    db = SessionLocal()
+    try:
+        db.query(CentralInvoiceCache).delete()
+        db.add(CentralInvoiceCache(source_hash="s1", invoice_number="S1", invoice_date=date(2026, 4, 1), supplier_name="Lento Srl",
+                                   total=Decimal("5"), search_text="x", payload_json=json.dumps({"rows": []})))
+        db.commit()
+        import time
+        started = time.monotonic()
+        data = asyncio.run(so.supplier_orders(db, "Lento Srl"))
+        assert time.monotonic() - started < 5
+        assert data["checks"]["invoices_without_rows"] == 1
+    finally:
+        db.query(CentralInvoiceCache).delete(); db.commit(); db.close()
