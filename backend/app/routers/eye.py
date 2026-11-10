@@ -914,7 +914,7 @@ async def central_supplier_orders(supplier: str = Query(..., min_length=1), year
     sheet = await _shared_sheet(db, supplier)
     if sheet:
         return {"supplier": supplier, "filename": sheet["filename"], "imported_at": sheet["imported_at"], **build_sheet_views(sheet["data"], year)}
-    return {"supplier": supplier, "source": "invoices", **supplier_orders(db, supplier, year)}
+    return {"supplier": supplier, "source": "invoices", **(await supplier_orders(db, supplier, year))}
 
 
 @router.get("/central/supplier-extras")

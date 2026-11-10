@@ -1,4 +1,5 @@
 """Ordini per fornitore: dati inventati, nessuna fattura reale nel repository."""
+import asyncio
 import json
 from datetime import date
 from decimal import Decimal
@@ -76,7 +77,48 @@ def test_reads_the_supplier_from_the_local_cache(db_session=None):
         db.add(CentralInvoiceCache(source_hash="h3", invoice_number="X", invoice_date=date(2026, 1, 1), supplier_name="Altro",
                                    total=Decimal("1"), search_text="x", payload_json=json.dumps({"rows": [row("ZZZ", 1, 1)]})))
         db.commit()
-        data = supplier_orders(db, "FORNITORE PROVA SRL")
+        data = asyncio.run(supplier_orders(db, "FORNITORE PROVA SRL"))
         assert data["checks"]["invoices"] == 2 and data["checks"]["distinct_articles"] == 2
     finally:
         db.query(CentralInvoiceCache).delete(); db.commit(); db.close()
+
+
+def test_supplier_name_matches_without_legal_form():
+    from app.supplier_orders import supplier_match_key
+    assert supplier_match_key("MARR Spa") == supplier_match_key("MARR S.P.A.") == "marr"
+    assert supplier_match_key("Marmi Batta SRL") != supplier_match_key("MARR Spa")
+
+
+def test_orders_use_local_invoices_and_download_missing_rows(monkeypatch):
+    """Nessun foglio da caricare: fatture locali + cache, e righe mancanti scaricate dal centrale."""
+    from app import central_service
+    from app.database import SessionLocal
+    from app.models import Invoice, InvoiceRow, Supplier
+    from app.supplier_orders import collect_invoices
+    calls = []
+
+    async def fake_detail(source_hash):
+        calls.append(source_hash)
+        return {"rows": [row("ARTICOLO CENTRALE", 2, 3)], "taxable": 6.0, "vat": 0.0}
+
+    monkeypatch.setattr(central_service, "central_invoice_detail", fake_detail)
+    monkeypatch.setattr(central_service, "configured", lambda: True)
+    db = SessionLocal()
+    try:
+        db.query(CentralInvoiceCache).delete()
+        supplier = Supplier(ragione_sociale="ZETA TEST S.P.A.")
+        db.add(supplier); db.flush()
+        invoice = Invoice(supplier_id=supplier.id, numero="L1", data=date(2026, 3, 1), imponibile=Decimal("10"), iva=Decimal("0"), totale=Decimal("10"), hash_file="hl1")
+        db.add(invoice); db.flush()
+        db.add(InvoiceRow(invoice_id=invoice.id, descrizione_originale="ARTICOLO LOCALE", descrizione_normalizzata="articolo locale", quantita=Decimal("1"), prezzo_unitario=Decimal("10"), totale_riga=Decimal("10")))
+        db.add(CentralInvoiceCache(source_hash="hc1", invoice_number="C1", invoice_date=date(2026, 3, 2), supplier_name="Zeta Test Spa",
+                                   total=Decimal("6"), search_text="x", payload_json=json.dumps({"rows": []})))
+        db.commit()
+        invoices = asyncio.run(collect_invoices(db, "Zeta Test Spa"))
+        assert [i["invoice_number"] for i in invoices] == ["L1", "C1"]
+        assert invoices[1]["rows"] and calls == ["hc1"]
+        # le righe scaricate restano nella cache: la seconda volta niente chiamate
+        asyncio.run(collect_invoices(db, "Zeta Test Spa"))
+        assert calls == ["hc1"]
+    finally:
+        db.query(CentralInvoiceCache).delete(); db.query(InvoiceRow).delete(); db.query(Invoice).delete(); db.query(Supplier).delete(); db.commit(); db.close()

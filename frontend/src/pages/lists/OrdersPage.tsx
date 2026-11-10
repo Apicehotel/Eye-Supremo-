@@ -3,7 +3,7 @@ import { api, eyeApi } from "../../lib/api";
 import { PageHeader } from "../../components/UI";
 import { SupplierOrders } from "./SupplierOrders";
 
-/** Ordini: si sceglie il fornitore e si carica il foglio ordini (.xlsx) come lo si ha. */
+/** Ordini: si cerca il fornitore e i dati si ricavano dalle fatture (nessun caricamento obbligatorio). */
 export function OrdersPage() {
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [supplier, setSupplier] = useState("");
@@ -22,18 +22,24 @@ export function OrdersPage() {
     })();
     return () => controller.abort();
   }, []);
-  const shown = suppliers.filter((n) => !filter.trim() || n.toLowerCase().includes(filter.trim().toLowerCase()));
+  const query = filter.trim().toLowerCase();
+  const shown = query ? suppliers.filter((n) => n.toLowerCase().includes(query)).slice(0, 8) : [];
+  const pick = (name: string) => { setSupplier(name); setFilter(""); };
   return (
     <>
-      <PageHeader title="Ordini" subtitle="Scegli il fornitore e carica il suo foglio ordini: consegne giornaliere, prezzi, fatture, verifiche." />
+      <PageHeader title="Ordini" subtitle="Scegli il fornitore: consegne giornaliere, prezzi, fatture e verifiche si ricavano da sole dalle fatture, senza caricare nulla." />
       <section className="panel">
-        <label>Fornitore
-          <input aria-label="Cerca fornitore" placeholder="Cerca fornitore…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <select aria-label="Fornitore" value={supplier} onChange={(e) => setSupplier(e.target.value)} size={Math.min(8, Math.max(2, shown.length))}>
-            {shown.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-        {supplier ? <SupplierOrders key={supplier} supplier={supplier} /> : <p>Seleziona un fornitore dall'elenco.</p>}
+        <div className="orders-picker">
+          <label>Fornitore
+            <input aria-label="Cerca fornitore" placeholder={supplier || "Scrivi per cercare il fornitore…"} value={filter} autoComplete="off"
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && shown[0]) pick(shown[0]); if (e.key === "Escape") setFilter(""); }} />
+          </label>
+          {supplier && !filter && <span className="orders-picked"><b>{supplier}</b> <button type="button" className="secondary-btn" onClick={() => setSupplier("")}>Cambia</button></span>}
+          {shown.length > 0 && <ul className="orders-suggest" role="listbox">{shown.map((n) => <li key={n}><button type="button" role="option" aria-selected={n === supplier} onClick={() => pick(n)}>{n}</button></li>)}</ul>}
+          {query && !shown.length && <p className="muted">Nessun fornitore corrisponde a «{filter}».</p>}
+        </div>
+        {supplier ? <SupplierOrders key={supplier} supplier={supplier} /> : <p>Scrivi il nome del fornitore e sceglilo dall'elenco.</p>}
       </section>
     </>
   );

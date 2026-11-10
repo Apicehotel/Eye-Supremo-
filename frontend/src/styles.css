@@ -311,3 +311,11 @@ body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-ri
   .top-switch button.active{background:var(--teal);border-color:var(--teal);color:#fff}
 }
 @media(min-width:761px){.home-grid{grid-template-columns:repeat(4,minmax(0,220px))}}
+
+.orders-picker{position:relative;margin-bottom:12px}
+.orders-picker label{display:flex;gap:10px;align-items:center}
+.orders-picker input{flex:1;min-width:0}
+.orders-picked{display:inline-flex;gap:10px;align-items:center;margin-top:8px}
+.orders-suggest{list-style:none;margin:4px 0 0;padding:4px;max-width:560px;background:var(--surface,#fff);border:1px solid #d6dbe6;border-radius:10px;box-shadow:0 8px 24px rgba(20,30,60,.12);position:absolute;z-index:20;left:0;right:0}
+.orders-suggest button{display:block;width:100%;text-align:left;background:none;border:0;padding:9px 10px;border-radius:8px;cursor:pointer;font:inherit}
+.orders-suggest button:hover,.orders-suggest button[aria-selected="true"]{background:#eef2fb}
