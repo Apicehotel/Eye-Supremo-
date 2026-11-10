@@ -67,7 +67,7 @@ export function SupplierOrders({ supplier }: { supplier: string }) {
 
   const uploader = <div className="button-row">
     <input ref={input} type="file" accept=".xlsx" hidden onChange={(e) => upload(e.target.files)} />
-    <button className="secondary-btn" onClick={() => input.current?.click()}>Carica foglio ordini (.xlsx)</button>
+    <button className="secondary-btn" onClick={() => input.current?.click()}>Usa un mio foglio ordini (.xlsx, facoltativo)</button>
     {data?.source === "sheet" && <button className="secondary-btn" onClick={exportExcel}>Scarica Excel</button>}
     {message && <span role="status">{message}</span>}
   </div>;
@@ -75,7 +75,7 @@ export function SupplierOrders({ supplier }: { supplier: string }) {
   if (error) return <><Empty title="Ordini non disponibili" text={error} />{uploader}</>;
   if (!data) return <Loading />;
   const c = data.checks || {};
-  if (!c.movements) return <><Empty title="Nessun ordine per questo fornitore" text="Carica il foglio ordini (.xlsx con «Dettaglio articoli», «Prezzi da fatture», «Fatture ricevute») oppure scarica le fatture per offline." />{uploader}</>;
+  if (!c.movements) return <><Empty title="Nessun ordine per questo fornitore" text="Non risultano fatture di questo fornitore né in archivio né nel centrale. Controlla che l'archivio sia sincronizzato (Impostazioni → Archivio centrale)." />{uploader}</>;
   const sheet = data.source === "sheet";
 
   return (

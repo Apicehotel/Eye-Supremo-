@@ -11,12 +11,15 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+import asyncio
+import re
+
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from datetime import datetime
 
-from .models import CentralInvoiceCache, SupplierOrderSheet
+from .models import CentralInvoiceCache, Invoice, SupplierOrderSheet
 from .normalization import fill_normalized_price, normalize_text
 
 # Tolleranza per la quadratura (centesimi di arrotondamento tra righe e riepilogo IVA).
@@ -45,18 +48,55 @@ def _article_key(description: str) -> str:
     return normalize_text(description).strip() or description.strip().lower()
 
 
+_LEGAL = {"spa", "srl", "snc", "sas", "srls", "sapa", "scarl", "unipersonale", "s", "p", "a", "r", "l", "c", "n"}
+
+
+def supplier_match_key(name: str) -> str:
+    """Nome fornitore confrontabile: senza maiuscole, punteggiatura e forma societaria («MARR Spa» = «MARR S.P.A.»)."""
+    words = [w for w in normalize_text(name or "").split() if w not in _LEGAL]
+    return " ".join(words)
+
+
+def _row_dict(row) -> dict:
+    return {
+        "original_description": row.descrizione_originale, "normalized_description": row.descrizione_normalizzata,
+        "quantity": float(row.quantita or 0), "original_unit": row.unita_originale, "normalized_unit": row.unita_normalizzata,
+        "unit_price": float(row.prezzo_unitario or 0), "line_total": float(row.totale_riga or 0),
+        "normalized_price": float(row.prezzo_normalizzato) if row.prezzo_normalizzato is not None else None,
+        "analysis_status": "product",
+    }
+
+
+def load_local_invoices(db: Session, supplier_name: str) -> list[dict]:
+    """Fatture importate in locale dal fornitore."""
+    wanted = supplier_match_key(supplier_name)
+    out: list[dict] = []
+    query = select(Invoice).options(selectinload(Invoice.supplier), selectinload(Invoice.rows)).order_by(Invoice.data)
+    for inv in db.scalars(query).all():
+        if not inv.supplier or supplier_match_key(inv.supplier.ragione_sociale) != wanted:
+            continue
+        out.append({
+            "source_hash": inv.hash_file, "invoice_number": inv.numero,
+            "invoice_date": inv.data.isoformat() if inv.data else None,
+            "taxable": float(inv.imponibile or 0), "vat": float(inv.iva or 0), "total": float(inv.totale or 0),
+            "source_filename": inv.file_originale, "rows": [_row_dict(r) for r in inv.rows],
+        })
+    return out
+
+
 def load_cached_invoices(db: Session, supplier_name: str) -> list[dict]:
-    """Fatture (con righe) del fornitore dalla cache locale del centrale."""
-    wanted = normalize_text(supplier_name).strip()
+    """Fatture (con righe, se scaricate) del fornitore dalla cache locale del centrale."""
+    wanted = supplier_match_key(supplier_name)
     invoices: list[dict] = []
     for record in db.scalars(select(CentralInvoiceCache).order_by(CentralInvoiceCache.invoice_date)).all():
-        if normalize_text(record.supplier_name or "").strip() != wanted:
+        if supplier_match_key(record.supplier_name or "") != wanted:
             continue
         try:
             payload = json.loads(record.payload_json or "{}")
         except (TypeError, ValueError):
             payload = {}
         invoices.append({
+            "source_hash": record.source_hash,
             "invoice_number": record.invoice_number,
             "invoice_date": record.invoice_date.isoformat() if record.invoice_date else None,
             "taxable": payload.get("taxable"),
@@ -66,6 +106,53 @@ def load_cached_invoices(db: Session, supplier_name: str) -> list[dict]:
             "rows": payload.get("rows") or [],
         })
     return invoices
+
+
+def known_invoices(db: Session, supplier_name: str) -> list[dict]:
+    """Fatture locali + cache del centrale, senza doppioni (a parità di fattura vince la copia con le righe)."""
+    merged: dict[tuple, dict] = {}
+    for inv in load_local_invoices(db, supplier_name) + load_cached_invoices(db, supplier_name):
+        key = (inv.get("invoice_number") or "", (inv.get("invoice_date") or "")[:10])
+        old = merged.get(key)
+        if old is None or (not old.get("rows") and inv.get("rows")):
+            merged[key] = inv
+    return list(merged.values())
+
+
+async def collect_invoices(db: Session, supplier_name: str) -> list[dict]:
+    """Tutte le fatture del fornitore, senza caricare nulla: archivio locale + cache del centrale, senza doppioni;
+    le fatture della cache senza righe vengono scaricate dal centrale (e salvate nella cache per le volte dopo)."""
+    from . import central_service
+    merged = {(i.get("invoice_number") or "", (i.get("invoice_date") or "")[:10]): i for i in known_invoices(db, supplier_name)}
+    missing = [inv for inv in merged.values() if not inv.get("rows") and inv.get("source_hash")]
+    if missing and central_service.configured():
+        gate = asyncio.Semaphore(8)
+
+        async def fill(inv: dict) -> None:
+            async with gate:
+                try:
+                    detail = await central_service.central_invoice_detail(inv["source_hash"])
+                except Exception:  # noqa: BLE001 - la fattura resta senza righe, il resto funziona
+                    return
+            rows = (detail or {}).get("rows") or []
+            if not rows:
+                return
+            inv["rows"] = rows
+            for field in ("taxable", "vat"):
+                if inv.get(field) is None and detail.get(field) is not None:
+                    inv[field] = detail[field]
+            record = db.get(CentralInvoiceCache, inv["source_hash"])
+            if record:
+                try:
+                    payload = json.loads(record.payload_json or "{}")
+                except (TypeError, ValueError):
+                    payload = {}
+                payload.update({k: v for k, v in detail.items() if k in ("rows", "taxable", "vat")})
+                record.payload_json = json.dumps(payload, default=str)
+
+        await asyncio.gather(*(fill(inv) for inv in missing))
+        db.commit()
+    return sorted(merged.values(), key=lambda i: (i.get("invoice_date") or "", i.get("invoice_number") or ""))
 
 
 def build_supplier_orders(invoices: list[dict], year: int | None = None) -> dict:
@@ -194,8 +281,8 @@ def build_supplier_orders(invoices: list[dict], year: int | None = None) -> dict
     }
 
 
-def supplier_orders(db: Session, supplier_name: str, year: int | None = None) -> dict:
-    return build_supplier_orders(load_cached_invoices(db, supplier_name), year)
+async def supplier_orders(db: Session, supplier_name: str, year: int | None = None) -> dict:
+    return build_supplier_orders(await collect_invoices(db, supplier_name), year)
 
 
 def _key(supplier_name: str) -> str:

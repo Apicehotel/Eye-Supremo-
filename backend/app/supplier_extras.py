@@ -11,7 +11,7 @@ from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
-from .supplier_orders import load_cached_invoices
+from .supplier_orders import known_invoices
 
 # (chiave, etichetta, regex) in ordine di priorità: la prima che combacia vince.
 CATEGORIES: list[tuple[str, str, re.Pattern]] = [
@@ -92,4 +92,4 @@ def build_supplier_extras(invoices: list[dict]) -> dict:
 
 
 def supplier_extras(db: Session, supplier_name: str) -> dict:
-    return build_supplier_extras(load_cached_invoices(db, supplier_name))
+    return build_supplier_extras(known_invoices(db, supplier_name))
